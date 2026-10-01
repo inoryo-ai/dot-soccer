@@ -1,0 +1,22 @@
+# Vercel へ**上げないもの**。
+#
+# 🔴 配信されるのは `web/dist` だけ（`vercel.json` の outputDirectory）だが、
+#    ここに書かないものは**ビルドのために全部アップロードされる**。
+#    セーブや試合ログは個人の遊んだ記録で、外へ出す理由がない。
+#    （カードショップEDENで「置いたものは全部公開される」を踏んだのと同じ筋）
+
+saves/
+logs/
+out/
+
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+
+# 組み立て結果は Vercel 側で作り直す（古い写しを上げない）
+web/dist/
+
+# 手元の検証用の使い捨て
+*.tmp.py

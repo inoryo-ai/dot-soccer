@@ -1,0 +1,473 @@
+/* ドットサッカー育成（デモ）— 画面の見た目
+ *
+ * ─────────────────────────────────────────────────────────────
+ * 🔴 参考にするのは「様式」まで
+ * ─────────────────────────────────────────────────────────────
+ * 上から見たピッチ・ドット絵・メニュー主体の進行という**ジャンルの作法**を借りる。
+ * 特定の作品のロゴ・キャラクター・画面そのものは複製しない（要件定義書 §12）。
+ * 色・字送り・枠の形はここで独自に決めている。
+ *
+ * 🔑 色は下の変数だけで決める。ここ以外に色を書かない
+ *    （カードショップEDENで枠線の書き方が5通りに散り、太さが意味を失った）。
+ */
+
+:root {
+  /* 芝と盤面 */
+  --turf:        #1f7a44;
+  --turf-dark:   #1a6b3b;
+  --line:        #d8f0e0;
+
+  /* 画面の地 */
+  --bg:          #10161c;
+  --bg-panel:    #1a232c;
+  --bg-raised:   #243140;
+  --edge:        #0a0f14;
+  --edge-light:  #3a4c60;
+
+  /* 文字 */
+  --ink:         #e8f0f6;
+  --ink-dim:     #94a8bb;
+
+  /* 役割の色。**用途を混ぜない** */
+  --home:        #ffd23f;   /* 自チーム。画面で一番目立つ */
+  --away:        #4aa3ff;   /* 相手 */
+  --accent:      #35d07f;   /* 進める操作 */
+  --danger:      #ff5d5d;   /* 取り返しがつかない操作 */
+  --warn:        #ffab3f;
+
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
+               ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  /* 芝の縞を薄く敷く。上から見たピッチの気配を画面全体に残す */
+  background-image:
+    repeating-linear-gradient(90deg,
+      rgba(255, 255, 255, .012) 0 24px,
+      rgba(0, 0, 0, .012) 24px 48px);
+}
+
+/* ------------------------------------------------------------- 画面遷移 */
+
+.screen { display: none; }
+.screen.is-on { display: block; }
+
+.screen-match { padding: 8px; }
+
+/* --------------------------------------------------------------- 読込中 */
+
+#boot {
+  min-height: 100dvh;
+  display: none;
+  place-items: center;
+  padding: 24px;
+}
+#boot.is-on { display: grid; }
+
+.boot-box { max-width: 30rem; text-align: center; }
+
+.logo {
+  margin: 0;
+  font-size: clamp(2rem, 9vw, 3.2rem);
+  letter-spacing: .18em;
+  font-weight: 800;
+  color: var(--home);
+  /* ドットの縁取り。画像を使わずに“打ち込んだ字”の気配を出す */
+  text-shadow:
+     2px 0 0 var(--edge), -2px 0 0 var(--edge),
+     0 2px 0 var(--edge), 0 -2px 0 var(--edge),
+     0 4px 0 #8a6a12;
+}
+.logo-sub { margin: .4rem 0 1.6rem; color: var(--ink-dim); letter-spacing: .1em; }
+
+.boot-bar {
+  height: 14px;
+  border: 2px solid var(--edge-light);
+  background: var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.boot-fill {
+  height: 100%;
+  width: 4%;
+  background: var(--accent);
+  transition: width .25s steps(8);
+}
+.boot-msg { margin: .8rem 0 0; min-height: 1.6em; }
+.boot-note { margin-top: 1.4rem; color: var(--ink-dim); font-size: .85rem; line-height: 1.8; }
+
+/* ---------------------------------------------------------------- 部品 */
+
+.panel {
+  background: var(--bg-panel);
+  border: 2px solid var(--edge-light);
+  border-top-color: #4d6a85;        /* 上辺を明るくして面の立ち上がりを出す */
+  border-radius: var(--radius);
+  padding: 12px 14px 14px;
+  margin: 0 0 12px;
+  box-shadow: 0 2px 0 var(--edge);
+}
+.panel-wide { max-width: 42rem; margin: 24px auto; }
+
+.panel-title {
+  margin: 0 0 .6rem;
+  font-size: .95rem;
+  letter-spacing: .08em;
+  color: var(--home);
+  border-bottom: 2px solid var(--edge-light);
+  padding-bottom: .35rem;
+}
+.sub-title { margin: 1.1rem 0 .4rem; font-size: .9rem; color: var(--ink-dim); }
+
+.note { margin: .3rem 0; color: var(--ink-dim); font-size: .82rem; line-height: 1.7; }
+.warn { color: var(--warn); }
+
+.btn {
+  appearance: none;
+  min-height: 44px;                 /* 指で押せる大きさ。ここを下げない */
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 2px solid var(--edge-light);
+  border-bottom-width: 4px;         /* 押せる面に見せる */
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.btn:active { border-bottom-width: 2px; transform: translateY(2px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--accent); color: #06220f; border-color: #0f7a45; }
+.btn-danger { color: var(--danger); border-color: #7a2b2b; }
+.btn-big { width: 100%; min-height: 56px; font-size: 1.05rem; margin-top: .6rem; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: .8rem; }
+.actions-sticky {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+  padding: 10px 0;
+}
+
+.field { margin: .6rem 0; }
+.field label { display: block; font-size: .82rem; color: var(--ink-dim); margin-bottom: .25rem; }
+.field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.field-row .field { flex: 1 1 12rem; }
+
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--edge);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+}
+input[type="range"] { width: 100%; height: 44px; accent-color: var(--accent); }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: .4rem 0; }
+.chip {
+  min-height: 40px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: .85rem;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.chip.is-on { background: var(--home); color: #2a2000; border-color: #8a6a12; font-weight: 700; }
+.chip:disabled { opacity: .4; cursor: not-allowed; }
+
+/* --------------------------------------------------------- チーム作成 */
+
+.plan-rows { display: grid; gap: 6px; }
+.plan-row { display: grid; grid-template-columns: 7rem 1fr 2.4rem; gap: 8px; align-items: center; }
+.plan-row span:first-child { font-size: .85rem; }
+.plan-row output { text-align: right; font-variant-numeric: tabular-nums; }
+.plan-status { margin: .6rem 0 0; font-variant-numeric: tabular-nums; }
+.plan-presets { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
+.plan-presets > span { color: var(--ink-dim); font-size: .82rem; }
+
+/* ------------------------------------------------------------- ホーム */
+
+.hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--edge-light);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.hud-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hud-name { font-weight: 800; color: var(--home); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-round { font-size: .8rem; color: var(--ink-dim); text-align: right; }
+.badge {
+  padding: 1px 7px;
+  font-size: .78rem;
+  font-weight: 700;
+  color: #06220f;
+  background: var(--accent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: var(--edge);
+  position: sticky;
+  top: 52px;
+  z-index: 4;
+}
+.tab {
+  min-height: 44px;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  background: var(--bg-panel);
+  border: 0;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+.tab.is-on { color: var(--home); border-bottom-color: var(--home); background: var(--bg-raised); }
+
+.tab-body { padding: 12px; max-width: 48rem; margin: 0 auto; }
+.tab-page { display: none; }
+.tab-page.is-on { display: block; }
+
+.fixture { font-size: 1.05rem; font-weight: 700; text-align: center; padding: .6rem 0; }
+.fixture .vs { color: var(--ink-dim); margin: 0 .6rem; font-weight: 400; }
+
+.card-stock { display: flex; flex-wrap: wrap; gap: 6px; }
+.stock {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 5px 9px;
+  font-size: .85rem;
+  background: var(--bg-raised);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+}
+.stock b { color: var(--home); font-variant-numeric: tabular-nums; }
+/* もらえたカードは「カード名」と「なぜもらえたか」を分けて出す */
+.award { display: grid; gap: 2px; padding: 7px 10px; }
+.award-name { font-weight: 700; color: var(--home); }
+.award-why { font-size: .78rem; color: var(--ink-dim); }
+.player.is-swap { border-color: var(--accent); }
+.stock-empty { color: var(--ink-dim); font-size: .85rem; }
+
+/* --------------------------------------------------------------- 選手 */
+
+.squad-list { display: grid; gap: 6px; }
+.player {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.player.is-bench { opacity: .72; }
+.player.is-on { border-color: var(--home); }
+.pos {
+  display: grid;
+  place-items: center;
+  height: 24px;
+  font-size: .72rem;
+  font-weight: 800;
+  color: var(--edge);
+  background: var(--ink-dim);
+  border-radius: 3px;
+}
+.pos[data-pos="GK"] { background: var(--warn); }
+.pos[data-pos="DF"] { background: var(--away); }
+.pos[data-pos="MF"] { background: var(--accent); }
+.pos[data-pos="FW"] { background: var(--home); }
+.player-main { min-width: 0; }
+.player-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-type { font-size: .76rem; color: var(--ink-dim); }
+.player-abil { font-size: .74rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; text-align: right; }
+/* 生まれ持った性質。特訓で動く能力と混ぜて読まれないよう、色を落とす */
+.player-trait { font-size: .7rem; color: var(--edge-light); }
+
+.result-box {
+  margin-top: .8rem;
+  padding: 10px;
+  background: var(--edge);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: .85rem;
+}
+.result-box .up { color: var(--accent); font-weight: 700; }
+.result-box .changed { color: var(--home); font-weight: 700; }
+
+/* ------------------------------------------------------------- 順位表 */
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 6px; text-align: right; white-space: nowrap; }
+th { color: var(--ink-dim); font-weight: 700; border-bottom: 2px solid var(--edge-light); }
+td:first-child, th:first-child, td.name, th.name { text-align: left; }
+tbody tr:nth-child(odd) { background: rgba(255, 255, 255, .03); }
+tr.is-me { background: rgba(255, 210, 63, .14); }
+tr.is-me td { color: var(--home); font-weight: 700; }
+
+/* --------------------------------------------------------------- 試合 */
+
+.scoreboard {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-areas: "home score away" "clock clock clock";
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+  max-width: 44rem;
+  margin: 0 auto 8px;
+}
+.sb-team { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-team:first-child { grid-area: home; color: var(--home); }
+.sb-team:nth-child(3) { grid-area: away; text-align: right; color: var(--away); }
+.sb-score {
+  grid-area: score;
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+}
+.sb-clock {
+  grid-area: clock;
+  text-align: center;
+  font-size: .82rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.pitch-wrap { max-width: 44rem; margin: 0 auto; }
+#pitch {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--turf);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+  /* 🔑 ドット絵を滲ませない。ここを消すと縮尺が変わったときにぼやける */
+  image-rendering: pixelated;
+}
+
+/* 得点の演出。試合が動いた瞬間を見逃さないためのもの */
+.goal-flash {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 10px 22px;
+  background: rgba(10, 15, 20, .82);
+  border: 3px solid var(--home);
+  border-radius: var(--radius);
+  pointer-events: none;
+  z-index: 3;
+  animation: goal-pop .25s steps(4);
+}
+.goal-word {
+  font-size: clamp(1.4rem, 7vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: .12em;
+  color: var(--home);
+  text-shadow: 2px 2px 0 var(--edge);
+}
+.goal-who { font-size: .85rem; color: var(--ink); }
+@keyframes goal-pop {
+  from { transform: translate(-50%, -50%) scale(.6); }
+  to   { transform: translate(-50%, -50%) scale(1); }
+}
+.screen-match { position: relative; }
+
+.ticker {
+  max-width: 44rem;
+  margin: 8px auto;
+  padding: 8px 10px;
+  min-height: 2.8em;
+  font-size: .85rem;
+  background: var(--edge);
+  border: 2px solid var(--edge-light);
+  border-radius: var(--radius);
+}
+.ticker .t-time { color: var(--ink-dim); margin-right: .5rem; font-variant-numeric: tabular-nums; }
+.ticker .t-goal { color: var(--home); font-weight: 800; }
+
+.match-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 44rem;
+  margin: 0 auto 10px;
+}
+#matchResult { max-width: 44rem; margin: 0 auto; }
+
+/* --------------------------------------------------------------- エラー */
+
+.error-box {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(32rem, calc(100vw - 24px));
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 3px solid var(--danger);
+  border-radius: var(--radius);
+  z-index: 50;
+}
+.error-box strong { color: var(--danger); display: block; margin-bottom: .3rem; }
+.error-box p { margin: 0 0 .6rem; font-size: .85rem; word-break: break-word; }
+
+/* --------------------------------------------------------- 画面が広い時 */
+
+@media (min-width: 720px) {
+  .tab-body { padding: 16px; }
+  .squad-list { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-fill { transition: none; }
+  .btn:active { transform: none; }
+}

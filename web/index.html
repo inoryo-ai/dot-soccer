@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>ドットサッカー育成（デモ）</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="育成→試合→課題→特訓のループが回るドットサッカーのデモ。ブラウザの中だけで動きます。">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%231d7a3f'/><circle cx='8' cy='8' r='3' fill='%23fff'/></svg>">
+</head>
+<body>
+
+<!-- ========================================================= 読み込み中 -->
+<section id="boot" class="screen is-on">
+  <div class="boot-box">
+    <h1 class="logo">DOT SOCCER</h1>
+    <p class="logo-sub">育成シミュレーション（デモ版）</p>
+    <div class="boot-bar"><div id="bootFill" class="boot-fill"></div></div>
+    <p id="bootMsg" class="boot-msg">準備しています…</p>
+    <p class="boot-note">
+      試合の計算はすべて<strong>この端末の中</strong>で行います。<br>
+      最初だけ Python の実行環境を読み込むので少し待ちます（2回目以降は速くなります）。
+    </p>
+  </div>
+</section>
+
+<!-- ======================================================= チームを作る -->
+<section id="setup" class="screen">
+  <div class="panel panel-wide">
+    <h2 class="panel-title">チームを作る</h2>
+
+    <div class="field">
+      <label for="teamName">チーム名</label>
+      <input id="teamName" type="text" maxlength="12" value="ドットFC" autocomplete="off">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="formation">フォーメーション</label>
+        <select id="formation"></select>
+      </div>
+      <div class="field">
+        <label for="seed">運の種（同じ数字なら同じチーム）</label>
+        <input id="seed" type="number" min="0" max="999999" value="1">
+      </div>
+    </div>
+
+    <h3 class="sub-title">初期育成 — 全選手に特訓<span id="planTotalTarget">20</span>回</h3>
+    <p class="note">
+      AIチームも同じ回数だけ育った状態で開幕します。<strong>配分だけがチームの個性</strong>になります。
+    </p>
+    <div id="planRows" class="plan-rows"></div>
+    <p class="plan-status">
+      割り振り <strong><span id="planUsed">0</span></strong> / <span id="planTotal">20</span>
+      <span id="planWarn" class="warn"></span>
+    </p>
+    <div class="plan-presets">
+      <span>お手本:</span>
+      <div id="planPresets" class="chip-row"></div>
+    </div>
+
+    <div class="actions">
+      <button id="startBtn" class="btn btn-primary">開幕する</button>
+      <button id="loadBtn" class="btn">続きから</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== ホーム -->
+<section id="home" class="screen">
+  <header class="hud">
+    <div class="hud-team">
+      <span id="hudTeam" class="hud-name">—</span>
+      <span id="hudRank" class="badge">—</span>
+    </div>
+    <div id="hudRound" class="hud-round">—</div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab is-on" data-tab="dash">ホーム</button>
+    <button class="tab" data-tab="squad">選手</button>
+    <button class="tab" data-tab="tactics">戦術</button>
+    <button class="tab" data-tab="table">順位表</button>
+  </nav>
+
+  <div class="tab-body">
+    <!-- ダッシュボード -->
+    <div class="tab-page is-on" data-page="dash">
+      <div class="panel">
+        <h2 class="panel-title">次の試合</h2>
+        <div id="nextFixture" class="fixture">—</div>
+        <button id="playBtn" class="btn btn-primary btn-big">キックオフ</button>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">持っている特訓カード</h2>
+        <div id="cardStock" class="card-stock"></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">データ</h2>
+        <div class="actions">
+          <button id="saveBtn" class="btn">保存する</button>
+          <button id="exportBtn" class="btn">書き出す</button>
+          <button id="resetBtn" class="btn btn-danger">最初からやり直す</button>
+        </div>
+        <p id="saveMsg" class="note"></p>
+      </div>
+    </div>
+
+    <!-- 選手と特訓 -->
+    <div class="tab-page" data-page="squad">
+      <div class="panel">
+        <h2 class="panel-title">選手</h2>
+        <p class="note">選手を選ぶ → カードを1枚（通常）か2枚（スペシャル）選ぶ → 特訓する</p>
+        <div class="actions">
+          <button id="swapBtn" class="btn">先発と控えを入れ替える</button>
+          <span id="swapMsg" class="note"></span>
+        </div>
+        <div id="squadList" class="squad-list"></div>
+      </div>
+      <div class="panel" id="trainPanel" hidden>
+        <h2 class="panel-title">特訓 — <span id="trainWho">—</span></h2>
+        <div id="trainCards" class="chip-row"></div>
+        <p id="trainHint" class="note"></p>
+        <div class="actions">
+          <button id="trainBtn" class="btn btn-primary">特訓する</button>
+          <button id="trainCancel" class="btn">やめる</button>
+        </div>
+        <div id="trainResult" class="result-box" hidden></div>
+      </div>
+    </div>
+
+    <!-- 戦術 -->
+    <div class="tab-page" data-page="tactics">
+      <div class="panel">
+        <h2 class="panel-title">基本戦術</h2>
+        <div class="field-row">
+          <div class="field">
+            <label for="tFormation">フォーメーション</label>
+            <select id="tFormation"></select>
+          </div>
+          <div class="field">
+            <label for="tAttitude">姿勢</label>
+            <select id="tAttitude"></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="tLine">ラインの高さ <span id="tLineVal">3</span></label>
+          <input id="tLine" type="range" min="1" max="5" value="3">
+        </div>
+        <div class="field">
+          <label for="tWidth">守備の幅 <span id="tWidthVal">3</span></label>
+          <input id="tWidth" type="range" min="1" max="5" value="3">
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">監督の性格</h2>
+        <div id="managerRows"></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">チーム方針</h2>
+        <p class="note">上から順に判定し、<strong>最初に当てはまった1つだけ</strong>実行します（最大<span id="policyMax">5</span>個）。</p>
+        <div id="policyRows"></div>
+        <div class="actions">
+          <button id="policyAdd" class="btn">条件を足す</button>
+        </div>
+      </div>
+      <div class="actions actions-sticky">
+        <button id="tacticsSave" class="btn btn-primary">この戦術で決める</button>
+        <span id="tacticsMsg" class="note"></span>
+      </div>
+    </div>
+
+    <!-- 順位表 -->
+    <div class="tab-page" data-page="table">
+      <div class="panel">
+        <h2 class="panel-title">順位表</h2>
+        <div id="standings" class="table-wrap"></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">これからの日程</h2>
+        <div id="fixtures" class="table-wrap"></div>
+      </div>
+      <div class="panel" id="historyPanel" hidden>
+        <h2 class="panel-title">過去のシーズン</h2>
+        <div id="history" class="table-wrap"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== 試合 -->
+<section id="match" class="screen screen-match">
+  <div class="scoreboard">
+    <span id="sbHome" class="sb-team">—</span>
+    <span id="sbScore" class="sb-score">0 - 0</span>
+    <span id="sbAway" class="sb-team">—</span>
+    <span id="sbClock" class="sb-clock">0:00</span>
+  </div>
+
+  <div class="pitch-wrap">
+    <canvas id="pitch" width="480" height="360"></canvas>
+  </div>
+
+  <div id="goalFlash" class="goal-flash" hidden>
+    <span class="goal-word">ゴール！</span>
+    <span id="goalWho" class="goal-who"></span>
+  </div>
+
+  <div id="ticker" class="ticker">—</div>
+
+  <div class="match-controls">
+    <button id="mcPlay" class="btn">一時停止</button>
+    <button id="mcSpeed" class="btn">速さ ×1（実時間）</button>
+    <button id="mcSkip" class="btn">結果まで飛ばす</button>
+  </div>
+
+  <div id="matchResult" class="panel" hidden>
+    <h2 class="panel-title">試合結果</h2>
+    <div id="statTable" class="table-wrap"></div>
+    <h3 class="sub-title">出た課題 — もらえた特訓カード</h3>
+    <div id="awarded" class="chip-row"></div>
+    <h3 class="sub-title">他会場</h3>
+    <div id="others" class="table-wrap"></div>
+    <div class="actions">
+      <button id="matchDone" class="btn btn-primary btn-big">ホームへ戻る</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ エラー -->
+<div id="errorBox" class="error-box" hidden>
+  <strong id="errorTitle">うまくいきませんでした</strong>
+  <p id="errorMsg"></p>
+  <button id="errorClose" class="btn">閉じる</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.js"></script>
+<script src="sprites.js"></script>
+<script src="pitch.js"></script>
+<script src="bridge.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
