@@ -1,6 +1,9 @@
-# 正解データ（Python 版の出力）
+# 正解データ
 
-このフォルダの JSON は、**Python 版の試合エンジンが出した値**です。
+このフォルダの JSON は、元々**Python 版の試合エンジンが出した値**です。
+D-18（キックオフとゴール後の再開）で試合の規則を変えたので、試合の結果に関わる
+`matches` `batch` `career` `cli` は **TypeScript 版で作り直した**（`node scripts/gen_golden.ts`）。
+`random` `math` `presets` `training` は規則と関係ないので、今も Python 版の出力のまま。
 TypeScript 版が同じシードで同じ結果を出すことを `tests/golden.test.ts` と
 `tests/cli.test.ts` が1値ずつ照合しています（決定 D-15）。
 
@@ -12,7 +15,13 @@ TypeScript 版が同じシードで同じ結果を出すことを `tests/golden.
   2. 「スタミナが20%未満になった選手」の数え方を、`id()` ではなく選手そのもので覚える形に
      直した。番地の使い回しで人数が少なく数えられていたため（D-17）
 
-作り直すとき（Python 版のコードが要る）:
+規則を変えて試合の結果が変わったとき（理由を `docs/decisions.md` に書いてから）:
+
+```bash
+node scripts/gen_golden.ts      # matches / batch / career / cli だけを書き直す
+```
+
+Python 版の出力を作り直すとき（Python 版のコードが要る）:
 
 ```bash
 git worktree add /tmp/dot-soccer-py 2dbe331

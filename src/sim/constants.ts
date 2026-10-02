@@ -230,6 +230,26 @@ export const SUPPORT_WEIGHT: Readonly<Record<string, number>> = {
 export const GK_DEPTH_M = 5.0;                    // GKが構える自ゴールからの距離
 export const GK_SIDE_TRACK = 0.30;                // ボールのy座標に追従する割合
 export const GOAL_KICK_X_M = 14.0;                // ゴールキック位置（自ゴールからの距離）
+
+// ------------------------------------------------- キックオフ（試合開始・後半開始・ゴール後）
+//
+// 🔴 **キックオフの立ち位置に、試合中の持ち場をそのまま使わない。**
+//    FW の持ち場は自ゴールから 70% ＝**最初から相手陣地にいる**（2026-10-02 オーナー指摘）。
+//    ルールでは全員が自陣、守る側はセンターサークルの外。
+//    → 前寄りの持ち場ほど自陣へ畳む。DF・GK の位置はほぼ変わらない。
+export const CENTER_CIRCLE_R_M = 9.15;
+export const KICKOFF_FOLD_FROM = 0.35;            // 自ゴールからこの割合より前の持ち場を畳む
+export const KICKOFF_FOLD_RATIO = 0.35;           // 畳んだ後の前後の幅（FW 0.70 → 0.47）
+export const KICKOFF_MAX_FRAC = 0.48;             // それでも越えない線（センターラインの約2m手前）
+export const KICKOFF_CIRCLE_MARGIN_M = 0.5;       // 守る側がセンターサークルから離れる余裕
+// 🔴 **ゴールの後、瞬間移動で並び直さない。** 1コマで 40m 以上飛び、
+//    次の1秒でもうボールが動いていた（2026-10-02 オーナー指摘）。
+//    → 全員が歩いて戻り、そろってからキックオフ。その間も時計は進む（オーナー判断）。
+export const RESTART_MIN_TICKS = 10;              // 全員そろっていても、これより早くは始めない
+export const RESTART_MAX_TICKS = 120;             // これを過ぎたら、戻りきれない人がいても始める
+export const RESTART_SETTLE_M = 1.5;              // 立ち位置からこの距離以内なら「戻った」
+export const RESTART_BALL_SPEED_MPS = 6.0;        // ボールがセンターへ戻る速さ
+export const RESTART_APPROACH_RATIO = 0.5;        // 立ち位置の近くでは、残りのこの割合ずつ詰める
 export const LOOSE_BALL_MAX_TICKS = 20;           // これ以上こぼれ球が続いたら最近接に渡す
 export const BEATEN_BEHIND_RADIUS_M = 3.0;        // この距離の守備者を抜いたら「抜かれた」と数える
 export const PASS_BASE = 0.94;
@@ -340,6 +360,7 @@ export const EFFORT: Readonly<Record<string, number>> = {
   //    ここが低すぎたせいで、90分の3分の2を歩いて過ごしていた（走行 6.3km/人）
   HOLD_ZONE: 0.86,     // 持ち場を守りながら位置を直す
   KEEP_SHAPE: 0.82,    // 隊形に合わせて動き直す
+  RETURN_KICKOFF: 0.75,  // ゴール後、キックオフの位置へ戻る（全力では走らない）
 };
 export const SUPPORT_ANGLE_OFFSET_M = 7.0;        // 保持者へ寄るとき、重ならないように離れて受ける距離
 // 🔑 受けに行く先を**いくつか見比べてから**決める。でたらめな方向へ出ると、
