@@ -12,6 +12,7 @@ import { play } from "../sim/engine.ts";
 import type { Replay } from "../sim/engine.ts";
 import { buildPreset } from "../sim/presets.ts";
 import * as Field from "./field3d.ts";
+import * as Stadium from "./stadium3d.ts";
 import * as Voxel from "./voxel.ts";
 import type { Pose } from "./voxel.ts";
 
@@ -65,7 +66,11 @@ function buildMatch(): void {
   }
 }
 
+/** 観客の揺れに使う秒数。試合の再生とは別に進める（止めても観客は動く） */
+let clock = 0;
+
 function drawFrame(dt: number): void {
+  clock += dt;
   const rp = replay;
   if (rp === null) return;
   const cv = $<HTMLCanvasElement>("view3d");
@@ -94,8 +99,9 @@ function drawFrame(dt: number): void {
     target, cx: cv.width / 2, cy: cv.height * 0.56,
   };
 
-  c.fillStyle = "#8fd0ef";
-  c.fillRect(0, 0, cv.width, cv.height);
+  /* 🔴 空 → 観客席 → ピッチ の順。観客席はピッチの外なので重ならないが、
+        屋根と照明塔は空へ伸びるので、空より後・ピッチより先に描く必要がある。 */
+  Stadium.draw(c, cam, clock);
   Field.draw(c, cam);
 
   /* 🔴 奥から手前へ。カメラからの距離で並べ替えてから描く */
@@ -191,10 +197,25 @@ function main(): void {
 
   let prev = performance.now();
   const loop = (now: number): void => {
-    const dt = Math.min(0.1, (now - prev) / 1000);
+    /* 🔴 **経過時間は負にならない**ようにする。requestAnimationFrame が渡す時刻は
+          「そのコマが始まった時刻」なので、`main()` で読んだ `performance.now()` より
+          **前**になることがある。すると1コマ目だけ `dt` が負になり、`frameIndex` が
+          -1 になって `frames[-1]` で落ちた（2026-10-03 に実際に発生）。 */
+    const dt = Math.max(0, Math.min(0.1, (now - prev) / 1000));
     prev = now;
-    drawFrame(dt);
+    /* 🔴 **次のコマの予約を先にする。** 後ろに置くと、描画で1回でも例外が出た瞬間に
+          予約まで到達せず**ループが静かに止まる**（画面は真っ白のまま、
+          エラーも流れない）。実際にこれで止まって原因が分からなかった。 */
     requestAnimationFrame(loop);
+    try {
+      drawFrame(dt);
+    } catch (e) {
+      /* 握りつぶさない。検証ページなので画面に出す */
+      const box = $("err");
+      box.hidden = false;
+      box.textContent = `描画で失敗: ${e instanceof Error ? `${e.message}\n${e.stack ?? ""}`
+                                                          : String(e)}`;
+    }
   };
   requestAnimationFrame(loop);
 }

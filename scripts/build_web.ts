@@ -52,6 +52,7 @@ export const EXPECTED_JS = [
   "sim/sha512.js", "sim/training.js",
   "web/api.js", "web/city.js", "web/fx.js", "web/iso.js", "web/lab.js", "web/main.js",
   "web/field3d.js", "web/pitch.js", "web/pitch3d.js", "web/room.js", "web/sprites.js",
+  "web/stadium3d.js",
   "web/voxel.js",
 ] as const;
 

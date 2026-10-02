@@ -6,7 +6,7 @@
  *    どれも「頂点を投影して塗る」だけで足りる。
  */
 
-import { basisOf, project } from "./voxel.ts";
+import { basisOf, isFrontFacing, project, projectPoly } from "./voxel.ts";
 import type { Basis, Cam, P2, Vec3 } from "./voxel.ts";
 
 /* ピッチの実寸（m）。競技規則の数字 */
@@ -33,12 +33,12 @@ type Quad = [Vec3, Vec3, Vec3, Vec3];
 
 function fill(c: CanvasRenderingContext2D, b: Basis, cam: Cam, q: Quad,
               color: string): void {
-  const p: (P2 | null)[] = q.map((v) => project(b, cam, v));
-  if (p.some((v) => v === null)) return;
-  const pts = p as P2[];
+  /* 🔴 角がカメラの後ろに出たら**切る**。捨てると芝が丸ごと消える（`projectPoly` の説明） */
+  const pts = projectPoly(b, cam, q);
+  if (pts === null) return;
   c.beginPath();
   c.moveTo(pts[0]!.x, pts[0]!.y);
-  for (let i = 1; i < 4; i++) c.lineTo(pts[i]!.x, pts[i]!.y);
+  for (let i = 1; i < pts.length; i++) c.lineTo(pts[i]!.x, pts[i]!.y);
   c.closePath();
   c.fillStyle = color;
   c.fill();
@@ -117,9 +117,11 @@ function goal(c: CanvasRenderingContext2D, b: Basis, cam: Cam, gx: number,
 export function draw(c: CanvasRenderingContext2D, cam: Cam): void {
   const b = basisOf(cam);
 
-  /* ピッチの外。端が抜けないよう広めに敷く */
-  fill(c, b, cam, [at(-40, -40), at(PITCH_X + 40, -40),
-                   at(PITCH_X + 40, PITCH_Y + 40), at(-40, PITCH_Y + 40)], C.out);
+  /* 🔴 ピッチの外は**観客席の手前まで**しか敷かない（2026-10-03）。
+        広く敷くと、先に描いたスタンドをこの一面が塗りつぶす。 */
+  const M = 7.4;
+  fill(c, b, cam, [at(-M, -M), at(PITCH_X + M, -M),
+                   at(PITCH_X + M, PITCH_Y + M), at(-M, PITCH_Y + M)], C.out);
 
   /* 芝の縞。質感であって模様ではないので差は小さく */
   const sw = PITCH_X / STRIPES;
@@ -221,9 +223,7 @@ export function drawBall(c: CanvasRenderingContext2D, cam: Cam, p: Vec3,
     const q = f.idx.map((i) => project(b, cam, pts[i]!));
     if (q.some((v) => v === null)) continue;
     const qq = q as P2[];
-    const area = (qq[1]!.x - qq[0]!.x) * (qq[2]!.y - qq[0]!.y)
-               - (qq[2]!.x - qq[0]!.x) * (qq[1]!.y - qq[0]!.y);
-    if (area <= 0) continue;
+    if (!isFrontFacing(qq)) continue;
     faces.push({ q: qq, d: (qq[0]!.d + qq[1]!.d + qq[2]!.d + qq[3]!.d) / 4, lit: f.lit });
   }
   faces.sort((m, n) => n.d - m.d);

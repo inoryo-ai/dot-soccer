@@ -74,16 +74,105 @@ export function basisOf(cam: Cam): Basis {
 
 export interface P2 { x: number; y: number; d: number }
 
-/** 世界の点を画面へ。カメラの後ろなら null */
-export function project(b: Basis, cam: Cam, p: Vec3): P2 | null {
+/** カメラの手前の面。これより近い点は割り算が暴れるので描けない */
+const NEAR = 0.2;
+
+/** 世界の点をカメラの座標へ。d=奥行き / sx=右 / sy=上。**割り算をしない** */
+interface V3 { d: number; sx: number; sy: number }
+
+function toView(b: Basis, p: Vec3): V3 {
   const vx = p.x - b.eye.x;
   const vy = p.y - b.eye.y;
   const vz = p.z - b.eye.z;
-  const d = vx * b.fwd.x + vy * b.fwd.y + vz * b.fwd.z;
-  if (d <= 0.2) return null;                 // カメラの後ろは描かない
-  const sx = vx * b.right.x + vy * b.right.y + vz * b.right.z;
-  const sy = vx * b.up.x + vy * b.up.y + vz * b.up.z;
-  return { x: cam.cx + (cam.focal * sx) / d, y: cam.cy - (cam.focal * sy) / d, d };
+  return {
+    d: vx * b.fwd.x + vy * b.fwd.y + vz * b.fwd.z,
+    sx: vx * b.right.x + vy * b.right.y + vz * b.right.z,
+    sy: vx * b.up.x + vy * b.up.y + vz * b.up.z,
+  };
+}
+
+function toScreen(cam: Cam, v: V3): P2 {
+  return {
+    x: cam.cx + (cam.focal * v.sx) / v.d,
+    y: cam.cy - (cam.focal * v.sy) / v.d,
+    d: v.d,
+  };
+}
+
+/** 世界の点を画面へ。カメラの後ろなら null */
+export function project(b: Basis, cam: Cam, p: Vec3): P2 | null {
+  const v = toView(b, p);
+  if (v.d <= NEAR) return null;              // カメラの後ろは描かない
+  return toScreen(cam, v);
+}
+
+/**
+ * 画面に出た多角形の符号つき面積（たすきがけ）。
+ *
+ * 🔴 **カメラを向いている面は「負」になる。** 画面の y が下向きだからで、
+ *    数学の紙の上とは符号が逆になる。ここを取り違えると、**見えるはずの面を捨てて
+ *    裏側の面を描く**ことになり、箱の輪郭は同じなので気づけない。
+ *    （2026-10-03 に実際に逆だった。観客席の手前の面が消えて空が見えていた）
+ */
+export function signedArea(q: P2[]): number {
+  let s = 0;
+  for (let i = 0; i < q.length; i++) {
+    const a = q[i]!;
+    const c = q[(i + 1) % q.length]!;
+    s += a.x * c.y - c.x * a.y;
+  }
+  return s;
+}
+
+/** 表を向いているか。`signedArea` の説明のとおり、負が表 */
+export function isFrontFacing(q: P2[]): boolean {
+  return signedArea(q) < 0;
+}
+
+/**
+ * 多角形を画面へ。**手前の面ではみ出した部分を切る**（捨てない）。
+ *
+ * 🔴 なぜ要るのか（2026-10-03 の実物）: 角が1つでもカメラの後ろに入ると
+ *    `project` が null を返す。それを見て面ごと捨てていたため、
+ *    **芝（105×68m）が丸ごと消えて、短い白線だけが宙に浮いた**。
+ *    面が大きいほど角はカメラの後ろに回るので、引きで寄るほど地面が消える。
+ *    捨てるのではなく、手前の面で切った多角形を作れば直る。
+ *
+ * 🔑 切るのはカメラ座標で行う。**割り算の前**なら奥行きに沿って線形なので、
+ *    辺の途中の点をそのまま比で出せる（画面座標で切ると曲がる）。
+ *
+ * 返り値は3点以上。全部カメラの後ろなら null。
+ */
+export function projectPoly(b: Basis, cam: Cam, poly: Vec3[]): P2[] | null {
+  const vs: V3[] = poly.map((p) => toView(b, p));
+
+  /* 全部手前にあるなら切らずに済む（ほとんどの面はこちら） */
+  let behind = 0;
+  for (const v of vs) if (v.d <= NEAR) behind++;
+  if (behind === vs.length) return null;
+
+  let kept = vs;
+  if (behind > 0) {
+    const out: V3[] = [];
+    for (let i = 0; i < vs.length; i++) {
+      const a = vs[i]!;
+      const c = vs[(i + 1) % vs.length]!;
+      const aIn = a.d > NEAR;
+      const cIn = c.d > NEAR;
+      if (aIn) out.push(a);
+      if (aIn !== cIn) {
+        const t = (NEAR - a.d) / (c.d - a.d);
+        out.push({
+          d: NEAR,
+          sx: a.sx + (c.sx - a.sx) * t,
+          sy: a.sy + (c.sy - a.sy) * t,
+        });
+      }
+    }
+    if (out.length < 3) return null;
+    kept = out;
+  }
+  return kept.map((v) => toScreen(cam, v));
 }
 
 /* ------------------------------------------------------------ 箱 */
@@ -325,9 +414,7 @@ export function drawPlayer(c: CanvasRenderingContext2D, cam: Cam, o: DrawOpts): 
       const pts = q as P2[];
       /* 🔑 裏を向いている面は描かない。**画面上の回り方の向き**で判定する
             （法線を世界で計算するより、投影後の符号を見るほうが確実） */
-      const area = (pts[1]!.x - pts[0]!.x) * (pts[2]!.y - pts[0]!.y)
-                 - (pts[2]!.x - pts[0]!.x) * (pts[1]!.y - pts[0]!.y);
-      if (area <= 0) continue;
+      if (!isFrontFacing(pts)) continue;
       const d = (pts[0]!.d + pts[1]!.d + pts[2]!.d + pts[3]!.d) / 4;
       faces.push({ pts, d, color: shade(box.color, f.lit) });
     }
