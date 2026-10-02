@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>見比べ — ドット絵 と ブロック3D（.soccer）</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+/* 🔑 この画面は**検証用**。ゲーム本体には出ない。
+      見比べるためだけの最小限の見た目にしてある（凝ると比較の邪魔になる）。 */
+.lab { max-width: 1400px; margin: 0 auto; padding: calc(var(--px) * 8); }
+.lab-head { display: flex; gap: calc(var(--px) * 6); align-items: baseline; flex-wrap: wrap; }
+.lab-note { color: var(--ink-dim); font-size: .82rem; }
+
+.lab-stage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--px) * 6);
+  margin-top: calc(var(--px) * 6);
+}
+.lab-pane {
+  position: relative;
+  background: #3f9e46;
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .25);
+  overflow: hidden;
+}
+.lab-pane canvas { display: block; width: 100%; height: auto; }
+/* ドット絵の側だけ拡大を滲ませない。3Dの側は面を塗るので不要 */
+#oldCanvas { image-rendering: pixelated; }
+.lab-tag {
+  position: absolute;
+  left: 0; top: 0;
+  z-index: 2;
+  padding: calc(var(--px) * 2) calc(var(--px) * 5);
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  background: var(--ui-edge);
+}
+
+.lab-ctrl {
+  display: flex;
+  gap: calc(var(--px) * 5);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: calc(var(--px) * 6);
+  padding: calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.lab-ctrl label { font-size: .82rem; font-weight: 700; color: var(--ink-dim); }
+.lab-ctrl .chip-row { margin: 0; }
+.lab-slider { display: flex; align-items: center; gap: calc(var(--px) * 3); }
+.lab-slider input[type="range"] { width: 12rem; height: calc(var(--px) * 14); }
+.lab-val { font-weight: 800; min-width: 3.5rem; }
+</style>
+</head>
+<body>
+
+<div class="lab">
+  <div class="lab-head">
+    <h1 style="margin:0;font-size:1.3rem;">見比べ — いまのドット絵 と ブロック3D</h1>
+    <span class="lab-note">左＝現行（8方向×4コマを手描き）／右＝3D（モデル1体・関節を回すだけ）</span>
+  </div>
+
+  <div class="lab-stage">
+    <div class="lab-pane">
+      <span class="lab-tag">いまのドット絵</span>
+      <canvas id="oldCanvas" width="320" height="360"></canvas>
+    </div>
+    <div class="lab-pane">
+      <span class="lab-tag">ブロック3D（2頭身）</span>
+      <canvas id="newCanvas" width="640" height="720"></canvas>
+    </div>
+  </div>
+
+  <div class="lab-ctrl">
+    <label>動き</label>
+    <div id="poseRow" class="chip-row"></div>
+
+    <div class="lab-slider">
+      <label for="yaw">体の向き</label>
+      <input id="yaw" type="range" min="0" max="360" value="200">
+      <span id="yawVal" class="lab-val">200°</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="camYaw">カメラ</label>
+      <input id="camYaw" type="range" min="0" max="360" value="90">
+      <span id="camYawVal" class="lab-val">90°</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="camPitch">見下ろし</label>
+      <input id="camPitch" type="range" min="0" max="80" value="32">
+      <span id="camPitchVal" class="lab-val">32°</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="speed">速さ</label>
+      <input id="speed" type="range" min="0" max="200" value="100">
+      <span id="speedVal" class="lab-val">1.00x</span>
+    </div>
+
+    <button id="spin" class="btn">カメラを回す</button>
+  </div>
+
+  <!-- 🔑 体つきは**見ながら決める**ところ。コードの中で当てずっぽうに決めたら
+       2回直しても合わなかったので、直接触れるようにしてある。 -->
+  <div class="lab-ctrl">
+    <label style="font-weight:800;color:var(--ink);">体つき</label>
+
+    <div class="lab-slider">
+      <label for="headRatio">頭の大きさ</label>
+      <input id="headRatio" type="range" min="25" max="55" value="40">
+      <span id="headRatioVal" class="lab-val">40%</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="headWidth">頭の幅</label>
+      <input id="headWidth" type="range" min="40" max="80" value="58">
+      <span id="headWidthVal" class="lab-val">0.58m</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="bodyWidth">体の幅</label>
+      <input id="bodyWidth" type="range" min="30" max="70" value="46">
+      <span id="bodyWidthVal" class="lab-val">0.46m</span>
+    </div>
+
+    <div class="lab-slider">
+      <label for="legRatio">脚の長さ</label>
+      <input id="legRatio" type="range" min="30" max="65" value="48">
+      <span id="legRatioVal" class="lab-val">48%</span>
+    </div>
+
+    <button id="reset" class="btn">既定に戻す</button>
+  </div>
+
+  <p class="lab-note" style="margin-top:calc(var(--px) * 5);">
+    🔑 右は <strong>箱6個を面に分けて、奥から手前へ塗っているだけ</strong>です。
+    WebGL も外部ライブラリも使っていません（要件 §6）。
+    GPU を使わないので、同じ入力なら必ず同じ絵になります（D-16 の決定論が保てます）。
+  </p>
+</div>
+
+<script type="module" src="js/web/lab.js"></script>
+</body>
+</html>

@@ -280,22 +280,34 @@ function checkTools(): void {
  *
  * 🔑 だから機械で突き合わせる。**見つかるのは開く前**になる。
  */
-function checkDomContract(index: string): void {
-  const ids = new Set([...index.matchAll(/\sid="([\w-]+)"/g)].map((m) => m[1]!));
-  const want = new Map<string, string>();
-  for (const f of tsFiles(join(ROOT, "src", "web"))) {
-    for (const m of readFileSync(f, "utf8").matchAll(/\$(?:<[^>]*>)?\("([\w-]+)"\)/g)) {
-      want.set(m[1]!, relative(ROOT, f));
-    }
+/**
+ * 入口のファイルと、その中身を載せている HTML の対応。
+ *
+ * 🔴 ページが2枚になった時点で、1枚だけ見る検査は**正しく赤を出した**（2026-10-03）。
+ *    `lab.ts` の id は `lab.html` にあるので `index.html` には無い。
+ *    検査が悪いのではなく、検査が知らない対応が増えただけ。ここに足す。
+ * 🔑 入口以外（`sprites.ts` など）は `$()` を持たないので、ここに現れない。
+ */
+const PAGES: Record<string, string> = {
+  "main.ts": "index.html",
+  "lab.ts": "lab.html",
+};
+
+function checkDomContract(): void {
+  let total = 0;
+  const missing: string[] = [];
+  for (const [entry, page] of Object.entries(PAGES)) {
+    const src = readFileSync(join(ROOT, "src", "web", entry), "utf8");
+    const html = readFileSync(join(DIST, page), "utf8");
+    const ids = new Set([...html.matchAll(/\sid="([\w-]+)"/g)].map((m) => m[1]!));
+    const want = new Set([...src.matchAll(/\$(?:<[^>]*>)?\("([\w-]+)"\)/g)]
+                         .map((m) => m[1]!));
+    total += want.size;
+    for (const id of want) if (!ids.has(id)) missing.push(`#${id}（${entry} → ${page}）`);
   }
-  const missing = [...want].filter(([id]) => !ids.has(id));
-  if (missing.length > 0) {
-    for (const [id, where] of missing) {
-      bad(`画面のコードが要る id が index.html に無い: #${id}（${where}）`);
-    }
-  } else {
-    ok(`画面のコードが名指しする ${want.size}個の id すべてが index.html にある`);
-  }
+  if (missing.length > 0) for (const m of missing) bad(`画面のコードが要る id が無い: ${m}`);
+  else ok(`画面のコードが名指しする ${total}個の id すべてが HTML にある（${
+    Object.values(PAGES).join(" / ")}）`);
 }
 
 function checkWebBuild(): void {
@@ -328,7 +340,7 @@ function checkWebBuild(): void {
     return;
   }
   const index = readFileSync(join(DIST, "index.html"), "utf8");
-  checkDomContract(index);
+  checkDomContract();
   const unstamped = [...index.matchAll(/(?:src|href)="([\w./-]+\.(?:js|css))"/g)].map((m) => m[1]);
   const imports = files.filter((f) => f.endsWith(".js")).flatMap((f) =>
     [...readFileSync(join(DIST, f), "utf8").matchAll(/from\s*"(\.{1,2}\/[\w./-]+\.js)"/g)]

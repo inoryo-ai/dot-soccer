@@ -28,7 +28,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = join(ROOT, "web");
 export const DIST = join(WEB, "dist");
 
-export const STATIC_FILES = ["index.html", "style.css"] as const;
+/* 🔑 `lab.html` は**見比べ用の検証ページ**。ゲーム本体からは辿れない。
+      配るのは、オーナーが同じURLで開いて見比べられるようにするため。 */
+export const STATIC_FILES = ["index.html", "style.css", "lab.html"] as const;
 
 /**
  * そのまま配る入れもの（中身は触らない）。
@@ -48,8 +50,8 @@ export const EXPECTED_JS = [
   "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js",
-  "web/api.js", "web/city.js", "web/fx.js", "web/iso.js", "web/main.js", "web/pitch.js",
-  "web/room.js", "web/sprites.js",
+  "web/api.js", "web/city.js", "web/fx.js", "web/iso.js", "web/lab.js", "web/main.js",
+  "web/pitch.js", "web/room.js", "web/sprites.js", "web/voxel.js",
 ] as const;
 
 /**

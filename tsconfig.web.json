@@ -21,5 +21,7 @@
     "declaration": false
   },
   "include": [],
-  "files": ["src/web/main.ts"]
+  // 🔑 入口は2つ。`lab.ts` は見比べ用の別ページ（`web/lab.html`）で、
+  //    ゲーム本体からはたどれない＝本体の動きに影響しない。
+  "files": ["src/web/main.ts", "src/web/lab.ts"]
 }
