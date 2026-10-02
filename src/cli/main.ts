@@ -294,5 +294,12 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // 🔑 `| head` などで読み手が先に閉じたら、黙って終える（EPIPE で落ちて長いエラーを出さない）
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code === "EPIPE") process.exit(0);
+      throw e;
+    });
+  }
   process.exitCode = await main(process.argv.slice(2));
 }

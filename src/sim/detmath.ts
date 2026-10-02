@@ -77,27 +77,34 @@ const REDUCE_LIMIT = 823549.6;   // 2^19 × π/2
 
 // --------------------------------------------------------------- 部品
 
+// 🔑 1試合で数十万回呼ばれる。作業用の領域は1つだけ持ち、戻り値も配列で返さない
+const SCRATCH = new DataView(new ArrayBuffer(8));
+let RY0 = 0.0;   // remPio2 の結果（x - n×π/2 の上位）
+let RY1 = 0.0;   // 同じく下位
+
 /** 2^k（k は整数）。掛け算1回で誤差なしに作る。 */
 function pow2(k: number): number {
   if (k > 1023) return pow2(1023) * pow2(k - 1023);
   if (k < -1022) return pow2(-1022) * pow2(k + 1022);
-  const buf = new DataView(new ArrayBuffer(8));
-  buf.setUint32(0, (k + 1023) << 20);
-  buf.setUint32(4, 0);
-  return buf.getFloat64(0);
+  SCRATCH.setUint32(0, (k + 1023) << 20);
+  SCRATCH.setUint32(4, 0);
+  return SCRATCH.getFloat64(0);
 }
 
 /** 2進数の指数部（x = m × 2^e、1 <= m < 2 の e）。0 は -1023 扱い。 */
 function exponentOf(x: number): number {
-  const buf = new DataView(new ArrayBuffer(8));
-  buf.setFloat64(0, x);
-  return ((buf.getUint32(0) >>> 20) & 0x7ff) - 1023;
+  SCRATCH.setFloat64(0, x);
+  return ((SCRATCH.getUint32(0) >>> 20) & 0x7ff) - 1023;
 }
 
-/** x - n×π/2 を2つの浮動小数 (y0 + y1) で返す。 */
-function remPio2(x: number): [number, number, number] {
+/** x - n×π/2 を2つの浮動小数 (RY0 + RY1) に置き、n を返す。 */
+function remPio2(x: number): number {
   const t = Math.abs(x);
-  if (t <= PIO4) return [0, x, 0.0];
+  if (t <= PIO4) {
+    RY0 = x;
+    RY1 = 0.0;
+    return 0;
+  }
   if (t > REDUCE_LIMIT) {
     throw new Error(`角度が大きすぎる（${x}）。試合の中では起きないはずの値`);
   }
@@ -114,8 +121,14 @@ function remPio2(x: number): [number, number, number] {
   w = n * PIO2_3T - ((r2 - r) - w);
   const y0 = r - w;
   const y1 = (r - y0) - w;
-  if (x < 0) return [-n, -y0, -y1];
-  return [n, y0, y1];
+  if (x < 0) {
+    RY0 = -y0;
+    RY1 = -y1;
+    return -n;
+  }
+  RY0 = y0;
+  RY1 = y1;
+  return n;
 }
 
 function kernelSin(x: number, y: number): number {
@@ -143,23 +156,23 @@ function quadrant(n: number): number {
 
 export function sin(x: number): number {
   if (!Number.isFinite(x)) return Number.NaN;
-  const [n, y0, y1] = remPio2(x);
+  const n = remPio2(x);
   switch (quadrant(n)) {
-    case 0: return kernelSin(y0, y1);
-    case 1: return kernelCos(y0, y1);
-    case 2: return -kernelSin(y0, y1);
-    default: return -kernelCos(y0, y1);
+    case 0: return kernelSin(RY0, RY1);
+    case 1: return kernelCos(RY0, RY1);
+    case 2: return -kernelSin(RY0, RY1);
+    default: return -kernelCos(RY0, RY1);
   }
 }
 
 export function cos(x: number): number {
   if (!Number.isFinite(x)) return Number.NaN;
-  const [n, y0, y1] = remPio2(x);
+  const n = remPio2(x);
   switch (quadrant(n)) {
-    case 0: return kernelCos(y0, y1);
-    case 1: return -kernelSin(y0, y1);
-    case 2: return -kernelCos(y0, y1);
-    default: return kernelSin(y0, y1);
+    case 0: return kernelCos(RY0, RY1);
+    case 1: return -kernelSin(RY0, RY1);
+    case 2: return -kernelCos(RY0, RY1);
+    default: return kernelSin(RY0, RY1);
   }
 }
 

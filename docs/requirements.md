@@ -80,10 +80,10 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 
 | 項目 | 要件 |
 | --- | --- |
-| 言語 | Python 3.11、**実行時は標準ライブラリのみ** |
-| 開発ツール | `ruff`（lint）と `mypy`（型チェック）は使う。実行時の制約とは別（ループ#3で決着） |
-| 再現性 | 乱数はすべてシード固定。同じシードなら必ず同じ結果 |
-| フォルダ構成 | `sim/`（本体）、`data/`（チームJSON）、`tests/`、`scripts/`、`README.md` |
+| 言語 | TypeScript（Node.js 22.18 以上で `.ts` をそのまま実行）。**実行時に外部ライブラリを使わない**（2026-10-02 に Python 3.11 から移行・D-15） |
+| 開発ツール | `typescript`（型チェックとブラウザ用の JS 作成）だけ。実行時の制約とは別 |
+| 再現性 | 乱数はすべてシード固定。同じシードなら**どの OS・どのブラウザでも**必ず同じ結果（D-16） |
+| フォルダ構成 | `src/sim/`（本体）、`src/cli/`・`src/node/`（端末用）、`src/web/`（画面）、`data/`（チームJSON）、`tests/`、`scripts/`、`README.md` |
 | 試合規格 | 11対11、ピッチ105×68、1ティック＝1秒、90分＝5400ティック |
 
 決定論的な設計は、本番の非同期PvPでもサーバー権威の試合処理・リプレイ保存・不正検証の土台になる。
@@ -123,10 +123,10 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 
 ### タイプ判定（D-01〜D-05・D-10 反映後）
 
-閾値は **25**（D-03）。`sim/constants.py` の `TYPE_THRESHOLD` の1か所だけ。
+閾値は **25**（D-03）。`src/sim/constants.ts` の `TYPE_THRESHOLD` の1か所だけ。
 攻撃系は `support, overlap, run_space, goal_wait` の **4種**（D-05。`press` は守備側で別扱い）。
 
-実装は `sim/model.py` の `judge_type`。**上から順に判定し、最初に当てはまったものを返す。**
+実装は `src/sim/model.ts` の `judgeType`。**上から順に判定し、最初に当てはまったものを返す。**
 
 **0. 何も伸びていない**
 
@@ -186,7 +186,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 - 能力と隠しパラメーターの上限は100
 - 同じ特訓を **3〜10回**続けるとタイプが変わる（D-03 の実測は7〜8回）
 - 課題は1試合で同じもの1回まで、最大8枚
-- 「多い・少ない」の基準値は `sim/constants.py` にまとめる
+- 「多い・少ない」の基準値は `src/sim/constants.ts` にまとめる
 
 ## 9. 試合エンジン
 
@@ -213,7 +213,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 🔴 **1回の行動には秒数を与える**（ループ#1）。毎ティック行動させると
 「1試合の奪い合い4,081回・走行191km」のように集計値が桁で狂う。
 例外は出ず試合も成立するので、数字を相場と並べるまで気づけない。
-→ `ACTION_CONTROL_TICKS` / `TACKLE_COOLDOWN_TICKS`。検査は `scripts/check_project.py` の [2]。
+→ `ACTION_CONTROL_TICKS` / `TACKLE_COOLDOWN_TICKS`。検査は `scripts/check_project.ts` の [2]。
 
 🔴 **乱数・時刻は引数で受ける**（D-08）。モジュール関数の `random.*` は使わない。
 
@@ -235,7 +235,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 隠しパラメーターは「その行動を**選びやすさ**」として効く。重みを混ぜて1本の式にすると、
 また11人そろった平均の動きに戻る。
 
-🔑 検査は `tests/test_movement.py`。**チーム共通の流れを差し引いた残り**を数える
+🔑 検査は `tests/movement.test.ts`。**チーム共通の流れを差し引いた残り**を数える
 （完全な塊なら0）。指摘前 0.585 → いま 0.78。
 
 ### 撃つかどうかと、入るかどうかは別（2026-09-30 オーナー指摘 → D-13）
@@ -295,12 +295,12 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 
 | 用途 | コマンド |
 | --- | --- |
-| 遊ぶ | `python -m sim play` |
-| 1試合 | `python -m sim match data/team_a.json data/team_b.json --seed 1` |
-| 特訓の検証 | `python -m sim train --card running --times 20` |
-| 全カードの一覧 | `python -m sim train-all` |
-| 大量対戦 | `python -m sim batch --matches 200 --seed 1` |
-| チームJSONの作り直し | `python -m sim presets` |
+| 遊ぶ | `npm run play` |
+| 1試合 | `npm run sim -- match data/team_a.json data/team_b.json --seed 1` |
+| 特訓の検証 | `npm run sim -- train --card running --times 20` |
+| 全カードの一覧 | `npm run sim -- train-all` |
+| 大量対戦 | `npm run sim -- batch --matches 200 --seed 1` |
+| チームJSONの作り直し | `npm run sim -- presets` |
 
 **試合ログ**（JSON）：時刻・種類（パス、奪取、シュート、ゴール、交代、方針の発動）・選手名。
 最後にスタッツ（シュート数、支配率、パス成功率）と課題一覧。
@@ -334,34 +334,35 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 ## 13. 実装状況と、それを確かめる検査
 
 🔴 **この表は自己申告にしない。** 「実装済み」と書いてある行は、
-書いたファイルが実在することを `python scripts/check_project.py` が機械で確かめる。
+書いたファイルが実在することを `node scripts/check_project.ts`（`npm run check`）が機械で確かめる。
 
 | 節 | 実装 | 検査 |
 | --- | --- | --- |
-| §6 MVP | `sim/engine.py` `sim/model.py` `sim/training.py` | `tests/test_sim.py` |
-| §6 再現性（D-08） | `sim/engine.py` | `tests/test_sim.py`（同じシードで同じ結果） |
-| §7 タイプ判定 | `sim/model.py` の `judge_type` | `tests/test_sim.py`（全カード20回以内に変化・組み合わせ全件） |
-| §8 特訓カード7枚 | `sim/training.py` の `CARDS` | `scripts/check_project.py` [4]（スペシャル20種の命名） |
-| §8 相反カード（D-02） | `sim/training.py` の `FORBIDDEN_PAIRS` | 同上 |
-| §9 行動に秒数（ループ#1） | `sim/constants.py` | `scripts/check_project.py` [2] |
-| §10 戦術・方針・監督 | `sim/model.py` `sim/engine.py` | `tests/test_game.py` |
-| §11 プリセット | `sim/presets.py` | `scripts/check_project.py` [5]（能力合計が一致） |
-| リーグ・シーズン | `sim/league.py` `sim/career.py` | `tests/test_game.py` / `scripts/check_project.py` [6] |
-| 対話画面 | `sim/ui.py` | `tests/test_game.py`（入力を注入して14節＋シーズン締めまで歩く） |
-| §7 生まれ持った性質（D-11） | `sim/model.py` の `cover_range` / `vision_range` | `tests/test_movement.py` |
-| §9 一人一人考えて動く（D-12） | `sim/engine.py` の `_think` / `_decide_*` | `tests/test_movement.py`（共通の流れを引いた残り） |
-| §9 撃つ気（D-13） | `sim/engine.py` の `_shoot_will` | `tests/test_ball_decisions.py` |
-| §9 出す相手を選ぶ（D-14） | `sim/engine.py` の `_try_pass` | `tests/test_ball_decisions.py` |
-| 試合の再生（画面用） | `sim/engine.py` の `record=True` | `tests/test_replay.py` |
-| ブラウザで遊ぶ | `web/` 一式 | `tests/test_web_api.py` / `scripts/check_project.py` [10] |
-| 複数シーズンの通し | — | `tests/test_long_run.py`（3シーズン） |
-| 相性（じゃんけん関係） | `sim/batch.py` | `scripts/check_project.py` [7] |
-| lint・型チェック | `pyproject.toml` | `scripts/check_project.py` [9] |
-| 実測と現実の相場の照合 | `scripts/measure.py` | `scripts/check_project.py` [11] / `tests/test_measure.py` |
+| §6 MVP | `src/sim/engine.ts` `src/sim/model.ts` `src/sim/training.ts` | `tests/sim.test.ts` |
+| §6 再現性（D-08・D-16） | `src/sim/engine.ts` `src/sim/pyrandom.ts` `src/sim/detmath.ts` | `tests/sim.test.ts`（同じシードで同じ結果）／ `tests/pyrandom.test.ts` |
+| Python 版との同一性（D-15） | `tests/golden/` | `tests/golden.test.ts` `tests/cli.test.ts`（Python 版の出力と1値ずつ照合） |
+| §7 タイプ判定 | `src/sim/model.ts` の `judgeType` | `tests/sim.test.ts`（全カード20回以内に変化・組み合わせ全件） |
+| §8 特訓カード7枚 | `src/sim/training.ts` の `CARDS` | `scripts/check_project.ts` [4]（スペシャル20種の命名） |
+| §8 相反カード（D-02） | `src/sim/training.ts` の `FORBIDDEN_PAIRS` | 同上 |
+| §9 行動に秒数（ループ#1） | `src/sim/constants.ts` | `scripts/check_project.ts` [2] |
+| §10 戦術・方針・監督 | `src/sim/model.ts` `src/sim/engine.ts` | `tests/game.test.ts` |
+| §11 プリセット | `src/sim/presets.ts` | `scripts/check_project.ts` [5]（能力合計が一致） |
+| リーグ・シーズン | `src/sim/league.ts` `src/sim/career.ts` | `tests/game.test.ts` / `scripts/check_project.ts` [6] |
+| 対話画面 | `src/cli/ui.ts` | `tests/game.test.ts` `tests/cli.test.ts`（入力を注入して14節＋シーズン締めまで歩く） |
+| §7 生まれ持った性質（D-11） | `src/sim/model.ts` の `cover_range` / `vision_range` | `tests/movement.test.ts` |
+| §9 一人一人考えて動く（D-12） | `src/sim/engine.ts` の `think` / `decide*` | `tests/movement.test.ts`（共通の流れを引いた残り） |
+| §9 撃つ気（D-13） | `src/sim/engine.ts` の `shootWill` | `tests/ball_decisions.test.ts` |
+| §9 出す相手を選ぶ（D-14） | `src/sim/engine.ts` の `tryPass` | `tests/ball_decisions.test.ts` |
+| 試合の再生（画面用） | `src/sim/engine.ts` の `record=true` | `tests/replay.test.ts` |
+| ブラウザで遊ぶ | `src/web/` 一式・`web/index.html` | `tests/web_api.test.ts` / `scripts/check_project.ts` [10] |
+| 複数シーズンの通し | — | `tests/long_run.test.ts`（3シーズン） |
+| 相性（じゃんけん関係） | `src/sim/batch.ts` `src/node/batch_pool.ts` | `scripts/check_project.ts` [7] |
+| 型チェック | `tsconfig.json` | `scripts/check_project.ts` [9] |
+| 実測と現実の相場の照合 | `scripts/measure.ts` | `scripts/check_project.ts` [11] / `tests/measure.test.ts` |
 
 ### 相場との照合の仕方（2026-10-01・ループ#5で作り直し）
 
-`python scripts/measure.py` が現実のサッカーの相場と照合している（出典はスクリプト内）。
+`node scripts/measure.ts` が現実のサッカーの相場と照合している（出典はスクリプト内）。
 
 🔴 **相場は「リーグの平均」なので、平均と比べる。**
    プリセット6チームは「1種類のカードだけ20回」という極端な型で、
@@ -375,4 +376,4 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
    ← これが無いと、平均だけ合わせて中身がめちゃくちゃでも緑になる
 
 `KNOWN_RED` は **2026-10-01 のループ#5/#6 で空になった**。
-増やすときは報告書に理由を書く（`tests/test_measure.py` が空であることを固定している）。
+増やすときは報告書に理由を書く（`tests/measure.test.ts` が空であることを固定している）。

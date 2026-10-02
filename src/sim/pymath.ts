@@ -123,50 +123,26 @@ export function floorDiv(a: number, b: number): number {
 
 // ---------------------------------------------------------------- hypot
 
-function split(x: number): [number, number] {
-  const t = x * 134217729.0; // 2^27 + 1（Veltkamp の定数）
-  const hi = t - (t - x);
-  return [hi, x - hi];
-}
-
-function dlMul(x: number, y: number): [number, number] {
-  const [xh, xl] = split(x);
-  const [yh, yl] = split(y);
-  const p = xh * yh;
-  const q = xh * yl + xl * yh;
-  const z = p + q;
-  const zz = p - z + q + xl * yl;
-  return [z, zz];
-}
-
-function dlFastSum(a: number, b: number): [number, number] {
-  const x = a + b;
-  const z = x - a;
-  return [x, b - z];
-}
-
-function frexpExp(x: number): number {
-  // x = m × 2^e（0.5 <= m < 1）の e を返す。x は正の正規化数
-  const buf = new DataView(new ArrayBuffer(8));
-  buf.setFloat64(0, x);
-  const biased = (buf.getUint32(0) >>> 20) & 0x7ff;
-  return biased - 1022;
-}
+// 🔑 試合中に1試合で数十万回呼ばれる。配列や DataView を毎回作ると遅いので、
+//    作業用の領域は1つだけ持ち、計算は1行ずつ書き下す（手順は CPython の vector_norm のまま）
+const SCRATCH = new DataView(new ArrayBuffer(8));
+const VELTKAMP = 134217729.0; // 2^27 + 1（数を上下半分に分ける定数）
 
 /**
  * CPython 3.11 の `math.hypot(x, y)`（`vector_norm`）。
  *
  * 🔑 2乗を誤差なしで足し、最後に1回だけ平方根を補正する。
- *    Math.hypot とは最後のビットが違うことがあり、試合が別物になる。
+ *    Math.hypot とは最後のビットが違うことがあり（400件中129件）、試合が別物になる。
  */
 export function hypot(x: number, y: number): number {
   const ax = Math.abs(x);
   const ay = Math.abs(y);
   if (ax === Infinity || ay === Infinity) return Infinity;
-  if (Number.isNaN(ax) || Number.isNaN(ay)) return Number.NaN;
-  const max = Math.max(ax, ay);
+  if (ax !== ax || ay !== ay) return Number.NaN;
+  const max = ax > ay ? ax : ay;
   if (max === 0) return 0;
-  const maxE = frexpExp(max);
+  SCRATCH.setFloat64(0, max);
+  const maxE = ((SCRATCH.getUint32(0) >>> 20) & 0x7ff) - 1022;
   if (maxE < -1023) {
     const DBL_MIN = 2.2250738585072014e-308;
     return DBL_MIN * hypot(ax / DBL_MIN, ay / DBL_MIN);
@@ -175,17 +151,51 @@ export function hypot(x: number, y: number): number {
   let csum = 1.0;
   let frac1 = 0.0;
   let frac2 = 0.0;
-  for (const v of [ax, ay]) {
-    const s = v * scale;
-    const [prHi, prLo] = dlMul(s, s);
-    const [smHi, smLo] = dlFastSum(csum, prHi);
-    csum = smHi;
-    frac1 += prLo;
-    frac2 += smLo;
-  }
+
+  // x の2乗を誤差なしで（Dekker の掛け算）→ csum へ誤差なしで足す
+  let v = ax * scale;
+  let t = v * VELTKAMP;
+  let hi = t - (t - v);
+  let lo = v - hi;
+  let p = hi * hi;
+  let q = hi * lo + lo * hi;
+  let prHi = p + q;
+  let prLo = p - prHi + q + lo * lo;
+  let smHi = csum + prHi;
+  let smLo = prHi - (smHi - csum);
+  csum = smHi;
+  frac1 += prLo;
+  frac2 += smLo;
+
+  // y も同じ
+  v = ay * scale;
+  t = v * VELTKAMP;
+  hi = t - (t - v);
+  lo = v - hi;
+  p = hi * hi;
+  q = hi * lo + lo * hi;
+  prHi = p + q;
+  prLo = p - prHi + q + lo * lo;
+  smHi = csum + prHi;
+  smLo = prHi - (smHi - csum);
+  csum = smHi;
+  frac1 += prLo;
+  frac2 += smLo;
+
   let h = Math.sqrt(csum - 1.0 + (frac1 + frac2));
-  const [prHi, prLo] = dlMul(-h, h);
-  const [smHi, smLo] = dlFastSum(csum, prHi);
+  // 補正: (-h) × h を誤差なしで足し戻す
+  const nt = -h * VELTKAMP;
+  const nhi = nt - (nt - -h);
+  const nlo = -h - nhi;
+  const ht = h * VELTKAMP;
+  const hhi = ht - (ht - h);
+  const hlo = h - hhi;
+  p = nhi * hhi;
+  q = nhi * hlo + nlo * hhi;
+  prHi = p + q;
+  prLo = p - prHi + q + nlo * hlo;
+  smHi = csum + prHi;
+  smLo = prHi - (smHi - csum);
   csum = smHi;
   frac1 += prLo;
   frac2 += smLo;

@@ -20,8 +20,7 @@
     <div class="boot-bar"><div id="bootFill" class="boot-fill"></div></div>
     <p id="bootMsg" class="boot-msg">準備しています…</p>
     <p class="boot-note">
-      試合の計算はすべて<strong>この端末の中</strong>で行います。<br>
-      最初だけ Python の実行環境を読み込むので少し待ちます（2回目以降は速くなります）。
+      試合の計算はすべて<strong>この端末の中</strong>で行います。
     </p>
   </div>
 </section>
@@ -236,10 +235,6 @@
   <button id="errorClose" class="btn">閉じる</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.js"></script>
-<script src="sprites.js"></script>
-<script src="pitch.js"></script>
-<script src="bridge.js"></script>
-<script src="main.js"></script>
+<script type="module" src="js/web/main.js"></script>
 </body>
 </html>
