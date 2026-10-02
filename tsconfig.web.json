@@ -6,6 +6,10 @@
   "compilerOptions": {
     "noEmit": false,
     "noEmitOnError": true,
+    // 🔴 配る JS にコメントを載せない。ここに書いた説明は**そのまま公開される**
+    //    （2026-10-02 に取引先の名前が1件、公開一歩手前まで行った）。
+    //    手元のソースは何も変わらない。変わるのは `web/dist/js/` だけ。
+    "removeComments": true,
     "rewriteRelativeImportExtensions": true,
     "outDir": "web/dist/js",
     "rootDir": "src",
