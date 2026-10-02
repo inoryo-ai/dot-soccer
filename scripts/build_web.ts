@@ -30,7 +30,7 @@ export const DIST = join(WEB, "dist");
 
 /* 🔑 `lab.html` は**見比べ用の検証ページ**。ゲーム本体からは辿れない。
       配るのは、オーナーが同じURLで開いて見比べられるようにするため。 */
-export const STATIC_FILES = ["index.html", "style.css", "lab.html"] as const;
+export const STATIC_FILES = ["index.html", "style.css", "lab.html", "pitch3d.html"] as const;
 
 /**
  * そのまま配る入れもの（中身は触らない）。
@@ -51,7 +51,8 @@ export const EXPECTED_JS = [
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js",
   "web/api.js", "web/city.js", "web/fx.js", "web/iso.js", "web/lab.js", "web/main.js",
-  "web/pitch.js", "web/room.js", "web/sprites.js", "web/voxel.js",
+  "web/field3d.js", "web/pitch.js", "web/pitch3d.js", "web/room.js", "web/sprites.js",
+  "web/voxel.js",
 ] as const;
 
 /**

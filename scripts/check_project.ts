@@ -291,6 +291,7 @@ function checkTools(): void {
 const PAGES: Record<string, string> = {
   "main.ts": "index.html",
   "lab.ts": "lab.html",
+  "pitch3d.ts": "pitch3d.html",
 };
 
 function checkDomContract(): void {

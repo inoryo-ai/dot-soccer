@@ -44,13 +44,14 @@ export interface Kit {
 }
 
 /** いまの動き。**見た目だけ**で、試合の結果には関わらない */
-export type Pose = "stand" | "run" | "sprint" | "kick" | "cheer" | "tired";
+export type Pose = "stand" | "run" | "sprint" | "kick" | "cheer" | "tired" | "hold";
 
 /* ------------------------------------------------------------ 投影 */
 
-interface Basis { eye: Vec3; right: Vec3; up: Vec3; fwd: Vec3 }
+export interface Basis { eye: Vec3; right: Vec3; up: Vec3; fwd: Vec3 }
 
-function basisOf(cam: Cam): Basis {
+/** カメラの姿勢を1回だけ作る。1コマの中で何度も呼ばない（毎回三角関数を引くため） */
+export function basisOf(cam: Cam): Basis {
   const cp = Math.cos(cam.pitch);
   const sp = Math.sin(cam.pitch);
   const cy = Math.cos(cam.yaw);
@@ -71,9 +72,10 @@ function basisOf(cam: Cam): Basis {
   return { eye, right, up, fwd };
 }
 
-interface P2 { x: number; y: number; d: number }
+export interface P2 { x: number; y: number; d: number }
 
-function project(b: Basis, cam: Cam, p: Vec3): P2 | null {
+/** 世界の点を画面へ。カメラの後ろなら null */
+export function project(b: Basis, cam: Cam, p: Vec3): P2 | null {
   const vx = p.x - b.eye.x;
   const vy = p.y - b.eye.y;
   const vz = p.z - b.eye.z;
@@ -232,6 +234,11 @@ function body(kit: Kit, p: Pose, t: number): Box[] {
   }
   if (p === "tired") {
     return parts(kit, legL, legR, armL * 0.5, armR * 0.5, bob, 0.30);
+  }
+  if (p === "hold") {
+    /* 🔑 ボールを持っている。小刻みに足を動かしつつ**腕を開いて前へ出す**＝
+          体でボールを隠している形。走りとは別物だと一目で分かる必要がある。 */
+    return parts(kit, s * 0.22, -s * 0.22, -0.55, 0.55, bob * 0.5, 0.12);
   }
   const lean = p === "sprint" ? 0.34 : p === "run" ? 0.18 : 0.02;
   armL += c * 0.04;
