@@ -837,10 +837,47 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 
 /* --------------------------------------------------------------- 試合 */
 
-.screen-match {
-  position: relative;
-  padding: calc(var(--px) * 4) calc(var(--px) * 4) calc(var(--px) * 10);
+/* 🔴 試合は**全画面**にする（2026-10-03 オーナー指摘「小さすぎて見えない」）。
+      得点板・実況・操作を縦に積むと、積んだぶんだけ盤が小さくなる。
+      盤を画面いっぱいに置き、ほかは**その上に重ねる**。
+   🔑 盤の倍率は `pitch.ts` の fit() が整数倍で入れる。ここで寸法を決めない。 */
+.screen-match.is-on {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--edge);
 }
+
+.screen-match .pitch-wrap {
+  max-width: none;
+  width: auto;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.screen-match #pitch { width: auto; border: 0; }
+
+/* 重ねるものは、盤の上に浮かせる */
+.screen-match .scoreboard,
+.screen-match .ticker,
+.screen-match .match-controls {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  margin: 0;
+  width: min(44rem, calc(100vw - var(--px) * 8));
+}
+.screen-match .scoreboard { top: calc(var(--px) * 4); }
+/* 🔑 操作ボタンの高さ（22）＋上下の余白ぶん上に置く。
+      20 だと実況の下端とボタンが重なった（2026-10-03 の目視）。 */
+.screen-match .ticker { bottom: calc(var(--px) * 32); }
+.screen-match .match-controls { bottom: calc(var(--px) * 4); width: auto; }
 
 /* 得点板。試合中いちばん見る場所なので、前に出ている太さ（6px）を使う */
 .scoreboard {

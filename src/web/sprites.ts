@@ -49,15 +49,25 @@ function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h:
 }
 
 /**
+ * いまの動き。**見た目を変えるだけで、試合の結果には一切関わらない**。
+ *
+ * 🔴 どれに当てはまるかを決めるのは `pitch.ts`（リプレイの数字から読む）。
+ *    ここは「渡された姿勢で描く」だけ。判定をここに持つと、
+ *    絵のファイルが試合の規則を持つことになる（§6 の三層が崩れる）。
+ */
+export type Act = "stand" | "run" | "sprint" | "hold" | "cheer";
+
+/**
  * 1枚描く。
  *
  * @param dir    0..7（0=奥へ, 2=右, 4=手前へ, 6=左）
  * @param frame  0..3（走りのコマ）
- * @param moving 走っているか
+ * @param act    いまの動き
  */
 function draw(ctx: CanvasRenderingContext2D, colors: KitColors, dir: number, frame: number,
-              moving: boolean): void {
+              act: Act): void {
   const { shirt, shirtDark, shorts, skin, hair, socks } = colors;
+  const moving = act === "run" || act === "sprint";
 
   /* 横向きの度合い。真横ほど体を細く、奥/手前ほど広く見せる */
   const side = Math.abs(Math.sin((dir / DIRS) * Math.PI * 2));      // 0..1
@@ -65,11 +75,20 @@ function draw(ctx: CanvasRenderingContext2D, colors: KitColors, dir: number, fra
   const cx = Math.floor(W / 2);
   const left = cx - Math.floor(bodyW / 2);
 
-  /* 足の振り。止まっているときは軽く上下するだけ */
-  const swing = moving ? [0, 1, 0, -1][frame]! : 0;
-  const bob = moving ? [0, -1, 0, -1][frame]! : [0, 0, -1, 0][frame]!;
+  /* 足の振り。止まっているときは軽く上下するだけ。
+     🔑 全力（sprint）は振り幅を1段大きくする。コマ数は増やさない
+        （増やすと貯める枚数が倍になり、スマホで間に合わなくなる）。 */
+  const amp = act === "sprint" ? 2 : 1;
+  const swing = moving ? [0, 1, 0, -1][frame]! * amp : 0;
+  /* 喜ぶときは2コマで跳ねる。止まっているときの上下よりはっきり動かす */
+  const bob = act === "cheer" ? [0, -2, -3, -2][frame]!
+            : moving ? [0, -1, 0, -1][frame]! * (act === "sprint" ? 2 : 1)
+            : [0, 0, -1, 0][frame]!;
 
   const top = 2 + bob;
+  /* 🔑 前のめり。全力のときだけ、上半身を進む向きへ1ドットずらす。
+        足を速く振るだけだと「その場で足踏み」に見える。 */
+  const leanX = act === "sprint" ? (dir === 2 ? 1 : dir === 6 ? -1 : 0) : 0;
 
   /* 影は本体側に描かない（接地位置が変わるとズレるため、盤面側で描く） */
 
@@ -87,32 +106,42 @@ function draw(ctx: CanvasRenderingContext2D, colors: KitColors, dir: number, fra
   rect(ctx, left, top + 9, bodyW, 3, shorts);
 
   /* 胴（縁取り→本体の2段で、平たく見えないようにする） */
-  rect(ctx, left - 1, top + 4, bodyW + 2, 6, shirtDark);
-  rect(ctx, left, top + 4, bodyW, 5, shirt);
+  rect(ctx, left - 1 + leanX, top + 4, bodyW + 2, 6, shirtDark);
+  rect(ctx, left + leanX, top + 4, bodyW, 5, shirt);
   /* 光の当たる側（左上）を1段明るく＝立体に見せる */
-  rect(ctx, left, top + 4, 1, 4, shirt);
+  rect(ctx, left + leanX, top + 4, 1, 4, shirt);
 
-  /* 腕。走っているときは脚と逆に振る */
+  /* 腕。動きごとに違う形にする。ここがいちばん「何をしているか」を伝える */
   const armY = top + 5;
-  rect(ctx, left - 1, armY + (moving ? -swing : 0), 1, 4, skin);
-  rect(ctx, left + bodyW, armY + (moving ? swing : 0), 1, 4, skin);
+  if (act === "cheer") {
+    /* 両腕を上へ。喜びは**腕の形**で伝わる（跳ねるだけでは伝わらない） */
+    rect(ctx, left - 1, top - 1, 1, 5, skin);
+    rect(ctx, left + bodyW, top - 1, 1, 5, skin);
+  } else if (act === "hold") {
+    /* ボールを持っている。腕を少し開いて前へ出す＝体で隠している形 */
+    rect(ctx, left - 2, armY + 1, 2, 3, skin);
+    rect(ctx, left + bodyW, armY + 1, 2, 3, skin);
+  } else {
+    rect(ctx, left - 1 + leanX, armY + (moving ? -swing : 0), 1, 4, skin);
+    rect(ctx, left + bodyW + leanX, armY + (moving ? swing : 0), 1, 4, skin);
+  }
 
   /* 頭 */
-  rect(ctx, cx - 2, top, 4, 4, skin);
+  rect(ctx, cx - 2 + leanX, top, 4, 4, skin);
   /* 髪。奥を向いているときは後頭部なので広く塗る */
   const back = dir === 0 || dir === 1 || dir === 7;
-  rect(ctx, cx - 2, top, 4, back ? 3 : 2, hair);
+  rect(ctx, cx - 2 + leanX, top, 4, back ? 3 : 2, hair);
   /* 手前を向いているときだけ目を打つ（1ドットで十分「顔」に見える） */
   if (dir === 3 || dir === 4 || dir === 5) {
-    dot(ctx, cx - 1, top + 2, "#2a1a10");
-    dot(ctx, cx + 1, top + 2, "#2a1a10");
+    dot(ctx, cx - 1 + leanX, top + 2, "#2a1a10");
+    dot(ctx, cx + 1 + leanX, top + 2, "#2a1a10");
   }
 }
 
 /** その組み合わせの1枚を返す（無ければ描いて貯める） */
 export function get(teamKey: string, colors: KitColors, dir: number, frame: number,
-                    moving: boolean): HTMLCanvasElement {
-  const k = `${teamKey}:${dir}:${frame}:${moving ? 1 : 0}`;
+                    act: Act): HTMLCanvasElement {
+  const k = `${teamKey}:${dir}:${frame}:${act}`;
   const hit = cache.get(k);
   if (hit) return hit;
 
@@ -122,7 +151,7 @@ export function get(teamKey: string, colors: KitColors, dir: number, frame: numb
   const ctx = c.getContext("2d");
   if (ctx === null) throw new Error("ドット絵を描く canvas が使えない");
   ctx.imageSmoothingEnabled = false;
-  draw(ctx, colors, dir, frame, moving);
+  draw(ctx, colors, dir, frame, act);
   cache.set(k, c);
   return c;
 }

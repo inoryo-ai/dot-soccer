@@ -56,7 +56,9 @@ const V = (): View => {
  * 🔑 上の表示板（`#hudBar`）は画面の外にある1本なので、ここでまとめて出し入れする
  *    （2026-10-02 の街ハブ化）。タイトルとチーム作成では、まだチームが無いので出さない。
  */
-const NO_HUD = new Set(["boot", "setup"]);
+/* 🔑 試合は全画面なので、上の表示板も出さない（2026-10-03）。
+      試合中に見たいのは得点板であって、順位や節ではない。 */
+const NO_HUD = new Set(["boot", "setup", "match"]);
 
 /**
  * 画面ごとの背景の絵（`web/bg/` に置いたもの）。
@@ -931,6 +933,22 @@ function main(): void {
     $("mcSpeed").textContent = speedLabel(SPEEDS[speedAt]!);
   });
   $("mcSkip").addEventListener("click", () => Pitch.skipToEnd());
+
+  /* 全画面。🔑 盤の倍率は整数なので、窓にブラウザの枠があると高さが足りず2倍で止まる。
+     全画面にすると 1920×1080 がそのまま使えて3倍になる（`pitch.ts` の fit()）。 */
+  $("mcFull").addEventListener("click", () => {
+    const btn = $<HTMLButtonElement>("mcFull");
+    if (document.fullscreenElement === null) {
+      /* 🔑 失敗を黙らせない。ブラウザや設定によっては断られる */
+      document.documentElement.requestFullscreen().catch((e: unknown) => {
+        showError(`全画面にできませんでした（${e instanceof Error ? e.message : String(e)}）。`
+                  + "  ブラウザの全画面（F11）でも同じ大きさになります。");
+      });
+    } else {
+      void document.exitFullscreen();
+    }
+    btn.textContent = document.fullscreenElement === null ? "全画面をやめる" : "全画面にする";
+  });
   $("matchDone").addEventListener("click", () => {
     Pitch.stop();
     renderHome();

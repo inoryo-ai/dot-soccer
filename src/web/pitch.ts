@@ -52,6 +52,9 @@ const PAD_BOTTOM = 62;         // 下の全体図のぶん空ける
 
 const STRIPES = 26;
 const PASS_ARC_M = 2.6;        // 飛んでいる間の最大の高さ（m・見た目だけ）
+/* 🔑 どちらも**見た目の閾値**。試合の結果には関わらない（§6 の三層） */
+const SPRINT_MS = 5.2;         // これより速ければ「全力」の絵にする（m/s）
+const CHEER_TICKS = 6;         // ゴールのあと何秒ぶん喜ぶか
 const JUMP_M = 6.0;            // これ以上ボールが動いたら「蹴った」とみなす
 
 /* 🔴 ここの色は `web/style.css` の `:root` と**同じ値にそろえる**（2026-10-02）。
@@ -186,6 +189,37 @@ export function attach(canvasEl: HTMLCanvasElement): void {
   ctx = canvas.getContext("2d", { alpha: false });
   if (ctx === null) throw new Error("ピッチを描く canvas が使えない");
   ctx.imageSmoothingEnabled = false;
+  fit();
+  globalThis.addEventListener("resize", fit);
+}
+
+/**
+ * 画面に合わせて盤を**できるだけ大きく**出す。
+ *
+ * ─────────────────────────────────────────────────────────────
+ * 🔴 2026-10-03 オーナー指摘「小さすぎて見えない」
+ * ─────────────────────────────────────────────────────────────
+ * それまでは CSS の `max-width` で頭打ちにしていた。窓の高さが足りないと
+ * 2倍の条件から外れて `44rem`（≒750px）まで落ちるので、
+ * フルHDで見ているのに盤だけ小さい、という状態になっていた。
+ *
+ * 🔑 **倍率は整数だけ。** 1.7倍のような端数にすると、1ドットが 2px の列と
+ *    3px の列に割れて縞のムラが出る（`image-rendering: pixelated` はムラを消さない）。
+ *    入る中でいちばん大きい整数倍を選び、余りは左右上下の余白にする。
+ * 🔑 盤は 640×360（16:9）。**3倍がちょうど 1920×1080** で、フルHDに隙間なく収まる。
+ */
+export function fit(): void {
+  const cv = canvas;
+  if (cv === null) return;
+  /* 🔴 **余白を引かない。** 得点板・実況・操作は盤の上に重ねるので、盤は画面を全部使える。
+        ここで 16px でも引くと、全画面（1080px）のとき `1080-16 = 1064` となり
+        `1064 / 360 = 2.95` で**3倍に届かず2倍に落ちる**。
+        16px の余白のために、フルHDがフルHDでなくなる。 */
+  const availW = globalThis.innerWidth;
+  const availH = globalThis.innerHeight;
+  const k = Math.max(1, Math.floor(Math.min(availW / cv.width, availH / cv.height)));
+  cv.style.width = `${cv.width * k}px`;
+  cv.style.height = `${cv.height * k}px`;
 }
 
 export function load(data: Replay, matchEvents: MatchEvent[], homeTeamName: string,
@@ -436,6 +470,16 @@ function draw(dt: number): void {
 
   const roster = rp.roster;
   const owner = fa[2];
+
+  /* 🔑 ゴールの直後だけ、入れたほうのチームが喜ぶ。
+        どのゴールかは**リプレイに入っている出来事から読むだけ**（新しい判定はしない）。
+        `null` なら誰も喜ばない。 */
+  const nowTick = Math.round(frameIndex * rp.sample_ticks);
+  let cheerSide: number | null = null;
+  for (const g of goalEvents) {
+    if (g.tick > nowTick) break;
+    if (nowTick - g.tick <= CHEER_TICKS) cheerSide = g.team === homeName ? 0 : 1;
+  }
   const list: { i: number; p: Projected; sp: number }[] = [];
   for (let i = 0; i < roster.length; i += 1) {
     const x = lerp(3 + i * 2);
@@ -469,9 +513,19 @@ function draw(dt: number): void {
     c.ellipse(p.x, p.y, Math.max(1.5, sx * 0.9), Math.max(0.8, sx * 0.4), 0, 0, Math.PI * 2);
     c.fill();
 
-    const moving = sp > 0.6;
+    /* いまの動きを選ぶ。
+       🔴 ここは**リプレイに入っている数字から読むだけ**で、新しい判定はしない
+          （試合の規則は `src/sim/` にしかない。D-15）。
+       🔑 優先順は 喜ぶ → 持っている → 全力 → 走り → 立ち。
+          重なったとき何を見せるかの順で、上ほど「その瞬間にしか無いもの」。 */
+    const act: Sprites.Act =
+        cheerSide !== null && roster[i]!.team === cheerSide ? "cheer"
+      : i === owner ? "hold"
+      : sp > SPRINT_MS ? "sprint"
+      : sp > 0.6 ? "run"
+      : "stand";
     const frame = Math.floor(phases[i]!) % Sprites.RUN_FRAMES;
-    const img = Sprites.get(kitKey, kit, Sprites.dirOf(facings[i]!), frame, moving);
+    const img = Sprites.get(kitKey, kit, Sprites.dirOf(facings[i]!), frame, act);
     /* 1ドットの大きさ。奥ほど小さい */
     const unit = Math.max(0.9, (p.scale * PLAYER_HEIGHT_M) / Sprites.H);
     const w = Sprites.W * unit;

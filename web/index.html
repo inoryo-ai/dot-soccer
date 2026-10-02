@@ -279,7 +279,9 @@
   </div>
 
   <div class="pitch-wrap">
-    <canvas id="pitch" width="480" height="360"></canvas>
+    <!-- 🔑 640×360（16:9）。3倍がちょうど 1920×1080 でフルHDに隙間なく収まる。
+         画面に合わせた倍率は `pitch.ts` の fit() が入れる（整数倍のみ）。 -->
+    <canvas id="pitch" width="640" height="360"></canvas>
   </div>
 
   <div id="goalFlash" class="goal-flash" hidden>
@@ -293,6 +295,9 @@
     <button id="mcPlay" class="btn">一時停止</button>
     <button id="mcSpeed" class="btn">速さ ×1（実時間）</button>
     <button id="mcSkip" class="btn">結果まで飛ばす</button>
+    <!-- 🔑 盤の倍率は整数だけ。窓にブラウザの枠がある状態では高さが足りず2倍で止まる。
+         全画面にすると 1920×1080 がそのまま使えて**3倍**になる。 -->
+    <button id="mcFull" class="btn">全画面にする</button>
   </div>
 
   <div id="matchResult" class="panel" hidden>
