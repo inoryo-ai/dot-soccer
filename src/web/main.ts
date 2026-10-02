@@ -11,6 +11,7 @@ import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
 import * as City from "./city.ts";
 import * as Fx from "./fx.ts";
 import * as Pitch from "./pitch.ts";
+import * as Room from "./room.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
 
@@ -61,6 +62,10 @@ function showScreen(id: string): void {
   for (const s of document.querySelectorAll(".screen")) s.classList.remove("is-on");
   $(id).classList.add("is-on");
   $("hudBar").hidden = NO_HUD.has(id);
+  /* 🔑 施設の中の絵は、その施設を開いたときだけ描く。
+        毎回描き直すのは、画面ごとに別の部屋だから（使い回すのは canvas 1枚だけ）。 */
+  const room = $<HTMLCanvasElement>("roomCanvas");
+  room.hidden = !Room.draw(room, id);
   window.scrollTo(0, 0);
 }
 

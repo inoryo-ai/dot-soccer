@@ -1113,6 +1113,26 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   }
 }
 
+/* ===================================== 施設の中の絵（2026-10-02 ラフ） */
+
+/* 🔴 街だけ立体にして中が白い板のままだと、**施設に入った感じがしない**。
+      入った先が「別のページ」ではなく「建物の中」に見えて、はじめて街が意味を持つ。
+   🔑 これは**背景**。読むのは手前のパネルなので、
+      いちばん後ろ（z-index 0）に敷き、操作は一切受けない。 */
+.room-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  /* 🔑 16:9 の絵をそのまま引き伸ばす。フルHD（1920×1080）はちょうど3倍 */
+  object-fit: cover;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+/* 🔑 背景より前に出す。敷いただけだとパネルの下に潜って読めなくなる */
+.screen, .hud { position: relative; z-index: 1; }
+
 /* ============================================ 街ハブ（2026-10-02 オーナー指示） */
 
 /* 🔴 街が常のホーム。施設を選んで入り、戻ってくる。
@@ -1259,9 +1279,13 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   :root { --px: 3px; }
   html, body { font-size: 17px; }
 
-  .tab-body { max-width: 1180px; }
+  /* 🔴 本文は画面いっぱいに広げない（2026-10-02 ラフ）。
+        広げると、後ろに描いた施設の中の絵が**1ドットも見えなくなる**。
+        ラフの構図は「部屋の上にパネルが浮いている」なので、
+        左右に部屋が見えるぶんの余白を必ず残す。 */
+  .tab-body { max-width: 1120px; }
   .panel-wide { max-width: 880px; }
-  .place { max-width: 1180px; }
+  .place { max-width: 1120px; }
   /* タイトルは画面の真ん中に1枚だけ置く絵なので、広い画面では堂々と大きくする */
   .boot-box { max-width: 40rem; padding: calc(var(--px) * 20) calc(var(--px) * 16); }
   .logo { font-size: 4.6rem; }
