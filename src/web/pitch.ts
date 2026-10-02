@@ -519,9 +519,13 @@ function drawMinimap(rp: Replay, px: number, py: number, fa: number[], fb: numbe
                      t: number, k: number): void {
   const c = need(ctx, "描画");
   const cv = need(canvas, "canvas");
-  const mw = Math.min(160, cv.width * 0.36);
+  /* 🔴 2026-10-02 オーナー指摘で直した: 全体図が**画面の中央下**にあり、
+        盤のいちばん手前（＝自陣で競っているところ）を覆っていた。
+        覆われた選手は画面から消えるので、何が起きているのか追えない。
+        → **右下の隅へ寄せ、ひと回り小さくする。** 全体図は補助であって主役ではない。 */
+  const mw = Math.min(124, cv.width * 0.26);
   const mh = mw * (py / px);
-  const mx = (cv.width - mw) / 2;
+  const mx = cv.width - mw - 8;
   const my = cv.height - mh - 6;
 
   c.fillStyle = COLOR.minimapBg;

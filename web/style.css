@@ -83,6 +83,25 @@
 
 * { box-sizing: border-box; }
 
+/* ─────────────────────────────────────────────────────────────
+ * 🔴 `hidden` 属性を必ず効かせる（2026-10-02 オーナー指摘で発覚・D-21）
+ * ─────────────────────────────────────────────────────────────
+ * 指摘:「ゴールの画面が出続けてる」。
+ *
+ * 原因は `display` の上書き。ブラウザ内蔵の `[hidden] { display: none }` は
+ * **属性セレクタ1つぶんの強さしか無い**ので、`.goal-flash { display: grid }` のような
+ * class の指定に負ける。負けると `box.hidden = true`（`main.ts`）が**何もしない**。
+ *
+ * 🔴 しかも消えないだけでなく、**ページを開いた時点から出たまま**になる
+ *    （HTML に `hidden` を書いてあっても効かないため）。
+ * 🔴 気づきにくさの質が悪い: 画面は普通に動き、例外も出ず、テストも検査も緑のまま通る。
+ *
+ * 🔑 だから1要素ずつ直さない。`hidden` を使う要素は他にもある
+ *    （`#trainPanel` `#matchResult` `#errorBox` `#historyPanel` `#trainResult`）。
+ *    ここで**まとめて勝たせる**ことで、今後 `display` を足しても同じ踏み方をしない。
+ *    `!important` を使うのはこの1行だけ。 */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -101,10 +120,13 @@ html, body {
 body {
   min-height: 100dvh;
   /* 芝の縞を薄く敷く。上から見たピッチの気配を画面全体に残す */
+  /* 🔴 2026-10-02 の目視確認で薄くした。白を 50% で敷いていたので、
+        広い画面では**縞の壁紙**として前に出てきて、盤や街より目立っていた。
+        地は地でいい。気配が残る程度まで落とす。 */
   background-image:
     repeating-linear-gradient(90deg,
-      rgba(255, 255, 255, .5) 0 calc(var(--px) * 12),
-      rgba(0, 0, 0, .018)     calc(var(--px) * 12) calc(var(--px) * 24));
+      rgba(255, 255, 255, .14) 0 calc(var(--px) * 12),
+      rgba(0, 0, 0, .012)      calc(var(--px) * 12) calc(var(--px) * 24));
 }
 
 /* 🔑 縁取り。ドット絵の字は必ず輪郭を持っている。影ではなく**囲む** */
@@ -578,7 +600,7 @@ input[type="range"] {
 /* 🔑 下の帯に隠れないよう、本文の下に帯のぶんだけ余白を足す */
 .tab-body {
   padding: calc(var(--px) * 6) calc(var(--px) * 6)
-           calc(var(--bar-h) + var(--px) * 8);
+           calc(var(--bar-h) + var(--px) * 20);
   max-width: 48rem;
   margin: 0 auto;
 }
@@ -1050,7 +1072,7 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 /* --------------------------------------------------------- 画面が広い時 */
 
 @media (min-width: 720px) {
-  .tab-body { padding: calc(var(--px) * 8) calc(var(--px) * 8) calc(var(--bar-h) + var(--px) * 10); }
+  .tab-body { padding: calc(var(--px) * 8) calc(var(--px) * 8) calc(var(--bar-h) + var(--px) * 22); }
   .squad-list { grid-template-columns: 1fr 1fr; }
   /* 広い画面ではコマンドを**帯のまま中央に寄せる**。端まで伸ばすと間延びする */
   .tabs {
@@ -1063,10 +1085,174 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   }
 }
 
+/* ============================================ 街ハブ（2026-10-02 オーナー指示） */
+
+/* 🔴 街が常のホーム。施設を選んで入り、戻ってくる。
+      絵は `src/web/city.ts` が canvas に描く（画像ファイルを持ち込まない）。 */
+/* 🔑 幅は **480 の整数倍で止める**（既定は 2倍＝960px）。
+      盤と同じ理由で、中途半端な倍率にすると1ドットの幅が列ごとに割れて縞ムラが出る。
+      画面がそれより狭いときだけ、やむをえず伸縮させる。 */
+.city-wrap {
+  position: relative;
+  width: min(calc(100% - var(--px) * 8), 960px);
+  margin: calc(var(--px) * 5) auto;
+  padding: calc(var(--px) * 3);
+  background: var(--paper-dark);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), var(--drop) var(--drop) 0 var(--edge);
+}
+#cityCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: var(--w-hair) solid var(--edge);
+  /* 🔑 ドット絵を滲ませない（盤と同じ） */
+  image-rendering: pixelated;
+}
+
+/* 行ける場所。🔑 **canvas の当たり判定ではなく、重ねたボタン**。
+   位置は `city.ts` の SPOTS から JS が入れる（絵と座標の出どころを1つにする） */
+.spot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 0;
+  padding: calc(var(--px) * 2) calc(var(--px) * 4);
+  font: inherit;
+  text-align: center;
+  color: var(--ink);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), 0 var(--drop) 0 var(--edge);
+  cursor: pointer;
+  /* ふわっと上下する。止まっていると「押せる」ことに気づかれない */
+  animation: spot-bob 1.2s steps(2) infinite;
+}
+.spot-name { font-size: .92rem; font-weight: 900; letter-spacing: .04em; }
+.spot-note { font-size: .7rem; color: var(--ink-dim); }
+/* 試合が本筋なので、サッカー場だけ色を付けて一段大きくする */
+.spot-main { background: var(--home); }
+.spot-main .spot-name { font-size: 1.05rem; }
+.spot-main .spot-note { color: var(--edge); }
+.spot:hover { background: #fffef9; }
+.spot-main:hover { background: #ffb525; }
+.spot:active { transform: translate(-50%, calc(-50% + var(--drop))); box-shadow: none; }
+.spot:focus-visible { outline: var(--w-frame) solid var(--away); outline-offset: var(--px); }
+/* ▼ で「ここへ入る」を示す */
+.spot::after {
+  content: "▼";
+  display: block;
+  margin-top: calc(var(--px) * -1);
+  font-size: .62rem;
+  color: var(--edge);
+}
+@keyframes spot-bob {
+  0%, 100% { margin-top: 0; }
+  50%      { margin-top: calc(var(--px) * -2); }
+}
+
+/* ------------------------------------------------------------- 施設の中 */
+
+.place { max-width: 48rem; margin: 0 auto; padding: calc(var(--px) * 5); }
+
+.place-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--px) * 4);
+  margin-bottom: calc(var(--px) * 5);
+}
+/* 事務所はタブで縦に長くなるので、戻り道を上に貼り付けておく */
+.place-head-sticky {
+  position: sticky;
+  top: calc(var(--px) * 17);
+  z-index: 4;
+  margin: 0;
+  padding: calc(var(--px) * 4) calc(var(--px) * 5);
+  background: var(--paper);
+  border-bottom: var(--w-frame) solid var(--edge);
+}
+.place-title { margin: 0; font-size: 1.1rem; font-weight: 900; letter-spacing: .08em; }
+/* ◀ を付けて、戻る向きを形でも示す */
+.btn-back { min-height: calc(var(--px) * 18); font-size: .82rem; }
+.btn-back::before { content: "◀"; margin-right: calc(var(--px) * 2); }
+
+.actions-center { justify-content: center; }
+.actions-center .btn-big { width: auto; min-width: 11rem; }
+
+/* -------------------------------------------------------------- 商店街 */
+
+.shop-list { display: grid; gap: calc(var(--px) * 3); }
+.shop-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--px) * 4);
+  flex-wrap: wrap;
+  padding: calc(var(--px) * 3) calc(var(--px) * 4);
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel);
+}
+.shop-name { font-weight: 800; }
+.shop-note { font-size: .76rem; color: var(--ink-dim); }
+.shop-buy { display: flex; align-items: center; gap: calc(var(--px) * 4); }
+.shop-yen { font-weight: 900; color: var(--accent-dark); }
+
+/* ------------------------------------------------- フルHD（2026-10-02 指摘） */
+
+/* 🔴 指摘:「画面サイズが小さい。フルHDサイズでいいよ」。
+      1920×1080 で見ると、本文が 768px の細い帯になっていた（max-width が 44〜48rem）。
+
+   🔑 **広げ方は2段構え。**
+      ① `--px` を 2px → 3px にする。寸法をすべて `--px` の倍数で書いてあるので、
+         枠・影・間隔・コマンド帯の高さ・コマンドの絵が**まとめて1.5倍**になる。
+         個別に max-width をいじるより、画面の密度そのものが変わる。
+      ② 本文と盤の横幅を上げる。 */
+@media (min-width: 1200px) {
+  :root { --px: 3px; }
+  html, body { font-size: 17px; }
+
+  .tab-body { max-width: 1180px; }
+  .panel-wide { max-width: 880px; }
+  .place { max-width: 1180px; }
+  /* タイトルは画面の真ん中に1枚だけ置く絵なので、広い画面では堂々と大きくする */
+  .boot-box { max-width: 40rem; padding: calc(var(--px) * 20) calc(var(--px) * 16); }
+  .logo { font-size: 4.6rem; }
+  /* 3列。2列のままだと1枚が間延びして、名前と数字の間が開きすぎる */
+  .squad-list { grid-template-columns: 1fr 1fr 1fr; }
+  .tabs { width: min(1180px, 100vw); }
+
+  /* 試合画面は盤の幅に全部そろえる。横幅がばらばらだと中心が定まらない */
+  .scoreboard, .ticker, .match-controls { max-width: 960px; }
+  #matchResult:not([hidden]) { width: min(960px, calc(100vw - var(--px) * 8)); }
+}
+
+/* 🔴 ドット絵は**整数倍でしか拡大しない。**
+      canvas は 480×360。1100px のような中途半端な幅にすると倍率が 2.29倍になり、
+      1ドットが 2px の列と 3px の列に分かれて、縞のようなムラが出る
+      （`image-rendering: pixelated` はムラを消さない。滲ませないだけ）。
+      だから **960px ＝ ちょうど2倍** で止める。
+   🔑 高さも条件に入れる。960×720 の盤に得点板・実況・操作を足すと約 940px 必要で、
+      縦が足りない窓で2倍にすると操作ボタンが画面の外へ出る。
+      足りないときは今までどおり幅に合わせて伸ばす（滲まないので実害は小さい）。 */
+@media (min-width: 1200px) and (min-height: 940px) {
+  .pitch-wrap { max-width: max-content; }
+  #pitch { width: 960px; }
+}
+
+/* 街も同じ考え方。1520px 以上あるときだけ **3倍（1440px）** まで上げる。
+   フルHD（1920px）では街が画面いっぱいに広がる */
+@media (min-width: 1520px) {
+  .city-wrap { width: 1440px; }
+}
+
 /* 🔴 動きを減らす設定の人には、刻んだ動きも出さない（点滅と跳ねは特につらい） */
 @media (prefers-reduced-motion: reduce) {
   .boot-fill { transition: none; }
   .btn:active, .chip:active, .player:active, .tab:active { transform: none; }
+  /* 🔑 街の目印の上下動は、止めても位置がずれないよう transform を保つ */
+  .spot { animation: none; }
+  .spot:active { transform: translate(-50%, -50%); }
   .tab-page.is-on,
   #trainPanel:not([hidden]), #trainPanel:not([hidden])::before,
   #matchResult:not([hidden]), #matchResult:not([hidden])::before,
