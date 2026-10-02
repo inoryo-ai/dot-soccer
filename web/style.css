@@ -1119,6 +1119,20 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
       入った先が「別のページ」ではなく「建物の中」に見えて、はじめて街が意味を持つ。
    🔑 これは**背景**。読むのは手前のパネルなので、
       いちばん後ろ（z-index 0）に敷き、操作は一切受けない。 */
+/* 🔴 絵の背景（2026-10-03 D-26）。手続きで描いた背景と**同じ場所・同じ役目**。
+      どちらか一方だけが出る（`main.ts` が出し分ける）。
+   🔑 `pixelated` を付けない。写実寄りの絵は、拡大するとき滑らかに補間したほうがよい。
+      ドット絵（盤・街）とは扱いを分ける。 */
+.bg-photo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
 .room-bg {
   position: fixed;
   inset: 0;
@@ -1238,7 +1252,24 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   background: var(--paper);
   border-bottom: var(--w-frame) solid var(--edge);
 }
-.place-title { margin: 0; font-size: 1.1rem; font-weight: 900; letter-spacing: .08em; }
+/* 🔴 背景が絵になった画面では、地の上に字を置くだけだと**読めない**
+      （2026-10-03 の目視。「サッカー場」が木と観客に紛れた）。
+   🔑 札にして地を持たせる。影や縁取りだけで戦うと、絵が変わるたびに
+      読めたり読めなかったりする＝運になる。 */
+.place-title {
+  margin: 0;
+  padding: calc(var(--px) * 2) calc(var(--px) * 6);
+  font-size: 1.1rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  color: var(--ink-on-dark);
+  background: linear-gradient(var(--ui-lt) 0 45%, var(--ui) 45% 100%);
+  border: var(--w-frame) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 2);
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .45),
+              0 var(--drop) 0 rgba(20, 64, 122, .5);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .9);
+}
 /* ◀ を付けて、戻る向きを形でも示す */
 .btn-back { min-height: calc(var(--px) * 18); font-size: .82rem; }
 .btn-back::before { content: "◀"; margin-right: calc(var(--px) * 2); }

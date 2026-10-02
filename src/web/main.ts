@@ -58,14 +58,37 @@ const V = (): View => {
  */
 const NO_HUD = new Set(["boot", "setup"]);
 
+/**
+ * 画面ごとの背景の絵（`web/bg/` に置いたもの）。
+ *
+ * 🔴 ここに無い画面は、従来どおり `room.ts` が手続きで描く（D-26）。
+ *    絵が用意できた画面から1行ずつ移していける。
+ * 🔑 選手とピッチは**絵にしない**。商店街で買う見た目で色を差し替える仕様なので、
+ *    焼き込むと着せ替えが機能しなくなる。
+ */
+const BG_PHOTO: Record<string, string> = {
+  stadium: "bg/stadium.png",
+};
+
 function showScreen(id: string): void {
   for (const s of document.querySelectorAll(".screen")) s.classList.remove("is-on");
   $(id).classList.add("is-on");
   $("hudBar").hidden = NO_HUD.has(id);
-  /* 🔑 施設の中の絵は、その施設を開いたときだけ描く。
-        毎回描き直すのは、画面ごとに別の部屋だから（使い回すのは canvas 1枚だけ）。 */
+  /* 施設の背景。
+     🔴 **絵があればそれを敷き、無ければ手続きで描く**（2026-10-03 D-26）。
+        絵と手続きが同時に出ることは無い。差し替え口をここ1か所にしておくと、
+        絵が増えるたびに `BG_PHOTO` へ1行足すだけで済む。 */
+  const photo = $("bgPhoto");
   const room = $<HTMLCanvasElement>("roomCanvas");
-  room.hidden = !Room.draw(room, id);
+  const src = BG_PHOTO[id];
+  if (src !== undefined) {
+    photo.style.backgroundImage = `url("${src}")`;
+    photo.hidden = false;
+    room.hidden = true;
+  } else {
+    photo.hidden = true;
+    room.hidden = !Room.draw(room, id);
+  }
   window.scrollTo(0, 0);
 }
 

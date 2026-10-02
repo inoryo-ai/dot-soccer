@@ -17,6 +17,12 @@
 <!-- 施設の中の絵。`src/web/room.ts` が画面ごとに描き替える。
      🔑 画面ごとに canvas を置かず**1枚を使い回す**（id は1つしか持てないのと、
         絵は一度に1つしか見えないため）。読むのは手前のパネルなので、ここは背景に徹する。 -->
+<!-- 背景の絵（2026-10-03 D-26）。画面ごとに `web/bg/` の1枚を敷く。
+     🔑 canvas ではなく div ＋ background-image にしてある。写実寄りの絵は
+        拡大するときに**滑らかに補間したい**ので、ドット絵用の pixelated とは別扱い。 -->
+<div id="bgPhoto" class="bg-photo" aria-hidden="true" hidden></div>
+
+<!-- 絵が用意されていない画面は、従来どおり手続きで描く -->
 <canvas id="roomCanvas" class="room-bg" width="960" height="540" aria-hidden="true" hidden></canvas>
 
 <!-- ===========================================================================

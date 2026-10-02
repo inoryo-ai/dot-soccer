@@ -30,6 +30,19 @@ export const DIST = join(WEB, "dist");
 
 export const STATIC_FILES = ["index.html", "style.css"] as const;
 
+/**
+ * そのまま配る入れもの（中身は触らない）。
+ *
+ * 🔴 **2026-10-03 オーナー判断で、背景だけ絵を持ち込むことにした（D-26）。**
+ *    要件 §12「画像ファイルを持ち込まない」は、出どころの問題を起こさないための規則だった。
+ *    背景を手続きで描くのは密度に天井があり、そこが詰まったための方針変更。
+ *    🔑 **変えたのは背景だけ。** 選手とピッチは手続きのまま
+ *    （商店街で買う見た目で色を差し替える仕様なので、焼き込むと機能が壊れる）。
+ * 🔑 ここに入れたものは**中身をそのまま公開する**。絵の中に文字を描き込むときは、
+ *    取引先の名前や実名を入れない（`style.css` の頭と同じ注意）。
+ */
+export const STATIC_DIRS = ["bg"] as const;
+
 /** ブラウザで使う JS（`web/dist/js/` の下）。ここに無いものが出たら組み立て失敗。 */
 export const EXPECTED_JS = [
   "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
@@ -92,6 +105,15 @@ export function build(log: (line: string) => void = (l) => console.log(l)): numb
     const src = readFileSync(join(WEB, name), "utf8");
     writeFileSync(join(DIST, name), stripComments(src, name), "utf8");
   }
+  /* 絵はそのまま写す（コメントのような中身を持たないので、触る理由が無い） */
+  for (const dir of STATIC_DIRS) {
+    const from = join(WEB, dir);
+    if (!existsSync(from)) continue;
+    mkdirSync(join(DIST, dir), { recursive: true });
+    for (const p of listFiles(from)) {
+      writeFileSync(join(DIST, dir, relative(from, p)), readFileSync(p));
+    }
+  }
 
   try {
     execFileSync(process.execPath,
@@ -138,7 +160,13 @@ export function build(log: (line: string) => void = (l) => console.log(l)): numb
     const p = join(jsDir, f);
     const src = readFileSync(p, "utf8").replace(
       /(\bfrom\s*|\bimport\s*\(?\s*)"(\.{1,2}\/[\w./-]+\.js)"/g,
-      (_m, head: string, path: string) => `${head}"${path}?v=${stamp}"`);
+      (_m, head: string, path: string) => `${head}"${path}?v=${stamp}"`)
+      /* 🔴 背景の絵にも同じ刻印を付ける（2026-10-03）。
+            付けないと、絵を描き直したのにブラウザが**古い絵を出し続ける**。
+            しかも画面は普通に立ち上がるので、差し替えたつもりで気づけない
+            （`model.py` だけ古い写しが読まれた 2026-09-30 と同じ踏み方）。 */
+      .replace(/"(bg\/[\w./-]+\.(?:png|jpg|jpeg|webp|avif))"/g,
+               (_m, path: string) => `"${path}?v=${stamp}"`);
     writeFileSync(p, src, "utf8");
   }
   writeFileSync(join(DIST, "manifest.json"),
