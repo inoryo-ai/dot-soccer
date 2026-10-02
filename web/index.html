@@ -17,6 +17,20 @@
 <!-- 施設の中の絵。`src/web/room.ts` が画面ごとに描き替える。
      🔑 画面ごとに canvas を置かず**1枚を使い回す**（id は1つしか持てないのと、
         絵は一度に1つしか見えないため）。読むのは手前のパネルなので、ここは背景に徹する。 -->
+<!-- 🔴 デザイン由来の**動く背景**（2026-10-03 D-28）。
+     `web/scene/stadium.js` が `<stadium-scene>` を定義する。canvas 4枚で
+     空・観客席・屋根・芝（静止）／観客の揺れ・旗（12fps）／照明のちらつき・
+     フレア・LEDボード（30fps）／ドット絵の層 960×540 を描き分ける。
+     🔑 `variant`(day/night) と `screen`(title/menu/match/result/goal) で切り替わる。
+        画面外では自分で描画を止める。 -->
+<!-- 🔴 入れものを1枚かませる。`stadium.js` は connectedCallback で
+     `position:relative;width:100%;height:100%` を**インラインで**入れるので、
+     CSS の `position:fixed` が負ける（インラインのほうが強い）。
+     外側を固定して、中はその中で 100% にさせる。 -->
+<div id="bgScene" class="bg-scene" aria-hidden="true" hidden>
+  <stadium-scene id="bgSceneEl" variant="day" screen="title"></stadium-scene>
+</div>
+
 <!-- 背景の絵（2026-10-03 D-26）。画面ごとに `web/bg/` の1枚を敷く。
      🔑 canvas ではなく div ＋ background-image にしてある。写実寄りの絵は
         拡大するときに**滑らかに補間したい**ので、ドット絵用の pixelated とは別扱い。 -->
@@ -324,6 +338,9 @@
      🔑 ここに入るものは**見た目だけ**で、試合の規則は1行も持たない（§6）。 -->
 <div id="fxLayer" aria-hidden="true"></div>
 
+<!-- 🔑 module ではなく普通の script。カスタム要素をすぐ登録したいので、
+     main.js（module＝遅延実行）より先に読む -->
+<script src="scene/stadium.js"></script>
 <script type="module" src="js/web/main.js"></script>
 </body>
 </html>

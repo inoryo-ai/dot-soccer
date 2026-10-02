@@ -41,7 +41,7 @@ export const STATIC_FILES = ["index.html", "style.css"] as const;
  * 🔑 ここに入れたものは**中身をそのまま公開する**。絵の中に文字を描き込むときは、
  *    取引先の名前や実名を入れない（`style.css` の頭と同じ注意）。
  */
-export const STATIC_DIRS = ["bg"] as const;
+export const STATIC_DIRS = ["bg", "scene"] as const;
 
 /** ブラウザで使う JS（`web/dist/js/` の下）。ここに無いものが出たら組み立て失敗。 */
 export const EXPECTED_JS = [

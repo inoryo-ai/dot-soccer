@@ -68,8 +68,22 @@ const NO_HUD = new Set(["boot", "setup", "match"]);
  * 🔑 選手とピッチは**絵にしない**。商店街で買う見た目で色を差し替える仕様なので、
  *    焼き込むと着せ替えが機能しなくなる。
  */
-const BG_PHOTO: Record<string, string> = {
-  stadium: "bg/stadium.png",
+const BG_PHOTO: Record<string, string> = {};
+
+/**
+ * デザイン由来の**動く背景**を使う画面（D-28）。値は `<stadium-scene>` の `screen` 属性。
+ *
+ * 🔑 `title` / `menu` / `result` は同じ「引きの構え」。`menu` だけ少しぼかして暗くなるので、
+ *    手前にパネルを置く画面（チーム作成・サッカー場）に向く。
+ * 🔴 ここに無い画面は従来どおり `room.ts` が手続きで描く。
+ *    街・商店街・事務所の部品（`city.js` / `shop.js` / `office.js`）はデザイン側に発注済み。
+ * 🔴 `match` はまだ入れていない。デザインの `match` は**自前のピッチの絵も描く**ので、
+ *    本物の試合描画と重なる。組み合わせ方を決めてから入れる。
+ */
+const BG_SCENE: Record<string, string> = {
+  boot: "title",
+  setup: "menu",
+  stadium: "result",
 };
 
 function showScreen(id: string): void {
@@ -80,15 +94,20 @@ function showScreen(id: string): void {
      🔴 **絵があればそれを敷き、無ければ手続きで描く**（2026-10-03 D-26）。
         絵と手続きが同時に出ることは無い。差し替え口をここ1か所にしておくと、
         絵が増えるたびに `BG_PHOTO` へ1行足すだけで済む。 */
+  const scene = $("bgScene");
   const photo = $("bgPhoto");
   const room = $<HTMLCanvasElement>("roomCanvas");
+  const scr = BG_SCENE[id];
   const src = BG_PHOTO[id];
-  if (src !== undefined) {
+  scene.hidden = scr === undefined;
+  photo.hidden = src === undefined;
+  if (scr !== undefined) {
+    $("bgSceneEl").setAttribute("screen", scr);
+    room.hidden = true;
+  } else if (src !== undefined) {
     photo.style.backgroundImage = `url("${src}")`;
-    photo.hidden = false;
     room.hidden = true;
   } else {
-    photo.hidden = true;
     room.hidden = !Room.draw(room, id);
   }
   window.scrollTo(0, 0);

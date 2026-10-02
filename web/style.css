@@ -1160,6 +1160,15 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
       どちらか一方だけが出る（`main.ts` が出し分ける）。
    🔑 `pixelated` を付けない。写実寄りの絵は、拡大するとき滑らかに補間したほうがよい。
       ドット絵（盤・街）とは扱いを分ける。 */
+/* 🔴 デザイン由来の動く背景（D-28）。絵・手続きの背景と**同じ場所・同じ役目**。
+      3つのうち出るのは常に1つだけ（`main.ts` が出し分ける）。 */
+.bg-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .bg-photo {
   position: fixed;
   inset: 0;
