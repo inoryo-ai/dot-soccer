@@ -867,14 +867,25 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 .screen-match #pitch { width: auto; border: 0; }
 
 /* 重ねるものは、盤の上に浮かせる */
-.screen-match .ticker,
-.screen-match .match-controls {
+/* 🔴 実況と操作を**画面の真ん中から外す**（2026-10-03 の目視）。
+      中央下に置くと、いちばん見たいゴール前の攻防をそのまま塞いでいた。
+      デザインの配置に合わせ、実況は左下、操作は右上へ。 */
+.screen-match .ticker {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  left: calc(var(--px) * 7);
+  bottom: calc(var(--px) * 7);
   z-index: 4;
   margin: 0;
-  width: min(44rem, calc(100vw - var(--px) * 8));
+  width: min(28rem, calc(100vw - 320px - var(--px) * 20));
+}
+.screen-match .match-controls {
+  position: absolute;
+  right: calc(var(--px) * 7);
+  top: calc(var(--px) * 7);
+  z-index: 4;
+  margin: 0;
+  width: auto;
+  justify-content: flex-end;
 }
 /* 全体図。デザインの右下の箱に合わせる */
 .mini-map {
@@ -884,9 +895,11 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   z-index: 4;
   width: 300px;
   height: 195px;
-  background: rgba(20, 64, 122, .55);
+  /* 🔴 半透明にしたら芝に溶けて点が読めなかった（2026-10-03 の目視）。
+        不透明な濃い地に戻す。全体図は**一目で位置が分かる**ことが仕事。 */
+  background: #14407a;
   border: var(--w-frame) solid var(--ui-edge);
-  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .6);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .85);
   image-rendering: pixelated;
 }
 
@@ -899,8 +912,6 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 }
 /* 🔑 操作ボタンの高さ（22）＋上下の余白ぶん上に置く。
       20 だと実況の下端とボタンが重なった（2026-10-03 の目視）。 */
-.screen-match .ticker { bottom: calc(var(--px) * 32); }
-.screen-match .match-controls { bottom: calc(var(--px) * 4); width: auto; }
 
 /* 得点板。試合中いちばん見る場所なので、前に出ている太さ（6px）を使う */
 /* 🔴 デザインの得点板（D-29）。**横一列の区画**にする。
