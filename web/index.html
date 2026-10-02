@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#3b2a1b">
 <title>ドットサッカー育成（デモ）</title>
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="育成→試合→課題→特訓のループが回るドットサッカーのデモ。ブラウザの中だけで動きます。">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%231d7a3f'/><circle cx='8' cy='8' r='3' fill='%23fff'/></svg>">
+<!-- 🔑 アイコンもドットで描く（外部画像を読まないため）。芝の上にボールが1つ -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect width='16' height='16' fill='%233b2a1b'/><rect x='1' y='1' width='14' height='14' fill='%233fae5a'/><rect x='7' y='3' width='2' height='10' fill='%23eafbee'/><rect x='6' y='6' width='4' height='4' fill='%23fffdf3'/><rect x='7' y='7' width='2' height='2' fill='%233b2a1b'/></svg>">
 </head>
 <body>
 
@@ -76,13 +78,6 @@
     </div>
     <div id="hudRound" class="hud-round">—</div>
   </header>
-
-  <nav class="tabs" id="tabs">
-    <button class="tab is-on" data-tab="dash">ホーム</button>
-    <button class="tab" data-tab="squad">選手</button>
-    <button class="tab" data-tab="tactics">戦術</button>
-    <button class="tab" data-tab="table">順位表</button>
-  </nav>
 
   <div class="tab-body">
     <!-- ダッシュボード -->
@@ -187,6 +182,16 @@
       </div>
     </div>
   </div>
+
+  <!-- 🔴 コマンドは画面の**下**に固定する（2026-10-02 導線の変更）。
+       もとは上のタブだった＝親指から遠く、「次に押すもの」を上に探させていた。
+       絵は CSS が box-shadow で1ピクセルずつ打つ（外部画像を読まないため）。 -->
+  <nav class="tabs" id="tabs" aria-label="コマンド">
+    <button class="tab is-on" data-tab="dash">ホーム</button>
+    <button class="tab" data-tab="squad">選手</button>
+    <button class="tab" data-tab="tactics">戦術</button>
+    <button class="tab" data-tab="table">順位表</button>
+  </nav>
 </section>
 
 <!-- ============================================================== 試合 -->
@@ -234,6 +239,10 @@
   <p id="errorMsg"></p>
   <button id="errorClose" class="btn">閉じる</button>
 </div>
+
+<!-- 飛ぶ数字・知らせの帯・散る粒を置く層。`src/web/fx.ts` が中身を作る。
+     🔑 ここに入るものは**見た目だけ**で、試合の規則は1行も持たない（§6）。 -->
+<div id="fxLayer" aria-hidden="true"></div>
 
 <script type="module" src="js/web/main.js"></script>
 </body>

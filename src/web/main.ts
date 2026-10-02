@@ -8,6 +8,7 @@
 import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
+import * as Fx from "./fx.ts";
 import * as Pitch from "./pitch.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
@@ -354,18 +355,35 @@ function doTrain(): void {
         いまは「変えた項目（deltas）」の前後を、特訓後の選手一覧から読む。 */
   const after = view.squad.find((p) => p.index === who);
   const ups: string[] = [];
+  /* 🔑 飛ばす数字は **実際に動いた差**（now - before）にする。`r.deltas` は「かけようとした量」で、
+        上限に当たると実際はそこまで伸びない。要求量を飛ばすと、数字だけ増えて表は変わらない
+        ＝嘘になる。表に出している `before→now` と必ず同じ出どころにする。 */
+  const moved: number[] = [];
   for (const k of Object.keys(r.deltas)) {
     const before = r.visible_before[k] ?? r.hidden_before[k];
     const now = after?.visible[k] ?? after?.hidden[k];
     if (before !== undefined && now !== undefined && now !== before) {
       ups.push(`${k} ${before}→${now}`);
+      moved.push(now - before);
     }
   }
   box.append(el("div", "up", ups.length > 0 ? ups.join(" / ") : "（上限に達していて伸びませんでした）"));
-  box.append(el("div", r.before === r.after ? "" : "changed",
-                r.before === r.after
-                  ? `タイプ: ${r.after}（変化なし）`
-                  : `★ タイプが変わった: ${r.before} → ${r.after}`));
+  const typeChanged = r.before !== r.after;
+  box.append(el("div", typeChanged ? "changed" : "",
+                typeChanged
+                  ? `★ タイプが変わった: ${r.before} → ${r.after}`
+                  : `タイプ: ${r.after}（変化なし）`));
+
+  /* 🔴 数字が静かに変わるだけでは、特訓が効いたことに気づけない（`fx.ts` の頭に理由）。
+        伸びたぶんをその場から飛ばし、タイプが変わった時だけ帯と粒を足す。
+        🔑 演出は見た目だけ。ここで結果を作らない（上の `moved` は表と同じ値） */
+  for (const [i, d] of moved.entries()) {
+    Fx.floatNum(`${d > 0 ? "+" : ""}${d}`, box, i);
+  }
+  if (typeChanged) {
+    Fx.ribbon(`${r.player} は ${r.after} になった！`);
+    Fx.sparks(box);
+  }
 
   selectedCards = [];
   renderHome();
@@ -610,6 +628,8 @@ function showGoal(ev: MatchEvent | null): void {
   const box = $("goalFlash");
   $("goalWho").textContent = ev && ev.player ? `${ev.player}（${ev.team}）` : "";
   box.hidden = false;
+  /* 🔑 粒は枠が出てから撒く。先に撒くと、まだ幅のない要素の中心（＝画面の隅）から飛ぶ */
+  Fx.sparks(box, 12);
   clearTimeout(goalTimer);
   goalTimer = window.setTimeout(() => { box.hidden = true; }, 2600);
 }

@@ -3,39 +3,82 @@
  * ─────────────────────────────────────────────────────────────
  * 🔴 参考にするのは「様式」まで
  * ─────────────────────────────────────────────────────────────
- * 上から見たピッチ・ドット絵・メニュー主体の進行という**ジャンルの作法**を借りる。
- * 特定の作品のロゴ・キャラクター・画面そのものは複製しない（要件定義書 §12）。
- * 色・字送り・枠の形はここで独自に決めている。
+ * 上から見たピッチ・ドット絵・**コマンドを選んで進める**という
+ * 経営シミュレーションの作法を借りる（2026-10-02 オーナー指示）。
+ * 特定の作品のロゴ・キャラクター・配色そのもの・画面写真は複製しない（要件定義書 §12）。
+ * 色・字送り・枠の寸法・コマの刻み方はここで独自に決めている。
+ *
+ * ─────────────────────────────────────────────────────────────
+ * 🔑 この見た目を成り立たせている4つの決め事
+ * ─────────────────────────────────────────────────────────────
+ * ① **明るい地に、濃い輪郭。** 暗い画面をやめた。すべての面に同じ濃茶の枠を回し、
+ *    影はぼかさず4pxずらすだけ。ぼかすと「紙を切って重ねた」感じが消える。
+ * ② **すべてのピクセルは2の倍数。** 枠・影・間隔・animationの刻みを `--px`(2px) の
+ *    倍数だけで作る。中途半端な1pxが混ざると、拡大したとき滲んで見える。
+ * ③ **動きは `steps()` で刻む。** なめらかに動かすと現代のUIになってしまう。
+ *    4〜8コマに刻むと、同じ動きがドット絵の側に寄る。
+ * ④ **操作は常に画面の下にある。** タブを上から下へ移した。親指で届く位置に
+ *    コマンドを固定し、「次に押すもの」を探させない。
  *
  * 🔑 色は下の変数だけで決める。ここ以外に色を書かない
  *    （カードショップEDENで枠線の書き方が5通りに散り、太さが意味を失った）。
+ * 🔑 外部フォント・外部画像は読まない（§6「実行時に外部ライブラリを使わない」と同じ筋で、
+ *    画面も外へ通信しない）。ドットの気配は **縁取りと刻みと CSS で描いた絵** で出す。
  */
 
 :root {
-  /* 芝と盤面 */
-  --turf:        #1f7a44;
-  --turf-dark:   #1a6b3b;
-  --line:        #d8f0e0;
+  /* ----------------------------------------------------- ピクセルの単位
+     🔴 寸法はすべてこれの倍数で書く。`calc(var(--px) * n)` 以外を書かない */
+  --px: 2px;
 
-  /* 画面の地 */
-  --bg:          #10161c;
-  --bg-panel:    #1a232c;
-  --bg-raised:   #243140;
-  --edge:        #0a0f14;
-  --edge-light:  #3a4c60;
+  /* 芝と盤面 */
+  --turf:        #3fae5a;
+  --turf-dark:   #37a04f;
+  --line:        #eafbee;
+
+  /* 画面の地。**明るい紙の上に部品を置く** */
+  --paper:       #f6ead0;   /* 一番下の地。少し黄みのある紙 */
+  --paper-dark:  #e7d6b4;   /* 地の陰。溝や目地 */
+  --panel:       #fffdf3;   /* 面。ほぼ白だが白にしない（枠が浮くため） */
+  --panel-sunk:  #efe3c6;   /* 沈んだ面。入力欄・表の縞 */
+
+  /* 輪郭。🔴 枠はこの1色だけ。太さで意味を分ける（下の「枠の太さ」参照） */
+  --edge:        #3b2a1b;
+  --edge-soft:   #9a8463;   /* 意味を持たない仕切り線だけ */
+  --bevel:       #ffffff;   /* 面の上辺に入れる光。立ち上がりを出す */
 
   /* 文字 */
-  --ink:         #e8f0f6;
-  --ink-dim:     #94a8bb;
+  --ink:         #33261a;
+  --ink-dim:     #7d6a51;
+  --ink-on-dark: #fffdf3;
 
   /* 役割の色。**用途を混ぜない** */
-  --home:        #ffd23f;   /* 自チーム。画面で一番目立つ */
-  --away:        #4aa3ff;   /* 相手 */
-  --accent:      #35d07f;   /* 進める操作 */
-  --danger:      #ff5d5d;   /* 取り返しがつかない操作 */
-  --warn:        #ffab3f;
+  --home:        #f2a714;   /* 自チーム。画面で一番目立つ */
+  --home-dark:   #c7820a;
+  --away:        #3d8ed6;
+  --away-dark:   #2a6ba6;
+  --accent:      #2fa85a;   /* 進める操作 */
+  --accent-dark: #1f7a40;
+  --danger:      #e2574c;   /* 取り返しがつかない操作 */
+  --danger-dark: #b23a31;
+  --warn:        #e08a1e;
 
-  --radius: 4px;
+  /* 🔴 GK は専用の色を持つ。値は `--danger` と同じだが**意味が違う**ので変数を分ける。
+        `--danger` を直に使うと「GKは危険」という読み方が生まれ、
+        あとで危険色だけ変えたときに GK のユニフォームまで一緒に変わる。
+        🔑 この値は `src/web/pitch.ts` の `KIT.gk` と**同じにする**
+        （位置の札が赤なのに盤の上では橙、という割れ方を防ぐ）。 */
+  --gk:          #e2574c;
+
+  /* 枠の太さ＝意味。これ以外の太さを使わない
+       2px(1) 仕切り / 4px(2) 面の枠 / 6px(3) 前に出ているもの（モーダル・得点） */
+  --w-hair:  var(--px);
+  --w-frame: calc(var(--px) * 2);
+  --w-pop:   calc(var(--px) * 3);
+
+  --drop:    calc(var(--px) * 2);   /* 影のずれ。ぼかさない */
+  --gap:     calc(var(--px) * 4);
+  --bar-h:   calc(var(--px) * 26);  /* 下のコマンド帯の高さ */
 }
 
 * { box-sizing: border-box; }
@@ -43,13 +86,16 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  background: var(--paper);
   color: var(--ink);
-  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
-               ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* 🔑 丸ゴシックを先に置く。角ゴより“おもちゃの箱”側に寄り、ドット絵と喧嘩しない。
+        無い環境では UI ゴシックへ落ちる。**外部フォントは読まない** */
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic UI", "YuGothic UI",
+               "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.55;
   -webkit-text-size-adjust: 100%;
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -57,8 +103,13 @@ body {
   /* 芝の縞を薄く敷く。上から見たピッチの気配を画面全体に残す */
   background-image:
     repeating-linear-gradient(90deg,
-      rgba(255, 255, 255, .012) 0 24px,
-      rgba(0, 0, 0, .012) 24px 48px);
+      rgba(255, 255, 255, .5) 0 calc(var(--px) * 12),
+      rgba(0, 0, 0, .018)     calc(var(--px) * 12) calc(var(--px) * 24));
+}
+
+/* 🔑 縁取り。ドット絵の字は必ず輪郭を持っている。影ではなく**囲む** */
+.logo, .cmd-label, .badge, .sb-score, .goal-word, .ribbon, .float-num, .panel-title {
+  paint-order: stroke fill;
 }
 
 /* ------------------------------------------------------------- 画面遷移 */
@@ -66,325 +117,736 @@ body {
 .screen { display: none; }
 .screen.is-on { display: block; }
 
-.screen-match { padding: 8px; }
-
 /* --------------------------------------------------------------- 読込中 */
 
 #boot {
   min-height: 100dvh;
   display: none;
   place-items: center;
-  padding: 24px;
+  padding: calc(var(--px) * 12);
 }
 #boot.is-on { display: grid; }
 
-.boot-box { max-width: 30rem; text-align: center; }
+.boot-box {
+  max-width: 30rem;
+  text-align: center;
+  padding: calc(var(--px) * 14) calc(var(--px) * 12) calc(var(--px) * 12);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
+}
 
 .logo {
   margin: 0;
-  font-size: clamp(2rem, 9vw, 3.2rem);
-  letter-spacing: .18em;
-  font-weight: 800;
+  font-size: clamp(2rem, 9vw, 3.1rem);
+  letter-spacing: .14em;
+  font-weight: 900;
   color: var(--home);
-  /* ドットの縁取り。画像を使わずに“打ち込んだ字”の気配を出す */
+  /* 打ち込んだ字の気配。輪郭2px＋下に厚み。ぼかしは使わない */
   text-shadow:
-     2px 0 0 var(--edge), -2px 0 0 var(--edge),
-     0 2px 0 var(--edge), 0 -2px 0 var(--edge),
-     0 4px 0 #8a6a12;
+     var(--px) 0 0 var(--edge), calc(var(--px) * -1) 0 0 var(--edge),
+     0 var(--px) 0 var(--edge), 0 calc(var(--px) * -1) 0 var(--edge),
+     0 calc(var(--px) * 3) 0 var(--home-dark),
+     0 calc(var(--px) * 4) 0 var(--edge);
 }
-.logo-sub { margin: .4rem 0 1.6rem; color: var(--ink-dim); letter-spacing: .1em; }
+.logo-sub {
+  margin: calc(var(--px) * 5) 0 calc(var(--px) * 9);
+  color: var(--ink-dim);
+  letter-spacing: .12em;
+  font-size: .86rem;
+}
 
 .boot-bar {
-  height: 14px;
-  border: 2px solid var(--edge-light);
-  background: var(--edge);
-  border-radius: var(--radius);
-  overflow: hidden;
+  height: calc(var(--px) * 8);
+  border: var(--w-hair) solid var(--edge);
+  background: var(--panel-sunk);
+  /* 目盛りを刻む。伸びている最中も「どこまで来たか」が粒で読める */
+  background-image:
+    repeating-linear-gradient(90deg,
+      transparent 0 calc(var(--px) * 5),
+      rgba(59, 42, 27, .16) calc(var(--px) * 5) calc(var(--px) * 6));
 }
 .boot-fill {
   height: 100%;
   width: 4%;
   background: var(--accent);
-  transition: width .25s steps(8);
+  border-right: var(--w-hair) solid var(--accent-dark);
+  /* 🔑 8コマに刻む。なめらかに伸ばすと現代のプログレスバーになる */
+  transition: width .3s steps(8);
 }
-.boot-msg { margin: .8rem 0 0; min-height: 1.6em; }
-.boot-note { margin-top: 1.4rem; color: var(--ink-dim); font-size: .85rem; line-height: 1.8; }
+.boot-msg { margin: calc(var(--px) * 5) 0 0; min-height: 1.6em; font-weight: 700; }
+.boot-note {
+  margin-top: calc(var(--px) * 7);
+  color: var(--ink-dim);
+  font-size: .8rem;
+  line-height: 1.75;
+}
 
 /* ---------------------------------------------------------------- 部品 */
 
+/* 面。🔑 上辺に光、外に硬い影。これで「紙を重ねた」ように見える */
 .panel {
-  background: var(--bg-panel);
-  border: 2px solid var(--edge-light);
-  border-top-color: #4d6a85;        /* 上辺を明るくして面の立ち上がりを出す */
-  border-radius: var(--radius);
-  padding: 12px 14px 14px;
-  margin: 0 0 12px;
-  box-shadow: 0 2px 0 var(--edge);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  border-top-color: var(--edge);
+  box-shadow:
+    inset 0 var(--px) 0 var(--bevel),
+    var(--drop) var(--drop) 0 var(--edge);
+  padding: 0 0 calc(var(--px) * 6);
+  margin: 0 0 calc(var(--px) * 7);
 }
-.panel-wide { max-width: 42rem; margin: 24px auto; }
+.panel-wide { max-width: 42rem; margin: calc(var(--px) * 10) auto; }
 
+/* 見出しは**色の帯**にする。どこまでが1つの塊かを一目で切る */
 .panel-title {
-  margin: 0 0 .6rem;
-  font-size: .95rem;
-  letter-spacing: .08em;
-  color: var(--home);
-  border-bottom: 2px solid var(--edge-light);
-  padding-bottom: .35rem;
+  margin: 0 0 calc(var(--px) * 5);
+  padding: calc(var(--px) * 3) calc(var(--px) * 6);
+  font-size: .92rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: var(--ink-on-dark);
+  background: var(--edge);
+  /* 帯の下に自チーム色の細い線。「これは自分の盤」の印 */
+  border-bottom: var(--w-frame) solid var(--home);
 }
-.sub-title { margin: 1.1rem 0 .4rem; font-size: .9rem; color: var(--ink-dim); }
+.panel > :not(.panel-title) { margin-left: calc(var(--px) * 6); margin-right: calc(var(--px) * 6); }
+.panel > .table-wrap { margin-left: 0; margin-right: 0; }
 
-.note { margin: .3rem 0; color: var(--ink-dim); font-size: .82rem; line-height: 1.7; }
-.warn { color: var(--warn); }
+.sub-title {
+  margin: calc(var(--px) * 7) 0 calc(var(--px) * 3);
+  font-size: .86rem;
+  font-weight: 800;
+  color: var(--ink);
+  padding-left: calc(var(--px) * 4);
+  border-left: var(--w-frame) solid var(--home);
+}
 
+.note { margin: calc(var(--px) * 2) 0; color: var(--ink-dim); font-size: .8rem; line-height: 1.7; }
+.warn { color: var(--danger-dark); font-weight: 700; }
+
+/* ------------------------------------------------------------- 押すもの */
+
+/* 🔑 押せる面は「下に厚みがある」。押すと厚みが減って沈む。
+      ぼかした影ではなく**実体のある段差**にする */
 .btn {
   appearance: none;
-  min-height: 44px;                 /* 指で押せる大きさ。ここを下げない */
-  padding: 0 14px;
+  min-height: calc(var(--px) * 22);   /* 44px。指で押せる大きさ。ここを下げない */
+  padding: 0 calc(var(--px) * 7);
+  font: inherit;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow:
+    inset 0 var(--px) 0 var(--bevel),
+    0 var(--drop) 0 var(--edge);
+  cursor: pointer;
+  transition: none;
+}
+.btn:hover { background: #fffef9; }
+.btn:active {
+  transform: translateY(var(--drop));
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .5);
+}
+.btn:focus-visible { outline: var(--w-frame) solid var(--away); outline-offset: var(--px); }
+.btn:disabled {
+  color: var(--ink-dim);
+  background: var(--panel-sunk);
+  box-shadow: none;
+  transform: none;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  color: var(--ink);
+  background: var(--home);
+  box-shadow:
+    inset 0 var(--px) 0 rgba(255, 255, 255, .55),
+    0 var(--drop) 0 var(--home-dark),
+    0 var(--drop) 0 var(--drop) var(--edge);
+}
+.btn-primary:hover { background: #ffb525; }
+.btn-primary:active {
+  transform: translateY(var(--drop));
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .4);
+}
+.btn-danger { color: var(--danger-dark); }
+.btn-danger:hover { background: #fff2f1; }
+
+/* 一番押してほしいもの。帯のように画面幅いっぱいへ広げる */
+.btn-big {
+  width: 100%;
+  min-height: calc(var(--px) * 28);
+  margin-top: calc(var(--px) * 4);
+  font-size: 1.1rem;
+  letter-spacing: .1em;
+}
+/* ▶ の目印。次に進む操作だとひと目で分かる */
+.btn-big::before { content: "▶"; margin-right: calc(var(--px) * 4); color: var(--edge); }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--px) * 4);
+  align-items: center;
+  margin-top: calc(var(--px) * 5);
+}
+.actions-sticky {
+  position: sticky;
+  bottom: calc(var(--bar-h) + var(--px) * 3);
+  z-index: 3;
+  padding: calc(var(--px) * 4);
+  background: var(--paper);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
+}
+
+/* -------------------------------------------------------------- 書き込み */
+
+.field { margin: calc(var(--px) * 4) 0; }
+.field label {
+  display: block;
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  margin-bottom: var(--px);
+}
+.field-row { display: flex; gap: calc(var(--px) * 5); flex-wrap: wrap; }
+.field-row .field { flex: 1 1 12rem; }
+
+/* 🔑 入力欄は**沈ませる**。押すもの（出ている）と書くもの（沈んでいる）を形で分ける */
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  min-height: calc(var(--px) * 22);
+  padding: 0 calc(var(--px) * 5);
   font: inherit;
   font-weight: 700;
   color: var(--ink);
-  background: var(--bg-raised);
-  border: 2px solid var(--edge-light);
-  border-bottom-width: 4px;         /* 押せる面に見せる */
-  border-radius: var(--radius);
-  cursor: pointer;
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset var(--px) var(--px) 0 rgba(59, 42, 27, .22);
+  border-radius: 0;
 }
-.btn:active { border-bottom-width: 2px; transform: translateY(2px); }
-.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-.btn-primary { background: var(--accent); color: #06220f; border-color: #0f7a45; }
-.btn-danger { color: var(--danger); border-color: #7a2b2b; }
-.btn-big { width: 100%; min-height: 56px; font-size: 1.05rem; margin-top: .6rem; }
-
-.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: .8rem; }
-.actions-sticky {
-  position: sticky;
-  bottom: 0;
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
-  padding: 10px 0;
+select { appearance: none; padding-right: calc(var(--px) * 12); }
+/* ▼ を自分で描く。環境ごとの既定の矢印に見た目を左右されないため */
+.field { position: relative; }
+.field:has(select)::after {
+  content: "▼";
+  position: absolute;
+  right: calc(var(--px) * 5);
+  bottom: calc(var(--px) * 6);
+  font-size: .7rem;
+  color: var(--ink-dim);
+  pointer-events: none;
+}
+input:focus-visible, select:focus-visible {
+  outline: var(--w-frame) solid var(--away);
+  outline-offset: 0;
 }
 
-.field { margin: .6rem 0; }
-.field label { display: block; font-size: .82rem; color: var(--ink-dim); margin-bottom: .25rem; }
-.field-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.field-row .field { flex: 1 1 12rem; }
-
-input[type="text"], input[type="number"], select {
+input[type="range"] {
   width: 100%;
-  min-height: 44px;
-  padding: 0 10px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--edge);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  height: calc(var(--px) * 22);
+  accent-color: var(--accent);
 }
-input[type="range"] { width: 100%; height: 44px; accent-color: var(--accent); }
 
-.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: .4rem 0; }
+/* --------------------------------------------------------------- 札（chip） */
+
+.chip-row { display: flex; flex-wrap: wrap; gap: calc(var(--px) * 3); margin: calc(var(--px) * 3) 0; }
 .chip {
-  min-height: 40px;
-  padding: 0 10px;
+  min-height: calc(var(--px) * 20);
+  padding: 0 calc(var(--px) * 5);
   font: inherit;
-  font-size: .85rem;
+  font-size: .84rem;
+  font-weight: 700;
   color: var(--ink);
-  background: var(--bg-raised);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), 0 var(--px) 0 var(--edge);
   cursor: pointer;
 }
-.chip.is-on { background: var(--home); color: #2a2000; border-color: #8a6a12; font-weight: 700; }
-.chip:disabled { opacity: .4; cursor: not-allowed; }
+.chip:active { transform: translateY(var(--px)); box-shadow: none; }
+/* 選ばれている札は**色が変わり、少し持ち上がる**。枠の色だけで示すと見落とす */
+.chip.is-on {
+  color: var(--ink);
+  background: var(--home);
+  box-shadow:
+    inset 0 var(--px) 0 rgba(255, 255, 255, .5),
+    0 var(--px) 0 var(--home-dark),
+    0 var(--px) 0 var(--px) var(--edge);
+  transform: translateY(calc(var(--px) * -1));
+}
+.chip:disabled {
+  color: var(--ink-dim);
+  background: var(--panel-sunk);
+  box-shadow: none;
+  transform: none;
+  cursor: not-allowed;
+}
 
 /* --------------------------------------------------------- チーム作成 */
 
-.plan-rows { display: grid; gap: 6px; }
-.plan-row { display: grid; grid-template-columns: 7rem 1fr 2.4rem; gap: 8px; align-items: center; }
-.plan-row span:first-child { font-size: .85rem; }
-.plan-row output { text-align: right; font-variant-numeric: tabular-nums; }
-.plan-status { margin: .6rem 0 0; font-variant-numeric: tabular-nums; }
-.plan-presets { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
-.plan-presets > span { color: var(--ink-dim); font-size: .82rem; }
+.plan-rows { display: grid; gap: calc(var(--px) * 3); }
+.plan-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr 2.6rem;
+  gap: calc(var(--px) * 4);
+  align-items: center;
+  padding: var(--px) calc(var(--px) * 3);
+  background: var(--panel-sunk);
+  border: var(--w-hair) solid var(--paper-dark);
+}
+.plan-row span:first-child { font-size: .84rem; font-weight: 700; }
+.plan-row output {
+  text-align: center;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--panel);
+  border: var(--w-hair) solid var(--edge);
+}
+.plan-status {
+  margin: calc(var(--px) * 4) 0 0;
+  padding: calc(var(--px) * 3) calc(var(--px) * 5);
+  font-weight: 700;
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--edge);
+}
+.plan-status strong { font-size: 1.15rem; color: var(--accent-dark); }
+.plan-presets {
+  display: flex;
+  gap: calc(var(--px) * 4);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: calc(var(--px) * 4);
+}
+.plan-presets > span { color: var(--ink-dim); font-size: .8rem; font-weight: 700; }
 
-/* ------------------------------------------------------------- ホーム */
+/* ------------------------------------------------------ 上の表示板（HUD） */
 
+/* 🔑 名札のように見せる。経営ものの「いま何節・何位」は常に目に入る場所に置く */
 .hud {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--bg-panel);
-  border-bottom: 2px solid var(--edge-light);
+  gap: calc(var(--px) * 4);
+  padding: calc(var(--px) * 4) calc(var(--px) * 5);
+  background: var(--edge);
+  border-bottom: var(--w-frame) solid var(--home);
   position: sticky;
   top: 0;
   z-index: 5;
 }
-.hud-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.hud-name { font-weight: 800; color: var(--home); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hud-round { font-size: .8rem; color: var(--ink-dim); text-align: right; }
-.badge {
-  padding: 1px 7px;
+.hud-team { display: flex; align-items: center; gap: calc(var(--px) * 4); min-width: 0; }
+.hud-name {
+  font-weight: 900;
+  font-size: 1.02rem;
+  letter-spacing: .04em;
+  color: var(--home);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-round {
   font-size: .78rem;
   font-weight: 700;
-  color: #06220f;
-  background: var(--accent);
-  border-radius: 999px;
+  color: var(--paper-dark);
+  text-align: right;
+  white-space: nowrap;
+}
+/* 順位は**札**。丸くしない（この画面に丸いものを置かない） */
+.badge {
+  padding: 0 calc(var(--px) * 3);
+  font-size: .76rem;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--home);
+  border: var(--w-hair) solid var(--paper);
   white-space: nowrap;
 }
 
+/* ------------------------------------------------- 下のコマンド帯（導線） */
+
+/* 🔴 もとは画面の上のタブだった。親指から遠く、「次に押すもの」が上にあった。
+      下へ固定し、**大きなコマンドの札**に変える。経営ものの作法もこちら */
 .tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
+  gap: var(--w-hair);
+  height: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--edge);
-  position: sticky;
-  top: 52px;
-  z-index: 4;
+  border-top: var(--w-frame) solid var(--edge);
 }
 .tab {
-  min-height: 44px;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: var(--px);
+  place-content: center;
+  place-items: center;
   font: inherit;
-  font-size: .85rem;
-  font-weight: 700;
+  font-size: .74rem;
+  font-weight: 800;
+  letter-spacing: .02em;
   color: var(--ink-dim);
-  background: var(--bg-panel);
+  background: var(--paper-dark);
   border: 0;
-  border-bottom: 3px solid transparent;
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .45);
   cursor: pointer;
 }
-.tab.is-on { color: var(--home); border-bottom-color: var(--home); background: var(--bg-raised); }
+.tab:active { box-shadow: none; }
+/* 選ばれているコマンドは、面が持ち上がって自チーム色の線が入る */
+.tab.is-on {
+  color: var(--ink);
+  background: var(--panel);
+  box-shadow:
+    inset 0 var(--px) 0 var(--bevel),
+    inset 0 calc(var(--px) * -2) 0 var(--home);
+}
 
-.tab-body { padding: 12px; max-width: 48rem; margin: 0 auto; }
+/* 🔑 コマンドの絵は box-shadow で**1ピクセルずつ打つ**。
+      外部の画像もアイコン用フォントも読まないため（§6 と同じ筋）。
+      1マス = var(--px)。原点は ::before 自身の左上の1マス */
+.tab::before {
+  content: "";
+  display: block;
+  width: var(--px);
+  height: var(--px);
+  margin-bottom: calc(var(--px) * 4);
+  color: currentColor;
+}
+/* ホーム = 屋根のある家 */
+.tab[data-tab="dash"]::before {
+  box-shadow:
+     calc(var(--px) * 4) 0 0, calc(var(--px) * 3) var(--px) 0, calc(var(--px) * 5) var(--px) 0,
+     calc(var(--px) * 2) calc(var(--px) * 2) 0, calc(var(--px) * 6) calc(var(--px) * 2) 0,
+     calc(var(--px) * 1) calc(var(--px) * 3) 0, calc(var(--px) * 7) calc(var(--px) * 3) 0,
+     calc(var(--px) * 2) calc(var(--px) * 4) 0, calc(var(--px) * 6) calc(var(--px) * 4) 0,
+     calc(var(--px) * 2) calc(var(--px) * 5) 0, calc(var(--px) * 6) calc(var(--px) * 5) 0,
+     calc(var(--px) * 2) calc(var(--px) * 6) 0, calc(var(--px) * 4) calc(var(--px) * 6) 0,
+     calc(var(--px) * 5) calc(var(--px) * 6) 0, calc(var(--px) * 6) calc(var(--px) * 6) 0;
+}
+/* 選手 = 頭と肩 */
+.tab[data-tab="squad"]::before {
+  box-shadow:
+     calc(var(--px) * 3) 0 0, calc(var(--px) * 4) 0 0,
+     calc(var(--px) * 3) var(--px) 0, calc(var(--px) * 4) var(--px) 0,
+     calc(var(--px) * 2) calc(var(--px) * 3) 0, calc(var(--px) * 3) calc(var(--px) * 3) 0,
+     calc(var(--px) * 4) calc(var(--px) * 3) 0, calc(var(--px) * 5) calc(var(--px) * 3) 0,
+     calc(var(--px) * 1) calc(var(--px) * 4) 0, calc(var(--px) * 6) calc(var(--px) * 4) 0,
+     calc(var(--px) * 1) calc(var(--px) * 5) 0, calc(var(--px) * 6) calc(var(--px) * 5) 0,
+     calc(var(--px) * 1) calc(var(--px) * 6) 0, calc(var(--px) * 6) calc(var(--px) * 6) 0;
+}
+/* 戦術 = 盤と矢印 */
+.tab[data-tab="tactics"]::before {
+  box-shadow:
+     0 0 0, var(--px) 0 0, calc(var(--px) * 2) 0 0, calc(var(--px) * 3) 0 0,
+     calc(var(--px) * 4) 0 0, calc(var(--px) * 5) 0 0, calc(var(--px) * 6) 0 0,
+     0 calc(var(--px) * 3) 0, calc(var(--px) * 6) calc(var(--px) * 3) 0,
+     calc(var(--px) * 2) calc(var(--px) * 4) 0, calc(var(--px) * 3) calc(var(--px) * 4) 0,
+     calc(var(--px) * 4) calc(var(--px) * 4) 0, calc(var(--px) * 5) calc(var(--px) * 4) 0,
+     calc(var(--px) * 4) calc(var(--px) * 3) 0, calc(var(--px) * 4) calc(var(--px) * 5) 0,
+     0 calc(var(--px) * 6) 0, var(--px) calc(var(--px) * 6) 0,
+     calc(var(--px) * 2) calc(var(--px) * 6) 0, calc(var(--px) * 3) calc(var(--px) * 6) 0,
+     calc(var(--px) * 4) calc(var(--px) * 6) 0, calc(var(--px) * 5) calc(var(--px) * 6) 0,
+     calc(var(--px) * 6) calc(var(--px) * 6) 0;
+}
+/* 順位表 = 高さの違う3本の柱 */
+.tab[data-tab="table"]::before {
+  box-shadow:
+     calc(var(--px) * 3) 0 0, calc(var(--px) * 4) 0 0,
+     calc(var(--px) * 3) var(--px) 0, calc(var(--px) * 4) var(--px) 0,
+     var(--px) calc(var(--px) * 2) 0, calc(var(--px) * 2) calc(var(--px) * 2) 0,
+     calc(var(--px) * 3) calc(var(--px) * 2) 0, calc(var(--px) * 4) calc(var(--px) * 2) 0,
+     var(--px) calc(var(--px) * 3) 0, calc(var(--px) * 2) calc(var(--px) * 3) 0,
+     calc(var(--px) * 3) calc(var(--px) * 3) 0, calc(var(--px) * 4) calc(var(--px) * 3) 0,
+     calc(var(--px) * 5) calc(var(--px) * 4) 0, calc(var(--px) * 6) calc(var(--px) * 4) 0,
+     var(--px) calc(var(--px) * 4) 0, calc(var(--px) * 2) calc(var(--px) * 4) 0,
+     calc(var(--px) * 3) calc(var(--px) * 4) 0, calc(var(--px) * 4) calc(var(--px) * 4) 0,
+     var(--px) calc(var(--px) * 5) 0, calc(var(--px) * 2) calc(var(--px) * 5) 0,
+     calc(var(--px) * 3) calc(var(--px) * 5) 0, calc(var(--px) * 4) calc(var(--px) * 5) 0,
+     calc(var(--px) * 5) calc(var(--px) * 5) 0, calc(var(--px) * 6) calc(var(--px) * 5) 0,
+     var(--px) calc(var(--px) * 6) 0, calc(var(--px) * 2) calc(var(--px) * 6) 0,
+     calc(var(--px) * 3) calc(var(--px) * 6) 0, calc(var(--px) * 4) calc(var(--px) * 6) 0,
+     calc(var(--px) * 5) calc(var(--px) * 6) 0, calc(var(--px) * 6) calc(var(--px) * 6) 0;
+}
+
+/* 🔑 下の帯に隠れないよう、本文の下に帯のぶんだけ余白を足す */
+.tab-body {
+  padding: calc(var(--px) * 6) calc(var(--px) * 6)
+           calc(var(--bar-h) + var(--px) * 8);
+  max-width: 48rem;
+  margin: 0 auto;
+}
 .tab-page { display: none; }
-.tab-page.is-on { display: block; }
+.tab-page.is-on {
+  display: block;
+  /* 切り替わったことを4コマで示す。無いと「押したのに変わっていない」と思われる */
+  animation: page-in .16s steps(4) both;
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(calc(var(--px) * 3)); }
+  to   { opacity: 1; transform: none; }
+}
 
-.fixture { font-size: 1.05rem; font-weight: 700; text-align: center; padding: .6rem 0; }
-.fixture .vs { color: var(--ink-dim); margin: 0 .6rem; font-weight: 400; }
+/* ------------------------------------------------------------- ホーム */
 
-.card-stock { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 次の試合は**対戦カード**として大きく見せる。ここが毎回の起点 */
+.fixture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--px) * 4);
+  flex-wrap: wrap;
+  padding: calc(var(--px) * 6) calc(var(--px) * 4);
+  font-size: 1.1rem;
+  font-weight: 800;
+  text-align: center;
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel);
+}
+.fixture .vs {
+  padding: 0 calc(var(--px) * 3);
+  font-size: .8rem;
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  background: var(--edge);
+}
+
+.card-stock { display: flex; flex-wrap: wrap; gap: calc(var(--px) * 3); }
 .stock {
   display: flex;
-  gap: 6px;
+  gap: calc(var(--px) * 3);
   align-items: baseline;
-  padding: 5px 9px;
-  font-size: .85rem;
-  background: var(--bg-raised);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  padding: calc(var(--px) * 2) calc(var(--px) * 4);
+  font-size: .84rem;
+  font-weight: 700;
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel);
 }
-.stock b { color: var(--home); font-variant-numeric: tabular-nums; }
+.stock b {
+  padding: 0 calc(var(--px) * 2);
+  color: var(--ink-on-dark);
+  background: var(--accent-dark);
+}
+.stock-empty { color: var(--ink-dim); font-size: .84rem; }
+
 /* もらえたカードは「カード名」と「なぜもらえたか」を分けて出す */
-.award { display: grid; gap: 2px; padding: 7px 10px; }
-.award-name { font-weight: 700; color: var(--home); }
-.award-why { font-size: .78rem; color: var(--ink-dim); }
-.player.is-swap { border-color: var(--accent); }
-.stock-empty { color: var(--ink-dim); font-size: .85rem; }
+.award {
+  display: grid;
+  gap: var(--px);
+  padding: calc(var(--px) * 3) calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), 0 var(--px) 0 var(--edge);
+}
+.award-name { font-weight: 800; color: var(--accent-dark); }
+.award-why { font-size: .76rem; color: var(--ink-dim); }
 
 /* --------------------------------------------------------------- 選手 */
 
-.squad-list { display: grid; gap: 6px; }
+.squad-list { display: grid; gap: calc(var(--px) * 3); }
 .player {
   display: grid;
-  grid-template-columns: 2.2rem 1fr auto;
-  gap: 8px;
+  grid-template-columns: calc(var(--px) * 16) 1fr auto;
+  gap: calc(var(--px) * 4);
   align-items: center;
   width: 100%;
-  min-height: 52px;
-  padding: 6px 8px;
+  min-height: calc(var(--px) * 26);
+  padding: calc(var(--px) * 3) calc(var(--px) * 4);
   font: inherit;
   text-align: left;
   color: var(--ink);
-  background: var(--bg-raised);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), 0 var(--px) 0 var(--edge);
   cursor: pointer;
 }
-.player.is-bench { opacity: .72; }
-.player.is-on { border-color: var(--home); }
+.player:hover { background: #fffef9; }
+.player:active { transform: translateY(var(--px)); box-shadow: none; }
+/* 控えは**地を沈ませる**。薄くするだけだと「読めない字」になる */
+.player.is-bench { background: var(--panel-sunk); box-shadow: inset var(--px) var(--px) 0 rgba(59, 42, 27, .12); }
+.player.is-on {
+  background: #fff6dd;
+  box-shadow:
+    inset 0 0 0 var(--w-frame) var(--home),
+    inset 0 var(--px) 0 var(--bevel),
+    0 var(--px) 0 var(--edge);
+}
+.player.is-swap { box-shadow: inset 0 0 0 var(--w-frame) var(--accent), 0 var(--px) 0 var(--edge); }
+
+/* 位置の札。色は役割で固定（GK/DF/MF/FW） */
 .pos {
   display: grid;
   place-items: center;
-  height: 24px;
+  height: calc(var(--px) * 11);
   font-size: .72rem;
-  font-weight: 800;
-  color: var(--edge);
-  background: var(--ink-dim);
-  border-radius: 3px;
+  font-weight: 900;
+  color: var(--ink);
+  background: var(--paper-dark);
+  border: var(--w-hair) solid var(--edge);
 }
-.pos[data-pos="GK"] { background: var(--warn); }
-.pos[data-pos="DF"] { background: var(--away); }
-.pos[data-pos="MF"] { background: var(--accent); }
+.pos[data-pos="GK"] { background: var(--gk); color: var(--ink-on-dark); }
+.pos[data-pos="DF"] { background: var(--away); color: var(--ink-on-dark); }
+.pos[data-pos="MF"] { background: var(--accent); color: var(--ink-on-dark); }
 .pos[data-pos="FW"] { background: var(--home); }
+
 .player-main { min-width: 0; }
-.player-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-type { font-size: .76rem; color: var(--ink-dim); }
-.player-abil { font-size: .74rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; text-align: right; }
+.player-name {
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player-type { font-size: .76rem; font-weight: 700; color: var(--accent-dark); }
+.player-abil { font-size: .74rem; color: var(--ink-dim); text-align: right; }
+.player-abil > div:first-child { font-weight: 800; font-size: .84rem; color: var(--ink); }
 /* 生まれ持った性質。特訓で動く能力と混ぜて読まれないよう、色を落とす */
-.player-trait { font-size: .7rem; color: var(--edge-light); }
+.player-trait { font-size: .7rem; color: var(--paper-dark); }
+
+/* ------------------------------------------------- 特訓（前に出すパネル） */
+
+/* 🔴 もとは選手一覧の下にそのまま生えていた。選んだのに画面の外にあることがあり、
+      「押したのに何も起きない」に見えた。**画面の前に出す**（導線を1本にする） */
+#trainPanel:not([hidden]) {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--bar-h) + var(--px) * 4);
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(34rem, calc(100vw - var(--px) * 8));
+  max-height: calc(100dvh - var(--bar-h) - var(--px) * 16);
+  overflow-y: auto;
+  margin: 0;
+  border-width: var(--w-pop);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
+  /* 跳ねて出る。行き過ぎてから戻る（overshoot）のが要。真っ直ぐ出ると紙が動かない */
+  animation: pop-in .2s steps(5) both;
+}
+/* 後ろを暗くして、いま触るところを1つに絞る */
+#trainPanel:not([hidden])::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(59, 42, 27, .5);
+  animation: fade-in .2s steps(4) both;
+}
+@keyframes pop-in {
+  0%   { transform: translateX(-50%) translateY(calc(var(--px) * 8)) scale(.82); opacity: 0; }
+  70%  { transform: translateX(-50%) translateY(0) scale(1.04); opacity: 1; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .result-box {
-  margin-top: .8rem;
-  padding: 10px;
-  background: var(--edge);
-  border: 2px solid var(--accent);
-  border-radius: var(--radius);
+  margin-top: calc(var(--px) * 5);
+  padding: calc(var(--px) * 5);
+  background: #f2fbf4;
+  border: var(--w-frame) solid var(--accent-dark);
+  box-shadow: inset 0 var(--px) 0 var(--bevel);
   font-size: .85rem;
 }
-.result-box .up { color: var(--accent); font-weight: 700; }
-.result-box .changed { color: var(--home); font-weight: 700; }
+.result-box .up { font-weight: 800; color: var(--accent-dark); }
+.result-box .changed {
+  display: block;
+  margin-top: calc(var(--px) * 3);
+  padding: calc(var(--px) * 2) calc(var(--px) * 4);
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--home);
+  border: var(--w-hair) solid var(--edge);
+}
 
 /* ------------------------------------------------------------- 順位表 */
 
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
-th, td { padding: 5px 6px; text-align: right; white-space: nowrap; }
-th { color: var(--ink-dim); font-weight: 700; border-bottom: 2px solid var(--edge-light); }
+.table-wrap {
+  overflow-x: auto;
+  border-top: var(--w-frame) solid var(--edge);
+}
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th, td { padding: calc(var(--px) * 2) calc(var(--px) * 3); text-align: right; white-space: nowrap; }
+th {
+  color: var(--ink-on-dark);
+  font-weight: 800;
+  background: var(--ink-dim);
+  position: sticky;
+  top: 0;
+}
 td:first-child, th:first-child, td.name, th.name { text-align: left; }
-tbody tr:nth-child(odd) { background: rgba(255, 255, 255, .03); }
-tr.is-me { background: rgba(255, 210, 63, .14); }
-tr.is-me td { color: var(--home); font-weight: 700; }
+tbody tr:nth-child(odd) { background: var(--panel-sunk); }
+/* 自分の行は**地ごと自チーム色**。字の色だけだと縞に負ける */
+tr.is-me { background: var(--home); }
+tr.is-me td { color: var(--ink); font-weight: 800; }
 
 /* --------------------------------------------------------------- 試合 */
 
+.screen-match {
+  position: relative;
+  padding: calc(var(--px) * 4) calc(var(--px) * 4) calc(var(--px) * 10);
+}
+
+/* 得点板。試合中いちばん見る場所なので、前に出ている太さ（6px）を使う */
 .scoreboard {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   grid-template-areas: "home score away" "clock clock clock";
-  gap: 4px 10px;
+  gap: var(--px) calc(var(--px) * 5);
   align-items: center;
-  padding: 8px 10px;
-  background: var(--bg-panel);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  padding: calc(var(--px) * 4) calc(var(--px) * 5);
+  background: var(--edge);
+  border: var(--w-pop) solid var(--edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(59, 42, 27, .5);
   max-width: 44rem;
-  margin: 0 auto 8px;
+  margin: 0 auto calc(var(--px) * 4);
 }
-.sb-team { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-team {
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sb-team:first-child { grid-area: home; color: var(--home); }
-.sb-team:nth-child(3) { grid-area: away; text-align: right; color: var(--away); }
+.sb-team:nth-child(3) { grid-area: away; text-align: right; color: #8ec6f5; }
 .sb-score {
   grid-area: score;
-  font-size: 1.5rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .06em;
+  padding: 0 calc(var(--px) * 4);
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  color: var(--ink-on-dark);
+  background: rgba(0, 0, 0, .28);
+  border: var(--w-hair) solid var(--ink-dim);
 }
 .sb-clock {
   grid-area: clock;
   text-align: center;
-  font-size: .82rem;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--paper-dark);
 }
 
-.pitch-wrap { max-width: 44rem; margin: 0 auto; }
+.pitch-wrap {
+  max-width: 44rem;
+  margin: 0 auto;
+  /* 芝の外に観客席のような縁を回す。盤が宙に浮かないようにする */
+  padding: calc(var(--px) * 3);
+  background: var(--paper-dark);
+  border: var(--w-frame) solid var(--edge);
+  box-shadow: inset 0 var(--px) 0 var(--bevel), var(--drop) var(--drop) 0 var(--edge);
+}
 #pitch {
   display: block;
   width: 100%;
   height: auto;
   background: var(--turf);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  border: var(--w-hair) solid var(--edge);
   /* 🔑 ドット絵を滲ませない。ここを消すと縮尺が変わったときにぼやける */
   image-rendering: pixelated;
 }
@@ -393,81 +855,226 @@ tr.is-me td { color: var(--home); font-weight: 700; }
 .goal-flash {
   position: absolute;
   left: 50%;
-  top: 34%;
+  top: 32%;
   transform: translate(-50%, -50%);
   display: grid;
   justify-items: center;
-  gap: 2px;
-  padding: 10px 22px;
-  background: rgba(10, 15, 20, .82);
-  border: 3px solid var(--home);
-  border-radius: var(--radius);
+  gap: var(--px);
+  padding: calc(var(--px) * 5) calc(var(--px) * 11);
+  background: var(--home);
+  border: var(--w-pop) solid var(--edge);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
   pointer-events: none;
-  z-index: 3;
-  animation: goal-pop .25s steps(4);
+  z-index: 10;
+  animation: goal-pop .3s steps(6) both, goal-shake .18s steps(3) 2;
 }
 .goal-word {
-  font-size: clamp(1.4rem, 7vw, 2.2rem);
-  font-weight: 800;
-  letter-spacing: .12em;
-  color: var(--home);
-  text-shadow: 2px 2px 0 var(--edge);
+  font-size: clamp(1.5rem, 7vw, 2.3rem);
+  font-weight: 900;
+  letter-spacing: .14em;
+  color: var(--ink-on-dark);
+  text-shadow:
+     var(--px) 0 0 var(--edge), calc(var(--px) * -1) 0 0 var(--edge),
+     0 var(--px) 0 var(--edge), 0 calc(var(--px) * -1) 0 var(--edge),
+     0 calc(var(--px) * 2) 0 var(--home-dark);
 }
-.goal-who { font-size: .85rem; color: var(--ink); }
+.goal-who { font-size: .85rem; font-weight: 800; color: var(--ink); }
 @keyframes goal-pop {
-  from { transform: translate(-50%, -50%) scale(.6); }
-  to   { transform: translate(-50%, -50%) scale(1); }
+  0%   { transform: translate(-50%, -50%) scale(.3); }
+  60%  { transform: translate(-50%, -50%) scale(1.12); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
-.screen-match { position: relative; }
+@keyframes goal-shake {
+  0%, 100% { margin-left: 0; }
+  50%      { margin-left: calc(var(--px) * 2); }
+}
 
+/* 実況。1行ずつ**差し込まれる**ように出す */
 .ticker {
   max-width: 44rem;
-  margin: 8px auto;
-  padding: 8px 10px;
-  min-height: 2.8em;
-  font-size: .85rem;
-  background: var(--edge);
-  border: 2px solid var(--edge-light);
-  border-radius: var(--radius);
+  margin: calc(var(--px) * 4) auto;
+  padding: calc(var(--px) * 4) calc(var(--px) * 5);
+  min-height: 2.9em;
+  font-size: .84rem;
+  font-weight: 700;
+  background: var(--panel);
+  border: var(--w-frame) solid var(--edge);
+  border-left-width: calc(var(--px) * 4);
+  border-left-color: var(--home);
+  box-shadow: inset 0 var(--px) 0 var(--bevel);
 }
-.ticker .t-time { color: var(--ink-dim); margin-right: .5rem; font-variant-numeric: tabular-nums; }
-.ticker .t-goal { color: var(--home); font-weight: 800; }
+.ticker .t-time {
+  display: inline-block;
+  margin-right: calc(var(--px) * 3);
+  padding: 0 calc(var(--px) * 2);
+  color: var(--ink-on-dark);
+  background: var(--ink-dim);
+}
+.ticker .t-goal { font-weight: 900; color: var(--danger-dark); }
 
 .match-controls {
   display: flex;
-  gap: 8px;
+  gap: calc(var(--px) * 4);
   justify-content: center;
   flex-wrap: wrap;
   max-width: 44rem;
-  margin: 0 auto 10px;
+  margin: 0 auto calc(var(--px) * 5);
 }
-#matchResult { max-width: 44rem; margin: 0 auto; }
+
+/* 結果も前に出す。試合画面の続きにそのまま生やすと、見逃して次へ進めない */
+#matchResult:not([hidden]) {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  width: min(44rem, calc(100vw - var(--px) * 8));
+  max-height: calc(100dvh - var(--px) * 12);
+  overflow-y: auto;
+  border-width: var(--w-pop);
+  animation: result-pop .22s steps(5) both;
+}
+#matchResult:not([hidden])::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(59, 42, 27, .55);
+  animation: fade-in .22s steps(4) both;
+}
+@keyframes result-pop {
+  0%   { transform: translate(-50%, -50%) scale(.84); opacity: 0; }
+  70%  { transform: translate(-50%, -50%) scale(1.03); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+/* ------------------------------------------------- 飛ぶ数字と帯（FX層） */
+
+/* 🔑 ここは `src/web/fx.ts` が作る。**規則は1行も持たない**（見た目だけ） */
+#fxLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 伸びた能力が、その場から飛び上がって消える。
+   数字が動くと「効いた」が分かる。表の数字が変わるだけでは気づけない */
+.float-num {
+  position: absolute;
+  font-size: .95rem;
+  font-weight: 900;
+  color: var(--accent);
+  text-shadow:
+     var(--px) 0 0 var(--edge), calc(var(--px) * -1) 0 0 var(--edge),
+     0 var(--px) 0 var(--edge), 0 calc(var(--px) * -1) 0 var(--edge);
+  animation: float-up 1s steps(10) both;
+  white-space: nowrap;
+}
+@keyframes float-up {
+  0%   { transform: translate(-50%, 0) scale(.7); opacity: 0; }
+  20%  { transform: translate(-50%, calc(var(--px) * -6)) scale(1.1); opacity: 1; }
+  100% { transform: translate(-50%, calc(var(--px) * -26)) scale(1); opacity: 0; }
+}
+
+/* 大きな知らせ（タイプが変わった・昇格した）は横から帯で出す */
+.ribbon {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  padding: calc(var(--px) * 4) calc(var(--px) * 9);
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: .06em;
+  color: var(--ink);
+  background: var(--home);
+  border: var(--w-pop) solid var(--edge);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
+  white-space: nowrap;
+  animation: ribbon-in .24s steps(5) both, ribbon-out .3s steps(5) 1.5s both;
+}
+@keyframes ribbon-in {
+  0%   { transform: translateX(-50%) scaleX(.1); opacity: 0; }
+  70%  { transform: translateX(-50%) scaleX(1.06); opacity: 1; }
+  100% { transform: translateX(-50%) scaleX(1); opacity: 1; }
+}
+@keyframes ribbon-out {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to   { opacity: 0; transform: translateX(-50%) translateY(calc(var(--px) * -8)); }
+}
+
+/* 四方に散る粒。ゴールと特訓成功の瞬間に撒く */
+.spark {
+  position: absolute;
+  width: calc(var(--px) * 2);
+  height: calc(var(--px) * 2);
+  background: var(--home);
+  box-shadow: 0 0 0 var(--w-hair) var(--edge);
+  animation: spark-fly .5s steps(6) both;
+}
+@keyframes spark-fly {
+  from { transform: translate(0, 0) scale(1.4); opacity: 1; }
+  to   { transform: translate(var(--dx), var(--dy)) scale(.4); opacity: 0; }
+}
 
 /* --------------------------------------------------------------- エラー */
 
 .error-box {
   position: fixed;
   left: 50%;
-  bottom: 12px;
+  bottom: calc(var(--bar-h) + var(--px) * 5);
   transform: translateX(-50%);
-  width: min(32rem, calc(100vw - 24px));
-  padding: 12px 14px;
-  background: var(--bg-panel);
-  border: 3px solid var(--danger);
-  border-radius: var(--radius);
-  z-index: 50;
+  z-index: 60;
+  width: min(32rem, calc(100vw - var(--px) * 8));
+  padding: calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-pop) solid var(--danger-dark);
+  box-shadow: var(--drop) var(--drop) 0 var(--edge);
+  animation: err-shake .24s steps(4) 2;
 }
-.error-box strong { color: var(--danger); display: block; margin-bottom: .3rem; }
-.error-box p { margin: 0 0 .6rem; font-size: .85rem; word-break: break-word; }
+.error-box strong {
+  display: block;
+  margin: calc(var(--px) * -5) calc(var(--px) * -5) calc(var(--px) * 3);
+  padding: calc(var(--px) * 2) calc(var(--px) * 5);
+  color: var(--ink-on-dark);
+  background: var(--danger-dark);
+}
+.error-box p { margin: 0 0 calc(var(--px) * 4); font-size: .85rem; word-break: break-word; }
+@keyframes err-shake {
+  0%, 100% { transform: translateX(-50%); }
+  50%      { transform: translateX(calc(-50% + var(--px) * 3)); }
+}
 
 /* --------------------------------------------------------- 画面が広い時 */
 
 @media (min-width: 720px) {
-  .tab-body { padding: 16px; }
+  .tab-body { padding: calc(var(--px) * 8) calc(var(--px) * 8) calc(var(--bar-h) + var(--px) * 10); }
   .squad-list { grid-template-columns: 1fr 1fr; }
+  /* 広い画面ではコマンドを**帯のまま中央に寄せる**。端まで伸ばすと間延びする */
+  .tabs {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(48rem, 100vw);
+    border: var(--w-frame) solid var(--edge);
+    border-bottom: 0;
+  }
 }
 
+/* 🔴 動きを減らす設定の人には、刻んだ動きも出さない（点滅と跳ねは特につらい） */
 @media (prefers-reduced-motion: reduce) {
   .boot-fill { transition: none; }
-  .btn:active { transform: none; }
+  .btn:active, .chip:active, .player:active, .tab:active { transform: none; }
+  .tab-page.is-on,
+  #trainPanel:not([hidden]), #trainPanel:not([hidden])::before,
+  #matchResult:not([hidden]), #matchResult:not([hidden])::before,
+  .goal-flash, .float-num, .ribbon, .spark, .error-box {
+    animation: none;
+  }
+  /* 🔑 animation を切ると `both` で効いていた最終状態も消えるため、
+        出したままにしておく必要があるものはここで明示する */
+  .float-num, .spark { opacity: 0; }
+  .ribbon, .goal-flash { opacity: 1; }
 }

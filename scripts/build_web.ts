@@ -35,7 +35,7 @@ export const EXPECTED_JS = [
   "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js",
-  "web/api.js", "web/main.js", "web/pitch.js", "web/sprites.js",
+  "web/api.js", "web/fx.js", "web/main.js", "web/pitch.js", "web/sprites.js",
 ] as const;
 
 export function listFiles(dir: string): string[] {

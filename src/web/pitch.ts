@@ -54,31 +54,36 @@ const STRIPES = 26;
 const PASS_ARC_M = 2.6;        // 飛んでいる間の最大の高さ（m・見た目だけ）
 const JUMP_M = 6.0;            // これ以上ボールが動いたら「蹴った」とみなす
 
+/* 🔴 ここの色は `web/style.css` の `:root` と**同じ値にそろえる**（2026-10-02）。
+      canvas の色は CSS 変数を読めないので、どうしても二重に書くことになる。
+      片方だけ変えると、盤の芝と画面の芝が違う緑になり、それだけで安く見える。
+      ずらすのは「盤の中だけで意味がある差」（縞・影）に限る。 */
 const COLOR = {
-  sky: "#10161c",
+  /* 盤の外側。画面の枠（--edge）と同じ濃茶にして、canvas と枠を地続きに見せる */
+  sky: "#3b2a1b",
   /* 🔑 ピッチの外にも芝を敷く。敷かないと画面の端が黒く抜けて、
         ピッチが宙に浮いて見える */
-  outfield: "#15532f",
-  turf: "#1f7a44",
+  outfield: "#2e8c46",
+  turf: "#3fae5a",          /* = --turf */
   /* 🔑 縞は**質感**であって模様ではない。差を付けすぎると
         斜めの帯に見えて、芝に見えなくなる */
-  turfAlt: "#20804a",
-  line: "rgba(232, 248, 238, .75)",
-  shadow: "rgba(0, 0, 0, .30)",
-  ball: "#ffffff",
-  ballEdge: "#1a1a1a",
-  goal: "rgba(255, 255, 255, .20)",
-  minimapBg: "rgba(10, 15, 20, .82)",
+  turfAlt: "#37a04f",       /* = --turf-dark */
+  line: "rgba(234, 251, 238, .88)",
+  shadow: "rgba(26, 60, 34, .34)",
+  ball: "#fffdf3",
+  ballEdge: "#3b2a1b",
+  goal: "rgba(255, 255, 255, .24)",
+  minimapBg: "rgba(59, 42, 27, .86)",
 };
 
 type KitKey = "home" | "away" | "gk";
 const KIT: Record<KitKey, KitColors> = {
-  home: { shirt: "#ffd23f", shirtDark: "#9c7410", shorts: "#2d2a1a",
-          skin: "#f2c9a0", hair: "#2a1a10", socks: "#ffd23f" },
-  away: { shirt: "#4aa3ff", shirtDark: "#1f5d9e", shorts: "#16263a",
-          skin: "#f2c9a0", hair: "#1a1410", socks: "#4aa3ff" },
-  gk: { shirt: "#ff8a3f", shirtDark: "#a04f14", shorts: "#2a1a10",
-        skin: "#f2c9a0", hair: "#2a1a10", socks: "#ff8a3f" },
+  home: { shirt: "#f2a714", shirtDark: "#c7820a", shorts: "#3b2a1b",
+          skin: "#f7cfa4", hair: "#3b2a1b", socks: "#f2a714" },
+  away: { shirt: "#3d8ed6", shirtDark: "#2a6ba6", shorts: "#23364a",
+          skin: "#f7cfa4", hair: "#2a1f16", socks: "#3d8ed6" },
+  gk: { shirt: "#e2574c", shirtDark: "#b23a31", shorts: "#3b2a1b",
+        skin: "#f7cfa4", hair: "#3b2a1b", socks: "#e2574c" },
 };
 
 /* ピッチの実寸（m）。競技規則の数字で、描き手が作らない */

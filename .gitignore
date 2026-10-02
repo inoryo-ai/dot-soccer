@@ -11,3 +11,8 @@ web/dist/
 
 # Node（TypeScript 版の開発ツール）
 node_modules/
+
+# 🔴 Python 版（D-15 で削除）の残骸。`.pyc` は中身がバイナリで差分も読めない。
+#    ignore が無かったので `git add -A` で実際に3件入りかけた（2026-10-02）。
+#    手元のフォルダごと消すのが本筋だが、消すまでここで止める。
+__pycache__/
