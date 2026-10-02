@@ -1,0 +1,21 @@
+{
+  // 🔑 ブラウザへ配る JS を作る設定（`node scripts/build_web.ts` から呼ばれる）。
+  //    入口（main.ts）からたどれるファイルだけを出す。`src/node/` `src/cli/` は
+  //    ファイルを触るので、ブラウザには出さない（たどれないので出ない）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "noEmitOnError": true,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "web/dist/js",
+    "rootDir": "src",
+    "types": [],
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "sourceMap": false,
+    "declaration": false
+  },
+  "include": [],
+  "files": ["src/web/main.ts"]
+}

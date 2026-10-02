@@ -9,11 +9,7 @@ saves/
 logs/
 out/
 
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-__pycache__/
-*.pyc
+node_modules/
 
 # 組み立て結果は Vercel 側で作り直す（古い写しを上げない）
 web/dist/

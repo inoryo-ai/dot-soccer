@@ -2,16 +2,12 @@
 logs/
 out/
 saves/
-__pycache__/
-*.pyc
 *.json.tmp
-
-# 開発ツールのキャッシュ（13MB超。入れると履歴が汚れるだけ）
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
 
 # ブラウザ配信用の組み立て結果（毎回作り直す使い捨て）
 web/dist/
 
 .vercel
+
+# Node（TypeScript 版の開発ツール）
+node_modules/
