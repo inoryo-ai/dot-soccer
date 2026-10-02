@@ -160,8 +160,8 @@ function main(): void {
        (v) => { Voxel.SHAPE.legRatio = v / 100; }, (v) => `${v}%`);
 
   $("reset").addEventListener("click", () => {
-    const d: [string, number][] = [["headRatio", 40], ["headWidth", 58],
-                                   ["bodyWidth", 46], ["legRatio", 48]];
+    const d: [string, number][] = [["headRatio", 35], ["headWidth", 50],
+                                   ["bodyWidth", 54], ["legRatio", 48]];
     for (const [id, v] of d) {
       const el = $<HTMLInputElement>(id);
       el.value = String(v);
