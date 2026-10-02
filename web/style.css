@@ -63,6 +63,16 @@
   --danger-dark: #b23a31;
   --warn:        #e08a1e;
 
+  /* ------------------------------------------------ 画面の青（2026-10-02 ラフ）
+     🔴 オーナーのラフに合わせて、UIの主役を**青**にした。
+        それまでは枠も見出しも濃茶1色で、情報の階層が「太さ」でしか出せていなかった。
+        見出しを青の帯にすると、どこからどこまでが1つの塊かが**色で**読める。
+     🔑 帯は上を明るく下を暗くする（2段）。平らな青はシールに見える。 */
+  --ui:        #2f7ed8;
+  --ui-lt:     #58a4ea;
+  --ui-dk:     #1a5aa8;
+  --ui-edge:   #14407a;
+
   /* 🔴 GK は専用の色を持つ。値は `--danger` と同じだが**意味が違う**ので変数を分ける。
         `--danger` を直に使うと「GKは危険」という読み方が生まれ、
         あとで危険色だけ変えたときに GK のユニフォームまで一緒に変わる。
@@ -207,19 +217,23 @@ body {
 /* ---------------------------------------------------------------- 部品 */
 
 /* 面。🔑 上辺に光、外に硬い影。これで「紙を重ねた」ように見える */
+/* 🔑 角を丸める（ラフに合わせた・2026-10-02）。直角のままだと「道具の窓」に見え、
+      遊ぶものに見えない。丸めるのは **--px の2倍まで**（丸めすぎるとドット絵と喧嘩する）。 */
 .panel {
   background: var(--panel);
-  border: var(--w-frame) solid var(--edge);
-  border-top-color: var(--edge);
+  border: var(--w-frame) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 3);
   box-shadow:
     inset 0 var(--px) 0 var(--bevel),
-    var(--drop) var(--drop) 0 var(--edge);
+    0 var(--drop) 0 rgba(20, 64, 122, .35);
   padding: 0 0 calc(var(--px) * 6);
   margin: 0 0 calc(var(--px) * 7);
+  overflow: hidden;              /* 見出しの帯を角丸からはみ出させない */
 }
 .panel-wide { max-width: 42rem; margin: calc(var(--px) * 10) auto; }
 
-/* 見出しは**色の帯**にする。どこまでが1つの塊かを一目で切る */
+/* 見出しは**青の帯**。どこまでが1つの塊かを色で切る。
+   🔑 上を明るく下を暗くした2段。平らな青はシールに見える。 */
 .panel-title {
   margin: 0 0 calc(var(--px) * 5);
   padding: calc(var(--px) * 3) calc(var(--px) * 6);
@@ -227,9 +241,10 @@ body {
   font-weight: 800;
   letter-spacing: .06em;
   color: var(--ink-on-dark);
-  background: var(--edge);
-  /* 帯の下に自チーム色の細い線。「これは自分の盤」の印 */
-  border-bottom: var(--w-frame) solid var(--home);
+  background: linear-gradient(var(--ui-lt) 0 45%, var(--ui) 45% 100%);
+  border-bottom: var(--w-hair) solid var(--ui-edge);
+  /* 白抜きの字は縁取りが要る。無いと明るい青の上で溶ける */
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .85);
 }
 .panel > :not(.panel-title) { margin-left: calc(var(--px) * 6); margin-right: calc(var(--px) * 6); }
 .panel > .table-wrap { margin-left: 0; margin-right: 0; }
@@ -257,11 +272,12 @@ body {
   font: inherit;
   font-weight: 800;
   color: var(--ink);
-  background: var(--panel);
-  border: var(--w-frame) solid var(--edge);
+  background: linear-gradient(var(--panel) 0 45%, var(--panel-sunk) 45% 100%);
+  border: var(--w-frame) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 2);
   box-shadow:
     inset 0 var(--px) 0 var(--bevel),
-    0 var(--drop) 0 var(--edge);
+    0 var(--drop) 0 rgba(20, 64, 122, .45);
   cursor: pointer;
   transition: none;
 }
@@ -281,11 +297,11 @@ body {
 
 .btn-primary {
   color: var(--ink);
-  background: var(--home);
+  background: linear-gradient(#ffc93f 0 45%, var(--home) 45% 100%);
+  border-color: var(--edge);
   box-shadow:
-    inset 0 var(--px) 0 rgba(255, 255, 255, .55),
-    0 var(--drop) 0 var(--home-dark),
-    0 var(--drop) 0 var(--drop) var(--edge);
+    inset 0 var(--px) 0 rgba(255, 255, 255, .6),
+    0 var(--drop) 0 var(--home-dark);
 }
 .btn-primary:hover { background: #ffb525; }
 .btn-primary:active {
@@ -452,8 +468,8 @@ input[type="range"] {
   align-items: center;
   gap: calc(var(--px) * 4);
   padding: calc(var(--px) * 4) calc(var(--px) * 5);
-  background: var(--edge);
-  border-bottom: var(--w-frame) solid var(--home);
+  background: linear-gradient(var(--ui-lt) 0 40%, var(--ui-dk) 40% 100%);
+  border-bottom: var(--w-frame) solid var(--ui-edge);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -463,17 +479,23 @@ input[type="range"] {
   font-weight: 900;
   font-size: 1.02rem;
   letter-spacing: .04em;
-  color: var(--home);
+  color: var(--ink-on-dark);
+  text-shadow: var(--px) var(--px) 0 var(--ui-edge);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 🔑 節は**札**に入れる（ラフの日付札）。地の青に字を置くだけだと沈む */
 .hud-round {
   font-size: .78rem;
-  font-weight: 700;
-  color: var(--paper-dark);
+  font-weight: 800;
+  color: var(--ink);
   text-align: right;
   white-space: nowrap;
+  padding: 0 calc(var(--px) * 4);
+  background: linear-gradient(var(--panel) 0 45%, var(--panel-sunk) 45% 100%);
+  border: var(--w-hair) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 2);
 }
 /* 順位は**札**。丸くしない（この画面に丸いものを置かない） */
 .badge {
@@ -500,9 +522,9 @@ input[type="range"] {
   grid-template-columns: repeat(4, 1fr);
   gap: var(--w-hair);
   height: calc(var(--bar-h) + env(safe-area-inset-bottom, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: var(--edge);
-  border-top: var(--w-frame) solid var(--edge);
+  padding: var(--w-hair) var(--w-hair) env(safe-area-inset-bottom, 0px);
+  background: var(--ui-dk);
+  border-top: var(--w-frame) solid var(--ui-edge);
 }
 .tab {
   display: grid;
@@ -514,20 +536,21 @@ input[type="range"] {
   font-size: .74rem;
   font-weight: 800;
   letter-spacing: .02em;
-  color: var(--ink-dim);
-  background: var(--paper-dark);
+  color: var(--ink-on-dark);
+  background: linear-gradient(var(--ui-lt) 0 45%, var(--ui) 45% 100%);
   border: 0;
-  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .45);
+  border-radius: calc(var(--px) * 2);
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .4);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .8);
   cursor: pointer;
 }
 .tab:active { box-shadow: none; }
-/* 選ばれているコマンドは、面が持ち上がって自チーム色の線が入る */
+/* 選ばれているコマンドは**金の札**に変わる。青のままだと、どれが開いているか読めない */
 .tab.is-on {
   color: var(--ink);
-  background: var(--panel);
-  box-shadow:
-    inset 0 var(--px) 0 var(--bevel),
-    inset 0 calc(var(--px) * -2) 0 var(--home);
+  background: linear-gradient(#ffc93f 0 45%, var(--home) 45% 100%);
+  text-shadow: none;
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .6);
 }
 
 /* 🔑 コマンドの絵は box-shadow で**1ピクセルずつ打つ**。
@@ -1089,12 +1112,21 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 
 /* 🔴 街が常のホーム。施設を選んで入り、戻ってくる。
       絵は `src/web/city.ts` が canvas に描く（画像ファイルを持ち込まない）。 */
-/* 🔑 幅は **480 の整数倍で止める**（既定は 2倍＝960px）。
+/* 🔑 街の絵は **640×360**。幅は 640 の整数倍で止める（既定は 2倍＝1280px）。
       盤と同じ理由で、中途半端な倍率にすると1ドットの幅が列ごとに割れて縞ムラが出る。
+      640×360 を選んだのは、**3倍がちょうど 1920×1080** でフルHDに整数倍のまま収まるから。
       画面がそれより狭いときだけ、やむをえず伸縮させる。 */
+/* 🔑 街は画面の**縦の真ん中**に置く（2026-10-02 の目視）。上に寄せると、
+      下に地の縞だけが大きく残って「作りかけ」に見える。 */
+#city.is-on {
+  display: grid;
+  place-content: center;
+  min-height: calc(100dvh - var(--px) * 18);
+}
+
 .city-wrap {
   position: relative;
-  width: min(calc(100% - var(--px) * 8), 960px);
+  width: min(calc(100vw - var(--px) * 8), 1280px);
   margin: calc(var(--px) * 5) auto;
   padding: calc(var(--px) * 3);
   background: var(--paper-dark);
@@ -1120,22 +1152,32 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   padding: calc(var(--px) * 2) calc(var(--px) * 4);
   font: inherit;
   text-align: center;
-  color: var(--ink);
-  background: var(--panel);
-  border: var(--w-frame) solid var(--edge);
-  box-shadow: inset 0 var(--px) 0 var(--bevel), 0 var(--drop) 0 var(--edge);
+  /* 🔑 街の札も UI と同じ青にする（2026-10-02 ラフ）。茶色の札だと、
+        街の色数が多いぶん「画面の部品」ではなく背景の一部に見えてしまう。 */
+  color: var(--ink-on-dark);
+  background: linear-gradient(var(--ui-lt) 0 45%, var(--ui) 45% 100%);
+  border: var(--w-frame) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 2);
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .45),
+              0 var(--drop) 0 rgba(20, 64, 122, .5);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .9);
   cursor: pointer;
   /* ふわっと上下する。止まっていると「押せる」ことに気づかれない */
   animation: spot-bob 1.2s steps(2) infinite;
 }
-.spot-name { font-size: .92rem; font-weight: 900; letter-spacing: .04em; }
-.spot-note { font-size: .7rem; color: var(--ink-dim); }
-/* 試合が本筋なので、サッカー場だけ色を付けて一段大きくする */
-.spot-main { background: var(--home); }
+/* 🔴 札の中で**折り返させない**（2026-10-02 の目視で「選手・戦術・順位／表」と割れていた）。
+      札は一目で読めることが仕事なので、幅のほうを合わせる。 */
+.spot-name { font-size: .92rem; font-weight: 900; letter-spacing: .04em; white-space: nowrap; }
+.spot-note { font-size: .7rem; opacity: .9; white-space: nowrap; }
+/* 試合が本筋なので、サッカー場だけ金の札にして一段大きくする */
+.spot-main {
+  background: linear-gradient(#ffc93f 0 45%, var(--home) 45% 100%);
+  border-color: var(--edge);
+  color: var(--ink);
+  text-shadow: none;
+}
 .spot-main .spot-name { font-size: 1.05rem; }
-.spot-main .spot-note { color: var(--edge); }
-.spot:hover { background: #fffef9; }
-.spot-main:hover { background: #ffb525; }
+.spot:hover { filter: brightness(1.08); }
 .spot:active { transform: translate(-50%, calc(-50% + var(--drop))); box-shadow: none; }
 .spot:focus-visible { outline: var(--w-frame) solid var(--away); outline-offset: var(--px); }
 /* ▼ で「ここへ入る」を示す */
@@ -1240,10 +1282,10 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   #pitch { width: 960px; }
 }
 
-/* 街も同じ考え方。1520px 以上あるときだけ **3倍（1440px）** まで上げる。
-   フルHD（1920px）では街が画面いっぱいに広がる */
-@media (min-width: 1520px) {
-  .city-wrap { width: 1440px; }
+/* 街も同じ考え方。窓が 1920px 以上あるときだけ **3倍（1920×1080）** まで上げる。
+   ここがフルHDちょうど */
+@media (min-width: 1960px) {
+  .city-wrap { width: 1920px; }
 }
 
 /* 🔴 動きを減らす設定の人には、刻んだ動きも出さない（点滅と跳ねは特につらい） */
