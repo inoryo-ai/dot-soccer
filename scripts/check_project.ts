@@ -274,7 +274,11 @@ function checkWebBuild(): void {
     bad(`web/dist を組み立てられない:\n      ${lines.slice(-5).join("\n      ")}`);
     return;
   }
-  const files = listFiles(DIST).map((p) => relative(DIST, p));
+  // 🔴 区切り文字を `/` へそろえる（Windows の `relative()` は `\` を返す）。
+  //    そろえないと下の2つの検査が**両方とも黙って通らなくなる**:
+  //    ①一覧（manifest は `/`）との照合が全件「配られていない」になる
+  //    ②`cli/` `node/` が混ざっていないかの検査が**一度も一致しない＝守っていない**
+  const files = listFiles(DIST).map((p) => relative(DIST, p).split("\\").join("/"));
   ok(`${files.length}ファイルを組み立てた`);
   const manifest = JSON.parse(readFileSync(join(DIST, "manifest.json"), "utf8")) as
     { stamp?: string; js: string[] };
