@@ -31,7 +31,7 @@ import { formatStandings } from "../src/sim/league.ts";
 import { Team } from "../src/sim/model.ts";
 import { buildPreset } from "../src/sim/presets.ts";
 import { cmpStr } from "../src/sim/pymath.ts";
-import { ROOT, golden } from "../tests/helpers.ts";
+import { ROOT, golden, maskSaveDir } from "../tests/helpers.ts";
 
 const OUT = join(ROOT, "tests", "golden");
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
@@ -136,7 +136,7 @@ function genCli(): void {
     const lines: string[] = [];
     playGame(join(dir, "s.json"), g.play_inputs, (t) => { lines.push(t); });
     out.play_inputs = g.play_inputs;
-    out.play_transcript = lines.map((l) => l.replaceAll(dir, "<SAVE_DIR>"));
+    out.play_transcript = lines.map((l) => maskSaveDir(l, dir));
     out.play_save = JSON.parse(readFileSync(join(dir, "s.json"), "utf8"));
   } finally {
     rmSync(dir, { recursive: true, force: true });

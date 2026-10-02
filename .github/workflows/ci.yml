@@ -1,0 +1,60 @@
+# 変更ごとに、手元と同じ検査を機械で回す。
+#
+# ─────────────────────────────────────────────────────────────
+# 🔴 なぜ Windows と Linux の両方で回すのか
+# ─────────────────────────────────────────────────────────────
+# TypeScript への書き直し（D-15）は Linux 系で作られ、Windows で一度も動かされないまま
+# main に入っていた。その結果 **Windows でだけ出る赤が2種類**残っていた（D-19）。
+#   ① `npm run check` [10] がパスの区切り文字（`\` と `/`）の違いで全件「配られていない」
+#   ② `tests/cli.test.ts` が正解データと1行ずれる（`<SAVE_DIR>\s.json` と `<SAVE_DIR>/s.json`）
+# どちらも片方のOSでしか再現しない。**だから両方で回す。**
+#
+# 🔴 なぜ Node を2つで回すのか
+# package.json の engines は `>=22.18`。開発機は 24 系。22.18 で動くと書いてあるなら、
+# 22.18 で実際に動くことを機械で確かめる（書いてあるだけの約束にしない）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 🔑 同じブランチに続けて push したら、古い実行は止める（待ち時間とぶんの節約）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 🔴 片方が落ちても、もう片方の結果を必ず見る（どのOS固有かを1回で判別するため）
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ["22.18", "24"]
+    steps:
+      # 🔑 v4 は内部が Node 20 で動く作りで、GitHub 側が非推奨にした（警告が出る）。
+      #    メジャーだけ固定する（v7 のうちの最新が使われる）
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # 🔑 lock ファイルどおりに入れる（`npm install` と違い、勝手に上げない）
+      - run: npm ci
+
+      - name: 型チェック
+        run: npm run typecheck
+
+      # 🔑 正解データとの1値ずつの照合がここに入っている（D-15 の要）
+      - name: テスト
+        run: npm test
+
+      # 🔑 提出前検査11項目。ブラウザ配信物の組み立てと、相場との照合も含む
+      - name: 提出前検査
+        run: npm run check

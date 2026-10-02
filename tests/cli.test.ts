@@ -15,7 +15,7 @@ import { cmdMatch, cmdTrain, cmdTrainAll } from "../src/cli/main.ts";
 import { playGame } from "../src/cli/ui.ts";
 import { Career } from "../src/sim/career.ts";
 import { formatStandings } from "../src/sim/league.ts";
-import { ROOT, golden } from "./helpers.ts";
+import { ROOT, golden, maskSaveDir } from "./helpers.ts";
 
 const g = golden<any>("cli");
 
@@ -53,7 +53,7 @@ test("対話画面を無人で最後まで歩いた記録とセーブが一致�
   try {
     const lines: string[] = [];
     playGame(join(dir, "s.json"), g.play_inputs, (t) => { lines.push(t); });
-    const transcript = lines.map((l) => l.replaceAll(dir, "<SAVE_DIR>"));
+    const transcript = lines.map((l) => maskSaveDir(l, dir));
     assert.equal(transcript.length, g.play_transcript.length, "行数");
     transcript.forEach((l, i) => assert.equal(l, g.play_transcript[i], `${i}行目`));
     const save = JSON.parse(readFileSync(join(dir, "s.json"), "utf8"));

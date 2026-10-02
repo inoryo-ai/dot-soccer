@@ -208,6 +208,32 @@ Python で作った（`tools/gen_golden.py` の `_track_stamina_by_actor`）。
    乱数・数学・プリセット・特訓（random / math / presets / training）は今も Python 版との照合のまま。
    検査: `tests/kickoff.test.ts`
 
+## D-19 パスの区切り文字を1か所でそろえ、検査を Windows と Linux の両方で機械にかける
+
+2026-10-02、TypeScript 版（D-15）を**初めて Windows の開発機で動かしたところ2件が赤になった。**
+どちらも試合の規則とは無関係で、**パスの区切り文字**（Windows は `\`、Mac/Linux は `/`）だけが原因。
+
+- `npm run check` [10] が、配った16ファイル全部を「一覧にあるのに配られていない」と報告した。
+  `manifest.json` 側は `/` なのに、照合する側（`scripts/check_project.ts`）が
+  `relative()` の戻り値をそのまま使って `\` のままだった。
+  🔴 **同じ行の下にある「`cli/` `node/` が混ざっていないか」の検査も、`/` 前提の正規表現なので
+  Windows では一度も一致していなかった＝守っているつもりで守っていない状態**だった。これが一番危ない。
+- `tests/cli.test.ts` が正解データと1行ずれた（`<SAVE_DIR>\s.json` と `<SAVE_DIR>/s.json`）。
+
+🔑 **直し方**: 一時フォルダ名の置き換えを `tests/helpers.ts` の `maskSaveDir()` 1本にまとめ、
+   正解データを**作る側**（`scripts/gen_golden.ts`）と**照合する側**（`tests/cli.test.ts`）が
+   同じ関数を使うようにした。別々に書くとまたズレる。
+   `check_project.ts` は `build_web.ts` と同じ `.split("\\").join("/")` をかけた
+   （`build_web.ts` は元から正規化していた。**漏れていたのは照合側だけ**）。
+
+🔴 **なぜ気づけなかったか＝正本（main）が一度も Windows で動いていなかった。**
+   書き直しは Linux 系で作られ、検査もテストもそこでしか回っていない。
+   **症状は OS を変えた瞬間にしか出ない種類なので、回す場所を増やす以外に検出手段がない。**
+   → `.github/workflows/ci.yml` を追加し、**ubuntu と windows × Node 22.18 と 24** の4通りで
+   `typecheck` → `test` → `check` を回す。Node 22.18 は `package.json` の `engines` に
+   書いてある下限で、書いてあるだけの約束にしないため実際に動かして確かめる。
+   （学習台帳の昇格ルール＝同じ原因が3箇所で出たので機械化する）
+
 ## 未決定のまま残すもの（オーナー判断）
 
 - [ ] 正式なゲーム名（当面フォルダ名は `dot-soccer`）
