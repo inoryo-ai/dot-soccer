@@ -36,9 +36,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: ["22.18", "24"]
     steps:
-      - uses: actions/checkout@v4
+      # 🔑 v4 は内部が Node 20 で動く作りで、GitHub 側が非推奨にした（警告が出る）。
+      #    メジャーだけ固定する（v7 のうちの最新が使われる）
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
