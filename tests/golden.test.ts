@@ -9,8 +9,9 @@
  * （乱数を引く順番、丸め方、同点のときの選び方）。見ても気づけない。
  * だから Python 版が書き出した正解（`tests/golden/*.json`）と、値を1つずつ突き合わせる。
  *
- * 🔑 正解データは `tools/gen_golden.py` で作った。三角関数などは OS ごとに最後のビットが
- *    違うので、Python 側も `tools/detmath.py`（四則演算だけで計算する版）に差し替えてある。
+ * 🔑 正解データの作り方は `tests/golden/README.md`（コミット 2dbe331 の生成スクリプト）。
+ *    三角関数などは OS ごとに最後のビットが違うので、Python 側も四則演算だけで計算する版に
+ *    差し替えてある（決定 D-16）。
  */
 
 import assert from "node:assert/strict";

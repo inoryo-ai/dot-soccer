@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "python3 scripts/build_web.py",
+  "installCommand": "npm ci",
+  "buildCommand": "node scripts/build_web.ts",
   "outputDirectory": "web/dist",
   "framework": null,
   "headers": [
@@ -13,7 +14,7 @@
       ]
     },
     {
-      "source": "/py/(.*)",
+      "source": "/(index.html|manifest.json)?",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
       ]
