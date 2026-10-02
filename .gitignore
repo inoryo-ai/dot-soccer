@@ -15,3 +15,6 @@ __pycache__/
 web/dist/
 
 .vercel
+
+# Node（TypeScript 版の開発ツール）
+node_modules/

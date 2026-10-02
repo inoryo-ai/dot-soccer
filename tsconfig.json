@@ -1,0 +1,25 @@
+{
+  // 🔑 型チェック専用（出力しない）。Node は .ts をそのまま動かす（型を消すだけ）ので、
+  //    実行に変換は要らない。ブラウザへ配るときだけ tsconfig.web.json で JS に直す。
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    // 🔴 Node の「型を消すだけ」で動かすので、enum・名前空間・引数プロパティは使えない
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+}
