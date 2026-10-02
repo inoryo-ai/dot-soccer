@@ -37,7 +37,11 @@ import type { KitColors } from "./sprites.ts";
 /* 🔑 「右斜め後ろから見下ろす」を、振り向き（yaw）と見下ろし角（pitch）で表す。
       カメラはボールを追うが、**向きは変えない**。向きまで追うと画面が回って、
       どちらへ攻めているか分からなくなる。 */
-const CAM_YAW = -0.52;         // 右へ振る量（ラジアン）
+/* 🔴 真横からの見下ろしにした（2026-10-03 オーナー指示・D-29）。
+      -0.52（約-30°）の斜めをやめ、π/2 にすると視線がピッチの**幅の方向**に向く。
+      画面の横＝ピッチの長さになるので、自陣から敵陣までが左右に並ぶ。
+      デザインの試合画面も同じ構えなので、スタンド帯と矛盾しない。 */
+const CAM_YAW = Math.PI / 2;
 const CAM_PITCH = 0.56;        // 見下ろす角度（0=水平・π/2=真上）
 const CAM_DIST = 26;           // 注視点までの距離（m）。小さいほど寄る
 const FOCAL = 430;             // 画角。大きいほど寄る
@@ -48,7 +52,9 @@ const FOCAL = 430;             // 画角。大きいほど寄る
 const PLAYER_HEIGHT_M = 2.05;
 const CAM_FOLLOW = 0.06;       // カメラがボールに追いつく速さ（1なら即追従）
 
-const PAD_BOTTOM = 62;         // 下の全体図のぶん空ける
+/* 🔴 0 にした（2026-10-03・D-29）。全体図を canvas の外へ出したので、
+      下に空ける理由が無くなった。盤は上にスタンド帯が載るぶん縦が短い。 */
+const PAD_BOTTOM = 0;
 
 const STRIPES = 26;
 const PASS_ARC_M = 2.6;        // 飛んでいる間の最大の高さ（m・見た目だけ）
@@ -184,6 +190,13 @@ function project(x: number, y: number, z = 0): Projected | null {
 
 /* ------------------------------------------------------------ 読み込み */
 
+/** 全体図を描く先（右下の小さい枠）。`attachMini` で渡される */
+let mini: HTMLCanvasElement | null = null;
+
+export function attachMini(canvasEl: HTMLCanvasElement): void {
+  mini = canvasEl;
+}
+
 export function attach(canvasEl: HTMLCanvasElement): void {
   canvas = canvasEl;
   ctx = canvas.getContext("2d", { alpha: false });
@@ -211,12 +224,12 @@ export function attach(canvasEl: HTMLCanvasElement): void {
 export function fit(): void {
   const cv = canvas;
   if (cv === null) return;
-  /* 🔴 **余白を引かない。** 得点板・実況・操作は盤の上に重ねるので、盤は画面を全部使える。
-        ここで 16px でも引くと、全画面（1080px）のとき `1080-16 = 1064` となり
-        `1064 / 360 = 2.95` で**3倍に届かず2倍に落ちる**。
-        16px の余白のために、フルHDがフルHDでなくなる。 */
+  /* 🔴 **余白を引かない。** ここで 16px でも引くと、全画面（1080px）のとき
+        3倍に届かず2倍に落ちる。16px の余白のためにフルHDがフルHDでなくなる。
+     🔑 盤の上には**スタンド帯**が載る（画面の高さの 396/1080 = 36.7%）。
+        その残りに収める。横幅は画面いっぱい使ってよい。 */
   const availW = globalThis.innerWidth;
-  const availH = globalThis.innerHeight;
+  const availH = globalThis.innerHeight * (1 - 396 / 1080);
   const k = Math.max(1, Math.floor(Math.min(availW / cv.width, availH / cv.height)));
   cv.style.width = `${cv.width * k}px`;
   cv.style.height = `${cv.height * k}px`;
@@ -571,16 +584,23 @@ function draw(dt: number): void {
 
 function drawMinimap(rp: Replay, px: number, py: number, fa: number[], fb: number[],
                      t: number, k: number): void {
-  const c = need(ctx, "描画");
-  const cv = need(canvas, "canvas");
+  /* 🔴 2026-10-03: 全体図を**ピッチの canvas から出した**（D-29）。
+        デザインでは右下の独立した枠なので、盤の中に場所を取らない。
+        盤は上にスタンド帯が載るぶん縦が短くなり、中に置く余裕が無くなった。 */
+  const cv = mini;
+  if (cv === null) return;
+  const c = cv.getContext("2d");
+  if (c === null) return;
+  c.clearRect(0, 0, cv.width, cv.height);
   /* 🔴 2026-10-02 オーナー指摘で直した: 全体図が**画面の中央下**にあり、
         盤のいちばん手前（＝自陣で競っているところ）を覆っていた。
         覆われた選手は画面から消えるので、何が起きているのか追えない。
         → **右下の隅へ寄せ、ひと回り小さくする。** 全体図は補助であって主役ではない。 */
-  const mw = Math.min(124, cv.width * 0.26);
+  /* 枠いっぱいに描く。位置と大きさは CSS が決める（デザインの右下の箱） */
+  const mw = cv.width - 8;
   const mh = mw * (py / px);
-  const mx = cv.width - mw - 8;
-  const my = cv.height - mh - 6;
+  const mx = 4;
+  const my = (cv.height - mh) / 2;
 
   c.fillStyle = COLOR.minimapBg;
   c.fillRect(mx - 3, my - 3, mw + 6, mh + 6);

@@ -841,14 +841,18 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
       得点板・実況・操作を縦に積むと、積んだぶんだけ盤が小さくなる。
       盤を画面いっぱいに置き、ほかは**その上に重ねる**。
    🔑 盤の倍率は `pitch.ts` の fit() が整数倍で入れる。ここで寸法を決めない。 */
+/* 🔴 デザインの試合画面の構成（D-29）: 上に**スタンド帯**、下に盤。
+      盤を画面の下へ寄せ、空いた上を背後の `<stadium-scene screen="match">` に見せる。
+      中央に置くと上下に帯が出て、スタンドが切れる。 */
 .screen-match.is-on {
   position: fixed;
   inset: 0;
   z-index: 3;
   display: grid;
-  place-items: center;
+  align-content: end;
+  justify-items: center;
   padding: 0;
-  background: var(--edge);
+  background: none;
 }
 
 .screen-match .pitch-wrap {
@@ -863,7 +867,6 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 .screen-match #pitch { width: auto; border: 0; }
 
 /* 重ねるものは、盤の上に浮かせる */
-.screen-match .scoreboard,
 .screen-match .ticker,
 .screen-match .match-controls {
   position: absolute;
@@ -873,50 +876,84 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   margin: 0;
   width: min(44rem, calc(100vw - var(--px) * 8));
 }
-.screen-match .scoreboard { top: calc(var(--px) * 4); }
+/* 全体図。デザインの右下の箱に合わせる */
+.mini-map {
+  position: absolute;
+  right: calc(var(--px) * 7);
+  bottom: calc(var(--px) * 7);
+  z-index: 4;
+  width: 300px;
+  height: 195px;
+  background: rgba(20, 64, 122, .55);
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .6);
+  image-rendering: pixelated;
+}
+
+/* 🔑 得点板は**左上**（デザインどおり）。中央に置くとスタンドの中心と喧嘩する */
+.screen-match .scoreboard {
+  position: absolute;
+  left: calc(var(--px) * 7);
+  top: calc(var(--px) * 7);
+  z-index: 4;
+}
 /* 🔑 操作ボタンの高さ（22）＋上下の余白ぶん上に置く。
       20 だと実況の下端とボタンが重なった（2026-10-03 の目視）。 */
 .screen-match .ticker { bottom: calc(var(--px) * 32); }
 .screen-match .match-controls { bottom: calc(var(--px) * 4); width: auto; }
 
 /* 得点板。試合中いちばん見る場所なので、前に出ている太さ（6px）を使う */
+/* 🔴 デザインの得点板（D-29）。**横一列の区画**にする。
+      チーム色 → スコア（明るい地）→ チーム色 → 時計（濃紺に黄）。
+      前は縦2段で、スタジアムの前に置くと間延びして読みづらかった。 */
 .scoreboard {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  grid-template-areas: "home score away" "clock clock clock";
-  gap: var(--px) calc(var(--px) * 5);
-  align-items: center;
-  padding: calc(var(--px) * 4) calc(var(--px) * 5);
-  background: var(--edge);
-  border: var(--w-pop) solid var(--edge);
-  box-shadow: var(--drop) var(--drop) 0 rgba(59, 42, 27, .5);
-  max-width: 44rem;
-  margin: 0 auto calc(var(--px) * 4);
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  background: none;
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .85);
+  width: max-content;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
 }
 .sb-team {
+  display: grid;
+  place-items: center;
+  padding: 0 calc(var(--px) * 6);
   font-weight: 800;
+  font-size: .92rem;
+  color: var(--ink-on-dark);
   white-space: nowrap;
+  max-width: 11rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .9);
 }
-.sb-team:first-child { grid-area: home; color: var(--home); }
-.sb-team:nth-child(3) { grid-area: away; text-align: right; color: #8ec6f5; }
+.sb-team:first-child { background: var(--ui); }
+.sb-team:nth-child(3) { background: var(--danger); }
 .sb-score {
-  grid-area: score;
-  padding: 0 calc(var(--px) * 4);
-  font-size: 1.6rem;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--px) * 3) calc(var(--px) * 7);
+  font-size: 1.7rem;
   font-weight: 900;
-  letter-spacing: .08em;
-  color: var(--ink-on-dark);
-  background: rgba(0, 0, 0, .28);
-  border: var(--w-hair) solid var(--ink-dim);
+  letter-spacing: .1em;
+  color: var(--ink);
+  background: var(--panel);
 }
+/* 時計は右端の濃紺。試合中いちばん視線が戻る場所 */
 .sb-clock {
-  grid-area: clock;
-  text-align: center;
-  font-size: .8rem;
-  font-weight: 700;
-  color: var(--paper-dark);
+  display: grid;
+  place-items: center;
+  padding: 0 calc(var(--px) * 6);
+  font-size: .95rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: var(--home);
+  background: var(--ui-edge);
 }
 
 .pitch-wrap {

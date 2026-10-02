@@ -84,6 +84,9 @@ const BG_SCENE: Record<string, string> = {
   boot: "title",
   setup: "menu",
   stadium: "result",
+  /* 🔑 `match` は上の 396/1080 がスタンド・屋根・LEDボードで、下は何も描かない
+        （デザイン側の `grassTop = H`）。そこへ本物の盤を敷く。 */
+  match: "match",
 };
 
 function showScreen(id: string): void {
@@ -792,6 +795,7 @@ function showMatchResult(): void {
 
 function main(): void {
   Pitch.attach($<HTMLCanvasElement>("pitch"));
+  Pitch.attachMini($<HTMLCanvasElement>("miniMap"));
 
   /* 🔑 以前は Pyodide（ブラウザで Python を動かす仕組み、約10MB）を読み込んでいた。
         TypeScript になったので待つものは無い。表示だけ一瞬で満たす */

@@ -293,10 +293,14 @@
   </div>
 
   <div class="pitch-wrap">
-    <!-- 🔑 640×360（16:9）。3倍がちょうど 1920×1080 でフルHDに隙間なく収まる。
-         画面に合わせた倍率は `pitch.ts` の fit() が入れる（整数倍のみ）。 -->
-    <canvas id="pitch" width="640" height="360"></canvas>
+    <!-- 🔑 640×228。**3倍で 1920×684**。上に載るスタンド帯（1080 のうち 396）を
+         差し引いた残りにちょうど収まる。倍率は `pitch.ts` の fit() が整数倍で入れる。 -->
+    <canvas id="pitch" width="640" height="228"></canvas>
   </div>
+
+  <!-- 全体図。🔴 ピッチの canvas の中ではなく**独立した枠**（デザインの右下の箱）。
+       盤の縦が短くなったので、中に置くと視界を食う。 -->
+  <canvas id="miniMap" class="mini-map" width="300" height="195" aria-hidden="true"></canvas>
 
   <div id="goalFlash" class="goal-flash" hidden>
     <span class="goal-word">ゴール！</span>
