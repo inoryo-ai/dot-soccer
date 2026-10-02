@@ -19,7 +19,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync,
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync,
          writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,8 +35,26 @@ export const EXPECTED_JS = [
   "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js",
-  "web/api.js", "web/main.js", "web/pitch.js", "web/sprites.js",
+  "web/api.js", "web/city.js", "web/fx.js", "web/iso.js", "web/main.js", "web/pitch.js",
+  "web/sprites.js",
 ] as const;
+
+/**
+ * 配信物からコメントを落とす。
+ *
+ * 🔑 HTML は `<!-- ... -->`、CSS は `/* ... *​/` だけを消す。
+ *    どちらも**入れ子にできない**ので、いちばん短く一致させれば足りる。
+ * 🔴 CSS の文字列の中に `/*` を書くと巻き込まれる。この画面では使っていないが、
+ *    使うことになったら、ここを素朴な正規表現のままにしない。
+ *    （検査 [10] が「配信物に禁止語が無いか」を見ているので、壊れれば気づける）
+ */
+export function stripComments(src: string, name: string): string {
+  const out = name.endsWith(".html")
+    ? src.replace(/<!--[\s\S]*?-->/g, "")
+    : src.replace(/\/\*[\s\S]*?\*\//g, "");
+  /* 空行が大量に残ると、消したことで逆に読みにくい配信物になる */
+  return out.replace(/\n{3,}/g, "\n\n").replace(/^\s*\n/, "");
+}
 
 export function listFiles(dir: string): string[] {
   const out: string[] = [];
@@ -57,7 +75,23 @@ export function build(log: (line: string) => void = (l) => console.log(l)): numb
     log(`❌ web/ に無いファイル: ${JSON.stringify(missing)}`);
     return 1;
   }
-  for (const name of STATIC_FILES) copyFileSync(join(WEB, name), join(DIST, name));
+  /* ─────────────────────────────────────────────────────────────
+   * 🔴 配るものからコメントを落とす
+   * ─────────────────────────────────────────────────────────────
+   * `index.html` と `style.css` は**そのまま配信される**。書いたコメントは
+   * 全部そのまま公開される。2026-10-02 に、取引先の名前が1件入ったまま
+   * 公開する一歩手前まで行った（以前にも内部メモを公開した前例がある）。
+   *
+   * 🔑 **禁止語の一覧で見張らない。** 一覧を持つと、その一覧自体が
+   *    「書いてはいけない名前の集まり」としてリポジトリに残る。
+   *    そもそもコメントを載せなければ、コメントからは何も漏れない。
+   * 🔑 JS 側は `tsconfig.web.json` の `removeComments` が同じことをする。
+   *    手元のソースは何も変わらない（配るものだけが変わる）。
+   */
+  for (const name of STATIC_FILES) {
+    const src = readFileSync(join(WEB, name), "utf8");
+    writeFileSync(join(DIST, name), stripComments(src, name), "utf8");
+  }
 
   try {
     execFileSync(process.execPath,

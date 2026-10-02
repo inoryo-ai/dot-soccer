@@ -267,6 +267,37 @@ function checkTools(): void {
  * 🔴 静的配信は「置いてあるものが全部公開される」。
  *    カードショップEDENでは内部メモが `/cards/README.md` で公開されていた。
  */
+/**
+ * 画面のコードが名指しする id が、**配る index.html に実在する**こと。
+ *
+ * ─────────────────────────────────────────────────────────────
+ * 🔴 2026-10-02 の見た目の作り直しで分かったこと
+ * ─────────────────────────────────────────────────────────────
+ * `src/web/main.ts` の `$("...")` は、無い id を渡されると**その場で例外**になる。
+ * ところが起きるのはブラウザで**その画面を開いた瞬間**だけで、
+ * 型チェックもテストも検査も、全部緑のまま通る（DOM を見ていないので当然）。
+ * 導線を変えて HTML の骨組みを動かすたびに、この踏み方が待っている。
+ *
+ * 🔑 だから機械で突き合わせる。**見つかるのは開く前**になる。
+ */
+function checkDomContract(index: string): void {
+  const ids = new Set([...index.matchAll(/\sid="([\w-]+)"/g)].map((m) => m[1]!));
+  const want = new Map<string, string>();
+  for (const f of tsFiles(join(ROOT, "src", "web"))) {
+    for (const m of readFileSync(f, "utf8").matchAll(/\$(?:<[^>]*>)?\("([\w-]+)"\)/g)) {
+      want.set(m[1]!, relative(ROOT, f));
+    }
+  }
+  const missing = [...want].filter(([id]) => !ids.has(id));
+  if (missing.length > 0) {
+    for (const [id, where] of missing) {
+      bad(`画面のコードが要る id が index.html に無い: #${id}（${where}）`);
+    }
+  } else {
+    ok(`画面のコードが名指しする ${want.size}個の id すべてが index.html にある`);
+  }
+}
+
 function checkWebBuild(): void {
   console.log("[10] ブラウザ配信物の組み立て — web/dist");
   const lines: string[] = [];
@@ -297,6 +328,7 @@ function checkWebBuild(): void {
     return;
   }
   const index = readFileSync(join(DIST, "index.html"), "utf8");
+  checkDomContract(index);
   const unstamped = [...index.matchAll(/(?:src|href)="([\w./-]+\.(?:js|css))"/g)].map((m) => m[1]);
   const imports = files.filter((f) => f.endsWith(".js")).flatMap((f) =>
     [...readFileSync(join(DIST, f), "utf8").matchAll(/from\s*"(\.{1,2}\/[\w./-]+\.js)"/g)]

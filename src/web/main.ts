@@ -8,6 +8,8 @@
 import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
+import * as City from "./city.ts";
+import * as Fx from "./fx.ts";
 import * as Pitch from "./pitch.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
@@ -47,9 +49,18 @@ const V = (): View => {
 
 /* ------------------------------------------------------------------ 共通 */
 
+/**
+ * 画面を1つだけ出す。
+ *
+ * 🔑 上の表示板（`#hudBar`）は画面の外にある1本なので、ここでまとめて出し入れする
+ *    （2026-10-02 の街ハブ化）。タイトルとチーム作成では、まだチームが無いので出さない。
+ */
+const NO_HUD = new Set(["boot", "setup"]);
+
 function showScreen(id: string): void {
   for (const s of document.querySelectorAll(".screen")) s.classList.remove("is-on");
   $(id).classList.add("is-on");
+  $("hudBar").hidden = NO_HUD.has(id);
   window.scrollTo(0, 0);
 }
 
@@ -204,6 +215,44 @@ function renderHome(): void {
   renderHistory();
 }
 
+/* -------------------------------------------------------------- 商店街 */
+
+/**
+ * 商店街の品ぞろえ。
+ *
+ * 🔴 **いまは品物を並べるところまで**（2026-10-02）。買う処理はまだ無い。
+ *    お金と持ち物は `src/sim/career.ts`（規則層）に置く必要があり、
+ *    そこへ手を入れると**正解データの作り直し**（D-18 と同じ手順）が要るため、
+ *    街の導線とは分けて次の段で入れる。
+ * 🔑 「準備中」と出すだけの空の店にしない。何が買えるようになるのかが見えていれば、
+ *    行き止まりではなく**これから開く店**に見える。
+ * 🔑 効果はすべて見た目だけ（要件 GD-03）。ここに能力を上げる品物を混ぜない。
+ */
+const SHOP_GOODS: { name: string; note: string; yen: number }[] = [
+  { name: "ユニフォーム", note: "青 / 赤 / 緑 / 縞 — ピッチのドット絵に出る", yen: 3000 },
+  { name: "ゴールキーパー着", note: "GK だけ別の色にできる", yen: 3000 },
+  { name: "髪型・髪色", note: "選手ごとに変えられる", yen: 1500 },
+  { name: "アクセサリー", note: "ヘアバンド・リストバンドなど", yen: 5000 },
+];
+
+function renderShop(): void {
+  const box = $("shopList");
+  box.textContent = "";
+  for (const g of SHOP_GOODS) {
+    const row = el("div", "shop-item");
+    const left = el("div", "shop-main");
+    left.append(el("div", "shop-name", g.name), el("div", "shop-note", g.note));
+    const right = el("div", "shop-buy");
+    right.append(el("div", "shop-yen", `${g.yen.toLocaleString("ja-JP")}円`));
+    const btn = el("button", "btn", "準備中");
+    btn.type = "button";
+    btn.disabled = true;
+    right.append(btn);
+    row.append(left, right);
+    box.append(row);
+  }
+}
+
 /* ---------------------------------------------------------------- 選手 */
 
 function renderSquad(): void {
@@ -354,18 +403,35 @@ function doTrain(): void {
         いまは「変えた項目（deltas）」の前後を、特訓後の選手一覧から読む。 */
   const after = view.squad.find((p) => p.index === who);
   const ups: string[] = [];
+  /* 🔑 飛ばす数字は **実際に動いた差**（now - before）にする。`r.deltas` は「かけようとした量」で、
+        上限に当たると実際はそこまで伸びない。要求量を飛ばすと、数字だけ増えて表は変わらない
+        ＝嘘になる。表に出している `before→now` と必ず同じ出どころにする。 */
+  const moved: number[] = [];
   for (const k of Object.keys(r.deltas)) {
     const before = r.visible_before[k] ?? r.hidden_before[k];
     const now = after?.visible[k] ?? after?.hidden[k];
     if (before !== undefined && now !== undefined && now !== before) {
       ups.push(`${k} ${before}→${now}`);
+      moved.push(now - before);
     }
   }
   box.append(el("div", "up", ups.length > 0 ? ups.join(" / ") : "（上限に達していて伸びませんでした）"));
-  box.append(el("div", r.before === r.after ? "" : "changed",
-                r.before === r.after
-                  ? `タイプ: ${r.after}（変化なし）`
-                  : `★ タイプが変わった: ${r.before} → ${r.after}`));
+  const typeChanged = r.before !== r.after;
+  box.append(el("div", typeChanged ? "changed" : "",
+                typeChanged
+                  ? `★ タイプが変わった: ${r.before} → ${r.after}`
+                  : `タイプ: ${r.after}（変化なし）`));
+
+  /* 🔴 数字が静かに変わるだけでは、特訓が効いたことに気づけない（`fx.ts` の頭に理由）。
+        伸びたぶんをその場から飛ばし、タイプが変わった時だけ帯と粒を足す。
+        🔑 演出は見た目だけ。ここで結果を作らない（上の `moved` は表と同じ値） */
+  for (const [i, d] of moved.entries()) {
+    Fx.floatNum(`${d > 0 ? "+" : ""}${d}`, box, i);
+  }
+  if (typeChanged) {
+    Fx.ribbon(`${r.player} は ${r.after} になった！`);
+    Fx.sparks(box);
+  }
 
   selectedCards = [];
   renderHome();
@@ -610,6 +676,8 @@ function showGoal(ev: MatchEvent | null): void {
   const box = $("goalFlash");
   $("goalWho").textContent = ev && ev.player ? `${ev.player}（${ev.team}）` : "";
   box.hidden = false;
+  /* 🔑 粒は枠が出てから撒く。先に撒くと、まだ幅のない要素の中心（＝画面の隅）から飛ぶ */
+  Fx.sparks(box, 12);
   clearTimeout(goalTimer);
   goalTimer = window.setTimeout(() => { box.hidden = true; }, 2600);
 }
@@ -689,7 +757,30 @@ function main(): void {
   renderPlanRows();
   renderPlanPresets();
   $<HTMLButtonElement>("loadBtn").disabled = !hasSave();
-  showScreen("setup");
+  /* 🔑 建物の絵と、押せる場所の位置を**同じ1か所（`city.ts` の SPOTS）から出す**。
+        CSS に座標を書き写すと、絵を動かしたときに押せる場所だけ取り残される */
+  City.draw($<HTMLCanvasElement>("cityCanvas"));
+  for (const [key, at] of Object.entries(City.SPOTS)) {
+    const spot = $(`go${key[0]!.toUpperCase()}${key.slice(1)}`);
+    spot.style.left = `${at.left}%`;
+    spot.style.top = `${at.top}%`;
+  }
+  renderShop();
+  showScreen("boot");
+
+  /* ---- タイトル → チーム作成 ---- */
+  $("titleNew").addEventListener("click", () => { showScreen("setup"); });
+
+  /* ---- 街から施設へ、施設から街へ ----
+     🔑 行き先は押されたボタンの `data-go`、戻りは `data-back` が持つ。
+        片方ずつ `addEventListener` を書くと、施設が増えるたびに書き忘れが出る */
+  $("city").addEventListener("click", (ev) => {
+    const go = (ev.target as HTMLElement | null)?.closest<HTMLElement>("[data-go]")?.dataset.go;
+    if (go) showScreen(go);
+  });
+  for (const b of document.querySelectorAll<HTMLElement>("[data-back]")) {
+    b.addEventListener("click", () => { showScreen("city"); });
+  }
 
   /* ---- チーム作成 ---- */
   $("startBtn").addEventListener("click", () => {
@@ -701,7 +792,7 @@ function main(): void {
     policyDraft = view.policy.map((r) => ({ ...r }));
     renderHome();
     saveGame(true);
-    showScreen("home");
+    showScreen("city");
   });
 
   $("loadBtn").addEventListener("click", () => {
@@ -723,7 +814,7 @@ function main(): void {
     view = out;
     policyDraft = view.policy.map((r) => ({ ...r }));
     renderHome();
-    showScreen("home");
+    showScreen("city");
   });
 
   /* ---- タブ ---- */
@@ -815,7 +906,7 @@ function main(): void {
   $("matchDone").addEventListener("click", () => {
     Pitch.stop();
     renderHome();
-    showScreen("home");
+    showScreen("city");
   });
 
   $("errorClose").addEventListener("click", () => { $("errorBox").hidden = true; });

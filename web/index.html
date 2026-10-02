@@ -3,22 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<title>ドットサッカー育成（デモ）</title>
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#3b2a1b">
+<title>.soccer — ドットサッカー育成（デモ）</title>
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="育成→試合→課題→特訓のループが回るドットサッカーのデモ。ブラウザの中だけで動きます。">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%231d7a3f'/><circle cx='8' cy='8' r='3' fill='%23fff'/></svg>">
+<!-- 🔑 アイコンもドットで描く（外部画像を読まないため）。芝の上にボールが1つ -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect width='16' height='16' fill='%233b2a1b'/><rect x='1' y='1' width='14' height='14' fill='%233fae5a'/><rect x='7' y='3' width='2' height='10' fill='%23eafbee'/><rect x='6' y='6' width='4' height='4' fill='%23fffdf3'/><rect x='7' y='7' width='2' height='2' fill='%233b2a1b'/></svg>">
 </head>
 <body>
 
-<!-- ========================================================= 読み込み中 -->
+<!-- ===========================================================================
+     上の表示板。🔴 **画面の中ではなく、画面の外に1つだけ置く**（2026-10-02）。
+     街にも事務所にもサッカー場にも同じものが要るが、id は1つしか持てない。
+     画面ごとに複製すると、どれを更新したのか追えなくなる。
+     ゲームが始まるまでは出さない（`hidden`）。
+     =========================================================================== -->
+<header class="hud" id="hudBar" hidden>
+  <div class="hud-team">
+    <span id="hudTeam" class="hud-name">—</span>
+    <span id="hudRank" class="badge">—</span>
+  </div>
+  <div id="hudRound" class="hud-round">—</div>
+</header>
+
+<!-- ========================================================== タイトル -->
 <section id="boot" class="screen is-on">
   <div class="boot-box">
-    <h1 class="logo">DOT SOCCER</h1>
-    <p class="logo-sub">育成シミュレーション（デモ版）</p>
+    <h1 class="logo">.soccer</h1>
+    <p class="logo-sub">ドットサッカー育成（デモ版）</p>
     <div class="boot-bar"><div id="bootFill" class="boot-fill"></div></div>
     <p id="bootMsg" class="boot-msg">準備しています…</p>
+    <div class="actions actions-center">
+      <button id="titleNew" class="btn btn-primary btn-big">はじめる</button>
+      <button id="loadBtn" class="btn btn-big">続きから</button>
+    </div>
     <p class="boot-note">
       試合の計算はすべて<strong>この端末の中</strong>で行います。
     </p>
@@ -61,54 +81,81 @@
     </div>
 
     <div class="actions">
-      <button id="startBtn" class="btn btn-primary">開幕する</button>
-      <button id="loadBtn" class="btn">続きから</button>
+      <button id="startBtn" class="btn btn-primary btn-big">開幕する</button>
     </div>
   </div>
 </section>
 
-<!-- ============================================================== ホーム -->
-<section id="home" class="screen">
-  <header class="hud">
-    <div class="hud-team">
-      <span id="hudTeam" class="hud-name">—</span>
-      <span id="hudRank" class="badge">—</span>
-    </div>
-    <div id="hudRound" class="hud-round">—</div>
-  </header>
+<!-- ============================================================== 街 -->
+<!-- 🔴 ここが常のホーム（2026-10-02 オーナー指示）。施設を選んで入り、戻ってくる。
+     🔑 押せる場所は **canvas の当たり判定ではなく、重ねた HTML のボタン**にする。
+        canvas の中で当たりを取ると、キーボードでも読み上げでも辿れなくなる。
+     🔑 建物の絵（`src/web/city.ts`）と重ねる位置（`SPOTS`）は必ず揃える。 -->
+<section id="city" class="screen">
+  <div class="city-wrap">
+    <canvas id="cityCanvas" width="640" height="360" aria-hidden="true"></canvas>
+    <button class="spot" data-go="shop" id="goShop">
+      <span class="spot-name">商店街</span>
+      <span class="spot-note">見た目をそろえる</span>
+    </button>
+    <button class="spot spot-main" data-go="stadium" id="goStadium">
+      <span class="spot-name">サッカー場</span>
+      <span class="spot-note">試合をする</span>
+    </button>
+    <button class="spot" data-go="office" id="goOffice">
+      <span class="spot-name">事務所</span>
+      <span class="spot-note">選手・戦術・順位表</span>
+    </button>
+  </div>
+</section>
 
-  <nav class="tabs" id="tabs">
-    <button class="tab is-on" data-tab="dash">ホーム</button>
-    <button class="tab" data-tab="squad">選手</button>
-    <button class="tab" data-tab="tactics">戦術</button>
-    <button class="tab" data-tab="table">順位表</button>
-  </nav>
+<!-- ====================================================== サッカー場 -->
+<section id="stadium" class="screen">
+  <div class="place">
+    <div class="place-head">
+      <button class="btn btn-back" data-back="1">街へ戻る</button>
+      <h2 class="place-title">サッカー場</h2>
+    </div>
+    <div class="panel">
+      <h2 class="panel-title">次の試合</h2>
+      <div id="nextFixture" class="fixture">—</div>
+      <button id="playBtn" class="btn btn-primary btn-big">キックオフ</button>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 商店街 -->
+<section id="shop" class="screen">
+  <div class="place">
+    <div class="place-head">
+      <button class="btn btn-back" data-back="1">街へ戻る</button>
+      <h2 class="place-title">商店街</h2>
+    </div>
+    <div class="panel">
+      <h2 class="panel-title">品ぞろえ</h2>
+      <div id="shopList" class="shop-list"></div>
+      <p class="note">
+        🔴 ここで買えるものは<strong>見た目だけ</strong>です（要件 GD-03
+        「価値は見た目を中心に置く」）。試合の結果は変わりません。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 事務所 -->
+<section id="office" class="screen">
+  <div class="place-head place-head-sticky">
+    <button class="btn btn-back" data-back="1">街へ戻る</button>
+    <h2 class="place-title">事務所</h2>
+  </div>
 
   <div class="tab-body">
-    <!-- ダッシュボード -->
-    <div class="tab-page is-on" data-page="dash">
-      <div class="panel">
-        <h2 class="panel-title">次の試合</h2>
-        <div id="nextFixture" class="fixture">—</div>
-        <button id="playBtn" class="btn btn-primary btn-big">キックオフ</button>
-      </div>
+    <!-- 選手と特訓 -->
+    <div class="tab-page is-on" data-page="squad">
       <div class="panel">
         <h2 class="panel-title">持っている特訓カード</h2>
         <div id="cardStock" class="card-stock"></div>
       </div>
-      <div class="panel">
-        <h2 class="panel-title">データ</h2>
-        <div class="actions">
-          <button id="saveBtn" class="btn">保存する</button>
-          <button id="exportBtn" class="btn">書き出す</button>
-          <button id="resetBtn" class="btn btn-danger">最初からやり直す</button>
-        </div>
-        <p id="saveMsg" class="note"></p>
-      </div>
-    </div>
-
-    <!-- 選手と特訓 -->
-    <div class="tab-page" data-page="squad">
       <div class="panel">
         <h2 class="panel-title">選手</h2>
         <p class="note">選手を選ぶ → カードを1枚（通常）か2枚（スペシャル）選ぶ → 特訓する</p>
@@ -186,7 +233,29 @@
         <div id="history" class="table-wrap"></div>
       </div>
     </div>
+
+    <!-- データ -->
+    <div class="tab-page" data-page="data">
+      <div class="panel">
+        <h2 class="panel-title">データ</h2>
+        <div class="actions">
+          <button id="saveBtn" class="btn">保存する</button>
+          <button id="exportBtn" class="btn">書き出す</button>
+          <button id="resetBtn" class="btn btn-danger">最初からやり直す</button>
+        </div>
+        <p id="saveMsg" class="note"></p>
+      </div>
+    </div>
   </div>
+
+  <!-- 🔑 コマンド帯は**事務所の中だけ**に出す（2026-10-02 オーナー判断）。
+       街が主なので、同じ場所へ行ける道を2本にしない。 -->
+  <nav class="tabs" id="tabs" aria-label="事務所のコマンド">
+    <button class="tab is-on" data-tab="squad">選手</button>
+    <button class="tab" data-tab="tactics">戦術</button>
+    <button class="tab" data-tab="table">順位表</button>
+    <button class="tab" data-tab="data">データ</button>
+  </nav>
 </section>
 
 <!-- ============================================================== 試合 -->
@@ -223,7 +292,7 @@
     <h3 class="sub-title">他会場</h3>
     <div id="others" class="table-wrap"></div>
     <div class="actions">
-      <button id="matchDone" class="btn btn-primary btn-big">ホームへ戻る</button>
+      <button id="matchDone" class="btn btn-primary btn-big">街へ戻る</button>
     </div>
   </div>
 </section>
@@ -234,6 +303,10 @@
   <p id="errorMsg"></p>
   <button id="errorClose" class="btn">閉じる</button>
 </div>
+
+<!-- 飛ぶ数字・知らせの帯・散る粒を置く層。`src/web/fx.ts` が中身を作る。
+     🔑 ここに入るものは**見た目だけ**で、試合の規則は1行も持たない（§6）。 -->
+<div id="fxLayer" aria-hidden="true"></div>
 
 <script type="module" src="js/web/main.js"></script>
 </body>
