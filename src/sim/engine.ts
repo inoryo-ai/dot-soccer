@@ -225,6 +225,11 @@ export class Match {
   loose_ticks = 0;
   action_cd = 0;          // 保持者が次の判断をするまでの残り秒数
   contest_cd = 0;         // 次に奪い合いが起きるまでの残り秒数
+  /**
+   * ゴールの後、キックオフを待っている間だけ入る。null なら試合が動いている。
+   * `team` はキックオフするチーム、`ticks` は待ち始めてからの秒数。
+   */
+  restart: { team: number; ticks: number } | null = null;
   private readonly staminaLowSeen = new Set<Actor>();
   /**
    * 🔑 局面の通し番号。**攻守が入れ替わるたびに1つ増える。**
@@ -277,9 +282,11 @@ export class Match {
   }
 
   private resetPositions(kickoffTeam: number): void {
+    this.restart = null;
+    const taker = this.kickoffTaker(kickoffTeam);
     for (const ts of this.teams) {
       for (const a of this.actors[ts.idx]!) {
-        [a.x, a.y] = this.basePosition(ts, a);
+        [a.x, a.y] = this.kickoffSpot(ts, a, kickoffTeam, taker);
         // 🔑 攻める方を向いて立つ。0 のままだと全員が右を向いて始まり、
         //    左へ攻めるチームが最初の数秒だけ曲がれない
         a.heading = ts.direction > 0 ? 0.0 : PI;
@@ -292,16 +299,112 @@ export class Match {
     }
     this.ball_x = C.PITCH_X / 2;
     this.ball_y = C.PITCH_Y / 2;
-    // キックオフはセンターサークルの最前の選手が持つ
-    const acts = this.actors[kickoffTeam]!;
-    const taker = minBy(
-      acts.filter((a) => a.pos !== "GK"),
-      (a) => Math.abs(a.x - this.ball_x) + Math.abs(a.y - this.ball_y),
+    this.takePossession(taker);
+  }
+
+  /** キックオフでボールを持つ人＝立ち位置がセンターに最も近いフィールド選手。 */
+  private kickoffTaker(kickoffTeam: number): Actor {
+    const ts = this.teams[kickoffTeam]!;
+    const cx = C.PITCH_X / 2;
+    const cy = C.PITCH_Y / 2;
+    return minBy(
+      this.actors[kickoffTeam]!.filter((a) => a.pos !== "GK"),
+      (a) => {
+        const [x, y] = this.kickoffPosition(ts, a, true);
+        return Math.abs(x - cx) + Math.abs(y - cy);
+      },
       (a) => a.name,
     );
-    taker.x = this.ball_x;
-    taker.y = this.ball_y;
-    this.takePossession(taker);
+  }
+
+  /** キックオフで立つ場所。蹴る人だけはセンター。 */
+  private kickoffSpot(ts: TeamState, a: Actor, kickoffTeam: number,
+                      taker: Actor): [number, number] {
+    if (a === taker) return [C.PITCH_X / 2, C.PITCH_Y / 2];
+    return this.kickoffPosition(ts, a, ts.idx === kickoffTeam);
+  }
+
+  /**
+   * キックオフの立ち位置。持ち場を自陣へ畳み、守る側はセンターサークルの外へ出す。
+   *
+   * 🔴 `basePosition` をそのまま使うと FW が最初から相手陣地にいる（2026-10-02 オーナー指摘）。
+   *    検査: `tests/kickoff.test.ts`
+   */
+  private kickoffPosition(ts: TeamState, a: Actor, kicking: boolean): [number, number] {
+    const [bx, by] = this.basePosition(ts, a);
+    const own = ts.ownGoalX();
+    let frac = Math.abs(bx - own) / C.PITCH_X;
+    if (frac > C.KICKOFF_FOLD_FROM) {
+      frac = C.KICKOFF_FOLD_FROM + (frac - C.KICKOFF_FOLD_FROM) * C.KICKOFF_FOLD_RATIO;
+    }
+    frac = Math.min(C.KICKOFF_MAX_FRAC, frac);
+    let x = ts.direction > 0 ? frac * C.PITCH_X : C.PITCH_X - frac * C.PITCH_X;
+    const y = by;
+    if (!kicking) {
+      const cx = C.PITCH_X / 2;
+      const dy = y - C.PITCH_Y / 2;
+      const r = C.CENTER_CIRCLE_R_M + C.KICKOFF_CIRCLE_MARGIN_M;
+      if (hypot(x - cx, dy) < r) x = cx - ts.direction * Math.sqrt(r * r - dy * dy);
+    }
+    return [x, y];
+  }
+
+  /**
+   * ゴールの後、全員がキックオフの位置へ歩いて戻るのを1秒ぶん進める。
+   *
+   * 🔴 瞬間移動で並び直すと、画面では全員が1コマで滑って戻り、
+   *    そのままボールが動き出す（2026-10-02 オーナー指摘）。
+   *    戻っている間もボールには誰も触れない。時計は進む（オーナー判断）。
+   * 🔑 乱数は引かない。戻る道のりは位置だけで決まる。
+   */
+  private stepRestart(): void {
+    const r = this.restart!;
+    r.ticks += 1;
+    const taker = this.kickoffTaker(r.team);
+    let settled = true;
+    for (const ts of this.teams) {
+      for (const a of this.actors[ts.idx]!) {
+        const [tx, ty] = this.kickoffSpot(ts, a, r.team, taker);
+        a.intent = "RETURN_KICKOFF";
+        // 🔴 近づいたら減速する。速い選手は向きを変えきれず、
+        //    立ち位置の周りを回り続けてキックオフが始まらなかった（実測で 180秒）
+        const d = hypot(tx - a.x, ty - a.y);
+        const effort = Math.min(C.EFFORT["RETURN_KICKOFF"]!,
+                                d * C.RESTART_APPROACH_RATIO / a.currentSpeed());
+        this.step(a, tx, ty, effort);
+        if (hypot(tx - a.x, ty - a.y) > C.RESTART_SETTLE_M) settled = false;
+      }
+    }
+    const cx = C.PITCH_X / 2;
+    const cy = C.PITCH_Y / 2;
+    const d = hypot(cx - this.ball_x, cy - this.ball_y);
+    if (d <= C.RESTART_BALL_SPEED_MPS) {
+      this.ball_x = cx;
+      this.ball_y = cy;
+    } else {
+      this.ball_x += (cx - this.ball_x) / d * C.RESTART_BALL_SPEED_MPS;
+      this.ball_y += (cy - this.ball_y) / d * C.RESTART_BALL_SPEED_MPS;
+      settled = false;
+    }
+    if ((settled && r.ticks >= C.RESTART_MIN_TICKS) || r.ticks >= C.RESTART_MAX_TICKS) {
+      // 残りの数十cmだけそろえて蹴り出す
+      this.resetPositions(r.team);
+    }
+  }
+
+  /** ゴールが決まった。ボールはゴールの中、誰も持っていない状態から戻り始める。 */
+  private beginRestart(kickoffTeam: number, scorer: TeamState): void {
+    this.owner = null;
+    this.loose_ticks = 0;
+    this.ball_x = scorer.targetGoalX();
+    this.ball_y = C.PITCH_Y / 2;
+    for (const side of this.actors) {
+      for (const a of side) {
+        a.intent = "RETURN_KICKOFF";
+        a.mark = null;
+      }
+    }
+    this.restart = { team: kickoffTeam, ticks: 0 };
   }
 
   private basePosition(ts: TeamState, a: Actor): [number, number] {
@@ -331,8 +434,12 @@ export class Match {
         this.evaluatePolicies();
         this.considerSubstitutions();
       }
-      this.moveAll();
-      this.resolveBall();
+      if (this.restart !== null) {
+        this.stepRestart();
+      } else {
+        this.moveAll();
+        this.resolveBall();
+      }
       if (this.owner !== null) this.teams[this.owner.team_idx]!.stats.possession_ticks += 1;
       this.trackStamina();
       if (this.record_enabled && this.tick % C.REPLAY_SAMPLE_TICKS === 0) this.recordFrame();
@@ -1075,7 +1182,7 @@ export class Match {
         this.log("ゴール", holder.name, ts.idx,
                  `${this.score[0]}-${this.score[1]} (${fmtF(dist, 0)}m)`);
       }
-      this.resetPositions(opp.idx);
+      this.beginRestart(opp.idx, ts);
     } else {
       if (this.log_enabled) {
         this.log("シュート", holder.name, ts.idx, `${fmtF(dist, 0)}m 枠外/セーブ`);

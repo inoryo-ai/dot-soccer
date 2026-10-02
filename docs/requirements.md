@@ -340,7 +340,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 | --- | --- | --- |
 | §6 MVP | `src/sim/engine.ts` `src/sim/model.ts` `src/sim/training.ts` | `tests/sim.test.ts` |
 | §6 再現性（D-08・D-16） | `src/sim/engine.ts` `src/sim/pyrandom.ts` `src/sim/detmath.ts` | `tests/sim.test.ts`（同じシードで同じ結果）／ `tests/pyrandom.test.ts` |
-| Python 版との同一性（D-15） | `tests/golden/` | `tests/golden.test.ts` `tests/cli.test.ts`（Python 版の出力と1値ずつ照合） |
+| Python 版との同一性（D-15） | `tests/golden/` | `tests/golden.test.ts` `tests/cli.test.ts`（Python 版の出力と1値ずつ照合。試合まわりは D-18 以降 `scripts/gen_golden.ts` で作り直したもの） |
 | §7 タイプ判定 | `src/sim/model.ts` の `judgeType` | `tests/sim.test.ts`（全カード20回以内に変化・組み合わせ全件） |
 | §8 特訓カード7枚 | `src/sim/training.ts` の `CARDS` | `scripts/check_project.ts` [4]（スペシャル20種の命名） |
 | §8 相反カード（D-02） | `src/sim/training.ts` の `FORBIDDEN_PAIRS` | 同上 |
@@ -353,6 +353,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 | §9 一人一人考えて動く（D-12） | `src/sim/engine.ts` の `think` / `decide*` | `tests/movement.test.ts`（共通の流れを引いた残り） |
 | §9 撃つ気（D-13） | `src/sim/engine.ts` の `shootWill` | `tests/ball_decisions.test.ts` |
 | §9 出す相手を選ぶ（D-14） | `src/sim/engine.ts` の `tryPass` | `tests/ball_decisions.test.ts` |
+| §9 キックオフとゴール後の再開（D-18） | `src/sim/engine.ts` の `kickoffPosition` / `stepRestart` | `tests/kickoff.test.ts` |
 | 試合の再生（画面用） | `src/sim/engine.ts` の `record=true` | `tests/replay.test.ts` |
 | ブラウザで遊ぶ | `src/web/` 一式・`web/index.html` | `tests/web_api.test.ts` / `scripts/check_project.ts` [10] |
 | 複数シーズンの通し | — | `tests/long_run.test.ts`（3シーズン） |
