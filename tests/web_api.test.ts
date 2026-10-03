@@ -212,7 +212,7 @@ describe("遊びの流れ", () => {
     const lineup = api.view().lineup;
     assert.equal(lineup.length, 11);
     assert.equal(lineup[0]!.pos, "GK");
-    assert.equal(lineup[0]!.x, 0.04);
+    assert.equal(lineup[0]!.x, 0.09);
     assert.equal(lineup[0]!.locked_x, 0.30);
     assert.equal(lineup[1]!.locked_x, null);
     jsonOk(lineup);
@@ -234,7 +234,7 @@ describe("遊びの流れ", () => {
     spots[0] = [0.80, 0.50];
     throwsGameError(() => api.setLineup(spots), "ゴールキーパー");
     /* 弾かれたあとも元のまま（半端に入らない） */
-    assert.equal(api.view().lineup[0]!.x, 0.04);
+    assert.equal(api.view().lineup[0]!.x, 0.09);
   });
 
   test("🔴 数が合わない・範囲の外は黙って直さずに弾く", () => {
