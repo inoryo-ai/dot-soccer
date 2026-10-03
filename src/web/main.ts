@@ -9,6 +9,7 @@ import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
 import * as Board from "./board.ts";
+import * as Ceremony from "./ceremony.ts";
 import * as City from "./city.ts";
 import * as Fx from "./fx.ts";
 import * as Pitch from "./pitch.ts";
@@ -721,7 +722,19 @@ function startMatch(): void {
   showScreen("match");
 
   lastScore = null;
+  skipAll = false;
+  const sides: Ceremony.Sides = {
+    home: out.teams[0], away: out.teams[1], myIndex: out.my_index,
+  };
   Pitch.load(out.replay, out.events, out.teams[0], {
+    /* 🔴 前半の終わりで一度止めて、ハーフタイム → 後半のキックオフ → 再生、の順に進める。
+          止めずに通すと、45分の区切りが**数字が変わるだけ**になって気づけない。 */
+    onHalfTime: () => {
+      const s = Pitch.state();
+      void Ceremony.halfTime(sides, s.home, s.away, scorersUpTo(out.events, s.tick))
+        .then(() => Ceremony.kickoff(2, sides))
+        .then(() => Pitch.resume());
+    },
     onUpdate: (s) => {
       /* 🔴 スコアが動いた瞬間に知らせる。数字が増えるだけだと見逃す */
       const now = `${s.home}-${s.away}`;
@@ -740,10 +753,34 @@ function startMatch(): void {
         t.append(el("span", null, "キックオフ"));
       }
     },
-    onFinish: showMatchResult,
+    onFinish: () => {
+      /* 🔑 「結果まで飛ばす」を押した人には演出も出さない。
+            飛ばしたのに幕が出るのは、押した意味を無視している */
+      if (skipAll) { showMatchResult(); return; }
+      const s = Pitch.state();
+      void Ceremony.fullTime(sides, s.home, s.away).then(showMatchResult);
+    },
   });
+
+  /* 🔑 キックオフの演出のあいだは止めておく。
+        笛の前に試合が動き出すと「もう始まっていた」ことになる */
+  Pitch.pause();
+  void Ceremony.kickoff(1, sides).then(() => Pitch.resume());
 }
 
+/** `tick` までに入ったゴールを、ハーフタイムの一覧に出す形で拾う */
+function scorersUpTo(events: MatchEvent[], tick: number): Ceremony.Scorer[] {
+  const out: Ceremony.Scorer[] = [];
+  for (const e of events) {
+    if (e.tick > tick) break;
+    if (e.type !== "ゴール") continue;
+    out.push({ time: e.time, team: e.team, player: e.player ?? "—" });
+  }
+  return out;
+}
+
+/** 「結果まで飛ばす」を押したか。押したら節目の演出も出さない */
+let skipAll = false;
 let goalTimer = 0;
 
 function showGoal(ev: MatchEvent | null): void {
@@ -997,7 +1034,13 @@ function main(): void {
     Pitch.setSpeed(SPEEDS[speedAt]!);
     $("mcSpeed").textContent = speedLabel(SPEEDS[speedAt]!);
   });
-  $("mcSkip").addEventListener("click", () => Pitch.skipToEnd());
+  $("mcSkip").addEventListener("click", () => {
+    /* 🔑 出ている演出を先に畳む。畳まずに飛ばすと、
+          結果の上にハーフタイムの幕が残って操作できなくなる */
+    skipAll = true;
+    Ceremony.cancel();
+    Pitch.skipToEnd();
+  });
 
   /* 全画面。🔑 盤の倍率は整数なので、窓にブラウザの枠があると高さが足りず2倍で止まる。
      全画面にすると 1920×1080 がそのまま使えて3倍になる（`pitch.ts` の fit()）。 */

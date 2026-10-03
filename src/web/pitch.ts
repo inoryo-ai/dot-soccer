@@ -29,6 +29,7 @@
  *    **`team` はチーム名の文字列**（番号ではない）。
  */
 
+import * as C from "../sim/constants.ts";
 import type { MatchEvent, Replay } from "../sim/engine.ts";
 import * as Sprites from "./sprites.ts";
 import type { KitColors } from "./sprites.ts";
@@ -117,6 +118,8 @@ export interface PitchState {
 export interface PitchCallbacks {
   onUpdate?: (s: PitchState) => void;
   onFinish?: () => void;
+  /** 前半が終わった瞬間に1回だけ。呼ばれた時点で再生は止まっている */
+  onHalfTime?: () => void;
 }
 
 interface Vec3 { x: number; y: number; z: number }
@@ -137,6 +140,10 @@ let lastStamp = 0;
 let rafId = 0;
 let onUpdate: ((s: PitchState) => void) | null = null;
 let onFinish: (() => void) | null = null;
+let onHalfTime: (() => void) | null = null;
+/** 前半の最後のコマ。ここで一度止めて、ハーフタイムの演出に渡す */
+let halfFrame = 0;
+let halfPassed = false;
 
 const camTarget = { x: 52.5, y: 34 };
 const phases: number[] = [];       // 選手ごとの足の運びの位相（足並みをそろえない）
@@ -262,6 +269,11 @@ export function load(data: Replay, matchEvents: MatchEvent[], homeTeamName: stri
   playing = true;
   onUpdate = callbacks.onUpdate ?? null;
   onFinish = callbacks.onFinish ?? null;
+  onHalfTime = callbacks.onHalfTime ?? null;
+  /* 🔑 前半の終わりは**規則の層の数字**から出す。ここに 2700 と書くと、
+        試合の長さを変えたときに演出だけ前半のままずれる */
+  halfFrame = C.TICKS_PER_HALF / data.sample_ticks;
+  halfPassed = false;
   lastStamp = 0;
   start();
 }
@@ -284,7 +296,14 @@ function step(stamp: number): void {
        1コマ = sample_ticks 秒ぶんなので、進むコマ数は speed ÷ sample_ticks */
     frameIndex += (dt * speed) / replay.sample_ticks;
     const last = replay.frames.length - 1;
-    if (frameIndex >= last) {
+    /* 🔴 前半の終わりの判定を**試合終了より先に**置く。後ろに置くと、
+          速さを上げたときに1コマで両方を跨いで、ハーフタイムが飛ぶ。 */
+    if (!halfPassed && frameIndex >= halfFrame) {
+      frameIndex = halfFrame;
+      halfPassed = true;
+      playing = false;
+      if (onHalfTime) onHalfTime();
+    } else if (frameIndex >= last) {
       frameIndex = last;
       playing = false;
       if (onFinish) onFinish();
@@ -646,6 +665,16 @@ export function toggle(): boolean {
   return playing;
 }
 
+/** 演出のあいだ止めておく／演出が終わったら動かす */
+export function pause(): void {
+  playing = false;
+}
+
+export function resume(): void {
+  playing = true;
+  lastStamp = 0;      // 止めていたあいだの時間を一気に進めない
+}
+
 export function setSpeed(v: number): number {
   speed = v;
   return speed;
@@ -654,6 +683,8 @@ export function setSpeed(v: number): number {
 export function skipToEnd(): void {
   const rp = need(replay, "再生データ");
   frameIndex = rp.frames.length - 1;
+  /* 🔑 飛ばしたらハーフタイムはもう出さない（終わった試合の途中で割り込まない） */
+  halfPassed = true;
   playing = false;
   draw(0.016);
   if (onUpdate) onUpdate(state());

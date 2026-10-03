@@ -1442,6 +1442,134 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   .city-wrap { width: 1920px; }
 }
 
+/* ============================================================ 節目の演出
+   キックオフ・ハーフタイム・試合終了。`src/web/ceremony.ts` が中身を作る。
+
+   🔑 **盤を隠しきらない。** 幕を真っ黒にすると、選手が並んでいる本物のキックオフの
+      絵が見えなくなる。うっすら敷いて、文字だけを前に出す。 */
+.ceremony {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 26, 48, .62);
+  cursor: pointer;
+}
+.cm-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--px) * 4);
+  padding: calc(var(--px) * 8) calc(var(--px) * 14);
+  background: var(--panel);
+  border: var(--w-pop) solid var(--ui-edge);
+  box-shadow: calc(var(--px) * 4) calc(var(--px) * 4) 0 rgba(10, 26, 48, .6);
+  text-align: center;
+  animation: cm-in .22s steps(4) both;
+}
+@keyframes cm-in {
+  from { transform: translateY(calc(var(--px) * -8)) scale(.9); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.cm-half {
+  font-size: 1.9rem;
+  font-weight: 900;
+  color: var(--ink-on-dark);
+  background: var(--ui);
+  border: var(--w-frame) solid var(--ui-edge);
+  padding: 0 calc(var(--px) * 8);
+}
+.cm-vs, .cm-score {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--px) * 6);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.cm-side { font-size: 1.15rem; font-weight: 800; color: var(--ink); }
+.cm-side.is-mine { color: var(--home-dark); }
+.cm-vs-mark { font-size: 1.5rem; font-weight: 900; color: var(--ink-dim); }
+.cm-score-num {
+  font-size: 2.6rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  padding: 0 calc(var(--px) * 6);
+  color: var(--ink);
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.cm-note { font-size: .86rem; font-weight: 700; color: var(--ink-dim); }
+.cm-ball {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  background: var(--accent-dark);
+  border: var(--w-frame) solid var(--ui-edge);
+  padding: 0 calc(var(--px) * 6);
+}
+
+.cm-scorers { display: flex; flex-direction: column; gap: var(--px); }
+.cm-scorer { display: flex; gap: calc(var(--px) * 4); align-items: baseline; }
+.cm-scorer-time { font-weight: 900; color: var(--ui-dk); font-variant-numeric: tabular-nums; }
+.cm-scorer-name { font-weight: 700; }
+
+.cm-whistle {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--px) * 3);
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--warn);
+  animation: cm-blow .5s steps(3) both;
+}
+/* 笛の印。中心の粒から音が広がる形を**枠だけ**で描く。
+   🔴 絵文字は使わない。笛の絵文字は無く、近いものを置くと鐘に見える */
+.cm-whistle-mark {
+  position: relative;
+  width: calc(var(--px) * 7);
+  height: calc(var(--px) * 7);
+  background: var(--warn);
+  border: var(--px) solid var(--edge);
+  flex: none;
+  /* 🔑 広がる音の線は `::before`/`::after` で**外側へ**出すので、
+        そのぶんの場所をここで空ける。空けないと文字に重なる（2026-10-03 の目視） */
+  margin-right: calc(var(--px) * 12);
+}
+.cm-whistle-mark::before,
+.cm-whistle-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: calc(var(--px) * 4);
+  height: calc(var(--px) * 4);
+  margin-top: calc(var(--px) * -2);
+  margin-left: calc(var(--px) * 2);
+  border-top: var(--px) solid var(--warn);
+  border-right: var(--px) solid var(--warn);
+  transform: rotate(45deg);
+}
+.cm-whistle-mark::after { margin-left: calc(var(--px) * 6); opacity: .55; }
+@keyframes cm-blow {
+  from { transform: scale(.6); opacity: 0; }
+  60%  { transform: scale(1.18); opacity: 1; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.cm-result { font-size: 1.6rem; font-weight: 900; }
+.is-win  .cm-result { color: var(--accent-dark); }
+.is-lose .cm-result { color: var(--danger-dark); }
+.is-draw .cm-result { color: var(--ink-dim); }
+
+/* 笛が鳴った瞬間に幕が引く。始まる気配を出す */
+.cm-box.is-go { animation: cm-go .28s steps(3) both; }
+@keyframes cm-go {
+  from { transform: none; }
+  to   { transform: scale(1.06); opacity: .15; }
+}
+
 /* ============================================================ 配置盤
    事務所 → 戦術 で、選手をつまんで立ち位置を動かす盤。
 

@@ -208,6 +208,21 @@ function minBy<T>(items: Iterable<T>, value: (t: T) => number, name: (t: T) => s
   return best;
 }
 
+/**
+ * その半分を蹴り始めるチーム（0=ホーム / 1=アウェー）。
+ *
+ * 🔴 **競技規則どおり、前半と後半は違うチームが蹴る。** 後半はエンドも入れ替わる。
+ *    本物ではコイントスの勝者が「どちらのゴールを攻めるか」か「キックオフするか」を選ぶが、
+ *    このゲームでは**ホーム／アウェーで決める**（2026-10-03 オーナー判断）。
+ *    運で決まる要素を増やさないほうが、同じシードで同じ試合になる筋が通る（D-16）。
+ *
+ * 🔑 ここが唯一の定義。試合も試合画面の演出もこれを読む。
+ *    画面側で「前半はホーム」と書き足すと、片方を直したときにもう片方が嘘になる。
+ */
+export function kickoffTeamOfHalf(half: 1 | 2): 0 | 1 {
+  return half === 1 ? 0 : 1;
+}
+
 export class Match {
   readonly rng: PyRandom;
   readonly seed: number;
@@ -425,12 +440,13 @@ export class Match {
 
   // ------------------------------------------------------------- 実行
   run(): MatchResult {
-    this.resetPositions(0);
+    this.resetPositions(kickoffTeamOfHalf(1));
     this.evaluatePolicies();
     for (this.tick = 0; this.tick < C.TICKS_PER_MATCH; this.tick++) {
       if (this.tick === C.TICKS_PER_HALF) {
+        /* 🔑 競技規則どおり、後半は**エンドを入れ替えて、前半と違うチームが**蹴る */
         for (const ts of this.teams) ts.direction *= -1;
-        this.resetPositions(1);
+        this.resetPositions(kickoffTeamOfHalf(2));
       }
       if (this.tick % C.POLICY_CHECK_INTERVAL === 0) {
         this.evaluatePolicies();

@@ -316,6 +316,10 @@
        盤の縦が短くなったので、中に置くと視界を食う。 -->
   <canvas id="miniMap" class="mini-map" width="300" height="195" aria-hidden="true"></canvas>
 
+  <!-- 試合の節目の演出（キックオフ／ハーフタイム／試合終了）。
+       🔑 中身は `src/web/ceremony.ts` が作る。押せば飛ばせる。 -->
+  <div id="ceremony" class="ceremony" hidden></div>
+
   <div id="goalFlash" class="goal-flash" hidden>
     <span class="goal-word">ゴール！</span>
     <span id="goalWho" class="goal-who"></span>
