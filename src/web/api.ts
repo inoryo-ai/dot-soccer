@@ -23,7 +23,8 @@ import type { Fixture, StandingsRow, StoredMatchResult } from "../sim/league.ts"
 import { ATTITUDES, FORMATIONS, GK_MAX_X_FRAC, POLICY_ACTIONS, POLICY_CONDITIONS,
          PolicyRule, Tactics, effectiveSlots } from "../sim/model.ts";
 import type { Player, SlotSpot } from "../sim/model.ts";
-import { PRESET_PLANS, TRAININGS_PER_PLAYER, defaultUserPlan } from "../sim/presets.ts";
+import { PRESET_PLANS, TRAININGS_PER_PLAYER, buildUserTeam,
+         defaultUserPlan } from "../sim/presets.ts";
 import type { Plan } from "../sim/presets.ts";
 import { pyRoundN } from "../sim/pymath.ts";
 import { CARDS, FORBIDDEN_PAIRS, getCard, issueText, specialName } from "../sim/training.ts";
@@ -339,6 +340,38 @@ export function setTactics(lineHeight: number, zoneWidth: number, attitude: stri
   if (t.formation !== formation) t.slots = null;
   t.formation = formation;
   return view();
+}
+
+/**
+ * **まだチームを作る前**の配置を見る。チーム作成の画面で使う。
+ *
+ * 🔴 ここで `career` を作らない。作ってしまうと「開幕していないのに
+ *    ゲームが始まっている」状態ができて、途中でやめたときに中途半端なセーブが残る。
+ *    使い捨てのチームを組んで、並びだけ返して捨てる。
+ *
+ * 🔑 名前も本物（同じ運の種なら開幕後と同じ11人になる）。仮名で並べると、
+ *    「開幕したら知らない名前になっていた」になる。
+ */
+export function previewLineup(teamName: string, seed: number, formation: string):
+  LineupSpot[] {
+  if (!(formation in FORMATIONS)) throw new GameError(`未知のフォーメーション: ${formation}`);
+  const name = (teamName ?? "").trim() || "（名前未定）";
+  let team;
+  try {
+    team = buildUserTeam(name, Math.trunc(Number(seed)), formation);
+  } catch (e) {
+    if (e instanceof ValueError) throw new GameError(e.message);
+    throw e;
+  }
+  const slots = effectiveSlots(team.tactics);
+  return Match.assignSlots(team.players, slots).map(([player, slot], i) => ({
+    index: i,
+    pos: slot[0],
+    name: player.name,
+    x: slot[1],
+    y: slot[2],
+    locked_x: slot[0] === "GK" ? GK_MAX_X_FRAC : null,
+  }));
 }
 
 /* ------------------------------------------------------------ 配置（立ち位置） */

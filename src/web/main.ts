@@ -35,7 +35,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string | null,
 
 let boot: Bootstrap | null = null;        // 変わらない情報（カード一覧・選択肢）
 let view: View | null = null;             // いまの状態
-let plan: Record<string, number> = {};    // 初期育成の配分
+/* チーム作成の画面で触っている配置の下書き。まだチームが無いので、ここに持つ。
+   🔑 `null` は「既定のまま触っていない」。触っていなければ開幕時に何も渡さない。 */
+let setupSlots: [number, number][] | null = null;
 let selectedPlayer: number | null = null;
 let selectedCards: string[] = [];
 let matchData: PlayNextResult | null = null;
@@ -172,64 +174,35 @@ function hasSave(): boolean {
   }
 }
 
-/* -------------------------------------------------- チーム作成の初期育成 */
+/* ------------------------------------------------ チーム作成（配置の下書き） */
 
-function renderPlanRows(): void {
-  const rows = $("planRows");
-  rows.textContent = "";
-  for (const [key, card] of Object.entries(B().cards)) {
-    const row = el("div", "plan-row");
-    row.append(el("span", null, card.label));
-    const range = el("input");
-    range.type = "range";
-    range.min = "0";
-    range.max = String(B().trainings_per_player);
-    range.value = String(plan[key] || 0);
-    range.addEventListener("input", () => {
-      plan[key] = Number(range.value);
-      updatePlanTotal();
-    });
-    const out = el("output", null, String(plan[key] || 0));
-    out.dataset.key = key;
-    row.append(range, out);
-    rows.append(row);
-  }
-  updatePlanTotal();
+/**
+ * チーム作成の画面の配置盤。**まだチームが無い状態**で描く。
+ *
+ * 🔴 ここで `api.newGame` を呼ばない。呼ぶと「開幕していないのにゲームが始まっている」
+ *    状態ができて、途中でやめたときに中途半端なセーブが残る。
+ *    `api.previewLineup()` が使い捨てのチームを組んで、並びだけ返す。
+ * 🔑 名前も本物（同じ運の種なら開幕後と同じ11人）。仮名で並べると
+ *    「開幕したら知らない名前になっていた」になる。
+ */
+function renderSetupBoard(): void {
+  const list = call(() => api.previewLineup($<HTMLInputElement>("teamName").value,
+                                            Number($<HTMLInputElement>("seed").value),
+                                            $<HTMLSelectElement>("formation").value));
+  if (!list) return;
+  /* 触った配置があれば、その座標を重ねて見せる（名前と位置の名はいまの顔ぶれから） */
+  const draft = setupSlots;
+  const shown = draft === null ? list
+    : list.map((sp, i) => ({ ...sp, x: draft[i]?.[0] ?? sp.x, y: draft[i]?.[1] ?? sp.y }));
+  Board.render($("setupBoard"), shown, {
+    commit(spots) {
+      setupSlots = spots;
+      $("setupBoardMsg").textContent = "この位置で開幕します。";
+    },
+    say(text) { $("setupBoardMsg").textContent = text; },
+  });
 }
 
-function updatePlanTotal(): void {
-  const total = Object.values(plan).reduce((a, b) => a + b, 0);
-  const target = B().trainings_per_player;
-  $("planUsed").textContent = String(total);
-  $("planTotal").textContent = String(target);
-  $("planTotalTarget").textContent = String(target);
-  for (const out of $("planRows").querySelectorAll("output")) {
-    out.textContent = String(plan[out.dataset.key ?? ""] || 0);
-  }
-  for (const r of $("planRows").querySelectorAll<HTMLInputElement>('input[type="range"]')) {
-    const key = r.parentElement?.querySelector("output")?.dataset.key ?? "";
-    r.value = String(plan[key] || 0);
-  }
-  /* 🔴 「ちょうど20回」でなければ開幕させない。足りないとAIだけ育った状態で始まる */
-  const ok = total === target;
-  $<HTMLButtonElement>("startBtn").disabled = !ok;
-  $("planWarn").textContent = ok ? ""
-    : (total < target ? `（あと ${target - total} 回）` : `（${total - target} 回 多い）`);
-}
-
-function renderPlanPresets(): void {
-  const box = $("planPresets");
-  box.textContent = "";
-  for (const [name, preset] of Object.entries(B().preset_plans)) {
-    const chip = el("button", "chip", name);
-    chip.type = "button";
-    chip.addEventListener("click", () => {
-      plan = { ...preset };
-      updatePlanTotal();
-    });
-    box.append(chip);
-  }
-}
 
 /* ---------------------------------------------------------------- ホーム */
 
@@ -892,11 +865,8 @@ function main(): void {
 
   boot = call(() => api.bootstrap());
   if (!boot) return;
-  plan = { ...boot.default_plan };
 
   fillSelect($<HTMLSelectElement>("formation"), boot.formations, boot.formations[0] ?? "4-4-2");
-  renderPlanRows();
-  renderPlanPresets();
   $<HTMLButtonElement>("loadBtn").disabled = !hasSave();
   /* 🔑 建物の絵と、押せる場所の位置を**同じ1か所（`city.ts` の SPOTS）から出す**。
         CSS に座標を書き写すと、絵を動かしたときに押せる場所だけ取り残される */
@@ -910,7 +880,29 @@ function main(): void {
   showScreen("boot");
 
   /* ---- タイトル → チーム作成 ---- */
-  $("titleNew").addEventListener("click", () => { showScreen("setup"); });
+  $("titleNew").addEventListener("click", () => {
+    showScreen("setup");
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "";
+    renderSetupBoard();
+  });
+
+  /* 🔴 フォーメーションを変えたら配置の下書きは捨てる。枠の数は4つとも11で同じなので
+        検査は通ってしまうが、4-4-2 のために置いた座標を 3-4-3 に当てても意味が無い。
+     🔑 運の種と名前は**顔ぶれが変わるだけ**なので、置いた位置は保つ。 */
+  $("formation").addEventListener("change", () => {
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "";
+    renderSetupBoard();
+  });
+  for (const id of ["seed", "teamName"]) {
+    $(id).addEventListener("input", () => { renderSetupBoard(); });
+  }
+  $("setupBoardReset").addEventListener("click", () => {
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "フォーメーションの形に戻しました。";
+    renderSetupBoard();
+  });
 
   /* ---- 街から施設へ、施設から街へ ----
      🔑 行き先は押されたボタンの `data-go`、戻りは `data-back` が持つ。
@@ -925,10 +917,20 @@ function main(): void {
 
   /* ---- チーム作成 ---- */
   $("startBtn").addEventListener("click", () => {
-    const out = call(() => api.newGame($<HTMLInputElement>("teamName").value,
-                                       Number($<HTMLInputElement>("seed").value),
-                                       $<HTMLSelectElement>("formation").value, plan));
+    /* 🔑 初期育成の配分は渡さない（2026-10-03 オーナー指示で画面から外した）。
+          省くと `src/sim/presets.ts` の既定の配分で全員が育つ。 */
+    let out = call(() => api.newGame($<HTMLInputElement>("teamName").value,
+                                     Number($<HTMLInputElement>("seed").value),
+                                     $<HTMLSelectElement>("formation").value));
     if (!out) return;
+    /* 🔴 配置は**チームができてから**入れる。作る前の盤は使い捨てのチームで
+          描いているので、ここで本物のチームへ入れ直す必要がある。 */
+    const slots = setupSlots;
+    if (slots !== null) {
+      const moved = call(() => api.setLineup(slots));
+      if (!moved) return;
+      out = moved;
+    }
     view = out;
     policyDraft = view.policy.map((r) => ({ ...r }));
     renderHome();

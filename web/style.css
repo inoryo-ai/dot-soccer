@@ -1453,6 +1453,26 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   .city-wrap { width: 1920px; }
 }
 
+/* ============================================================ チーム作成
+   🔑 **左で決めて、右で並べる**（2026-10-03 オーナー指示）。
+      左は入力が3つだけなので幅を取らない。右の盤に場所を回す。
+   🔴 狭い窓では**縦に積む**。横に並べたまま縮めると、盤が小さくなりすぎて
+      駒がつまめなくなる（駒は指で触れる大きさが要る）。 */
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: calc(var(--px) * 7);
+  align-items: start;
+  max-width: 68rem;
+  margin: calc(var(--px) * 10) auto;
+}
+@media (max-width: 900px) {
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.setup-left, .setup-right { margin-bottom: 0; }
+/* 盤はこの画面では枠いっぱいまで使う（事務所より広く取れる） */
+.setup-right .board { max-width: none; }
+
 /* ============================================================ 節目の演出
    キックオフ・ハーフタイム・試合終了。`src/web/ceremony.ts` が中身を作る。
 
@@ -1598,7 +1618,9 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   aspect-ratio: 105 / 68;
   border: var(--w-frame) solid var(--ui-edge);
   background: var(--turf);
-  overflow: hidden;
+  /* 🔴 **駒は盤からはみ出してよい**（2026-10-03 の目視）。ここを `hidden` にしていたので、
+        ゴールライン上に立つ GK の駒が左端で**半分切れていた**。
+        芝と白線だけを `.board-grass` 側で切り、駒は外へ出す。 */
   touch-action: none;             /* 🔴 これが無いと、指でつまむと画面ごとスクロールする */
   user-select: none;
 }
@@ -1606,6 +1628,7 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 .board-grass {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   /* 芝の縞。盤でも縞を敷くと、駒がどのくらい動いたか目で測れる */
   background: repeating-linear-gradient(90deg,
               var(--turf) 0 calc(var(--px) * 16),

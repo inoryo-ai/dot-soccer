@@ -71,43 +71,49 @@
 </section>
 
 <!-- ======================================================= チームを作る -->
+<!-- 🔑 2段組。**左で決めて、右で並べる。**（2026-10-03 オーナー指示）
+     左は「チーム名とフォーメーションだけ」。右は開幕前から選手を置ける盤。
+     🔴 右の盤は**まだチームが無い状態**で描く。`api.previewLineup()` が
+        使い捨てのチームを組んで並びだけ返す（`career` は作らない）。 -->
 <section id="setup" class="screen">
-  <div class="panel panel-wide">
-    <h2 class="panel-title">チームを作る</h2>
+  <div class="setup-grid">
 
-    <div class="field">
-      <label for="teamName">チーム名</label>
-      <input id="teamName" type="text" maxlength="12" value="ドットFC" autocomplete="off">
-    </div>
+    <div class="panel setup-left">
+      <h2 class="panel-title">チームを作る</h2>
 
-    <div class="field-row">
+      <div class="field">
+        <label for="teamName">チーム名</label>
+        <input id="teamName" type="text" maxlength="12" value="ドットFC" autocomplete="off">
+      </div>
+
       <div class="field">
         <label for="formation">フォーメーション</label>
         <select id="formation"></select>
       </div>
+
       <div class="field">
         <label for="seed">運の種（同じ数字なら同じチーム）</label>
         <input id="seed" type="number" min="0" max="999999" value="1">
       </div>
+
+      <div class="actions">
+        <button id="startBtn" class="btn btn-primary btn-big">開幕する</button>
+      </div>
     </div>
 
-    <h3 class="sub-title">初期育成 — 全選手に特訓<span id="planTotalTarget">20</span>回</h3>
-    <p class="note">
-      AIチームも同じ回数だけ育った状態で開幕します。<strong>配分だけがチームの個性</strong>になります。
-    </p>
-    <div id="planRows" class="plan-rows"></div>
-    <p class="plan-status">
-      割り振り <strong><span id="planUsed">0</span></strong> / <span id="planTotal">20</span>
-      <span id="planWarn" class="warn"></span>
-    </p>
-    <div class="plan-presets">
-      <span>お手本:</span>
-      <div id="planPresets" class="chip-row"></div>
+    <div class="panel setup-right">
+      <h2 class="panel-title">選手の位置</h2>
+      <p class="note">
+        選手をつまんで動かすと、その位置から試合が始まります。
+        <strong>矢印キーでも動かせます</strong>（Shiftで大きく）。GKは自陣までしか出せません。
+      </p>
+      <div id="setupBoard"></div>
+      <div class="actions">
+        <button id="setupBoardReset" class="btn">フォーメーションの形に戻す</button>
+        <span id="setupBoardMsg" class="note"></span>
+      </div>
     </div>
 
-    <div class="actions">
-      <button id="startBtn" class="btn btn-primary btn-big">開幕する</button>
-    </div>
   </div>
 </section>
 
