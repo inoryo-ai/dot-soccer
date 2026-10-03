@@ -1295,7 +1295,10 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
    位置は `city.ts` の SPOTS から JS が入れる（絵と座標の出どころを1つにする） */
 .spot {
   position: absolute;
-  transform: translate(-50%, -50%);
+  /* 🔴 指した点の**上**に乗せる（2026-10-03 オーナー指摘「建物の上に名前を出して」）。
+        中心合わせ（-50%）だと札が建物にかぶさって、スタジアムもビルも隠れていた。
+        下端を合わせれば、下に出る ▼ がちょうど建物の天辺を指す。 */
+  transform: translate(-50%, -100%);
   display: grid;
   gap: 0;
   padding: calc(var(--px) * 2) calc(var(--px) * 4);
@@ -1327,7 +1330,7 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 }
 .spot-main .spot-name { font-size: 1.05rem; }
 .spot:hover { filter: brightness(1.08); }
-.spot:active { transform: translate(-50%, calc(-50% + var(--drop))); box-shadow: none; }
+.spot:active { transform: translate(-50%, calc(-100% + var(--drop))); box-shadow: none; }
 .spot:focus-visible { outline: var(--w-frame) solid var(--away); outline-offset: var(--px); }
 /* ▼ で「ここへ入る」を示す */
 .spot::after {

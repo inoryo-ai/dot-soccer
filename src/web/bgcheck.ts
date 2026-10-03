@@ -17,7 +17,7 @@ const ITEMS: { kind: Bg.Kind; label: string; spots: boolean }[] = [
 ];
 
 const SPOT_LABEL: Record<string, string> = {
-  stadium: "サッカー場", shop: "商店街", office: "事務所",
+  stadium: "サッカー場", shop: "商店街", office: "サッカークラブ",
 };
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
