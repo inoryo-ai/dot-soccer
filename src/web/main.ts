@@ -8,14 +8,13 @@
 import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
+import * as Bg from "./bg.ts";
 import * as Board from "./board.ts";
 import * as Ceremony from "./ceremony.ts";
-import * as City from "./city.ts";
 import * as Fx from "./fx.ts";
 /* 🔑 試合の描画は3Dに一本化した（D-33）。外から見える形は前のままなので、
       ここは読み込み先が変わるだけ。別名は `Pitch` のまま置く。 */
 import * as Pitch from "./match3d.ts";
-import * as Room from "./room.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
 
@@ -69,20 +68,31 @@ const NO_HUD = new Set(["boot", "setup", "match"]);
 /**
  * 画面ごとの背景の絵（`web/bg/` に置いたもの）。
  *
- * 🔴 ここに無い画面は、従来どおり `room.ts` が手続きで描く（D-26）。
- *    絵が用意できた画面から1行ずつ移していける。
+ * 🔴 いまは空。絵のファイルを持ち込む画面ができたらここへ1行足す。
+ *    街・商店街・事務所は**コードで描く**ほうを採った（下の `BG_CODE`）。
  * 🔑 選手とピッチは**絵にしない**。商店街で買う見た目で色を差し替える仕様なので、
  *    焼き込むと着せ替えが機能しなくなる。
  */
 const BG_PHOTO: Record<string, string> = {};
 
 /**
+ * デザイン由来の**コードで描く背景**を使う画面（2026-10-03 取り込み）。
+ *
+ * 🔑 街は画面の中の `cityCanvas` に敷く（押せる場所を重ねるため）。
+ *    商店街と事務所は画面の外の1枚（`roomCanvas`）に敷く。
+ * 🗑 これが入ったことで `city.ts`（街の絵）と `room.ts`（施設の中の絵）は役目を終えた。
+ */
+const BG_CODE: Record<string, Bg.Kind> = {
+  shop: "arcade",
+  office: "office",
+};
+
+/**
  * デザイン由来の**動く背景**を使う画面（D-28）。値は `<stadium-scene>` の `screen` 属性。
  *
  * 🔑 `title` / `menu` / `result` は同じ「引きの構え」。`menu` だけ少しぼかして暗くなるので、
  *    手前にパネルを置く画面（チーム作成・サッカー場）に向く。
- * 🔴 ここに無い画面は従来どおり `room.ts` が手続きで描く。
- *    街・商店街・事務所の部品（`city.js` / `shop.js` / `office.js`）はデザイン側に発注済み。
+ * 🗑 2026-10-03: 街・商店街・事務所はデザインから届いたので `BG_CODE` へ移した。
  * 🔴 `match` はまだ入れていない。デザインの `match` は**自前のピッチの絵も描く**ので、
  *    本物の試合描画と重なる。組み合わせ方を決めてから入れる。
  */
@@ -109,16 +119,19 @@ function showScreen(id: string): void {
   const room = $<HTMLCanvasElement>("roomCanvas");
   const scr = BG_SCENE[id];
   const src = BG_PHOTO[id];
+  const code = BG_CODE[id];
   scene.hidden = scr === undefined;
   photo.hidden = src === undefined;
+  room.hidden = code === undefined;
   if (scr !== undefined) {
     $("bgSceneEl").setAttribute("screen", scr);
-    room.hidden = true;
   } else if (src !== undefined) {
     photo.style.backgroundImage = `url("${src}")`;
-    room.hidden = true;
-  } else {
-    room.hidden = !Room.draw(room, id);
+  } else if (code !== undefined) {
+    /* 🔑 `hidden` を外してから描く。隠れている要素は大きさが 0 なので、
+          先に描くと1倍で描いてしまう */
+    room.hidden = false;
+    Bg.draw(room, code);
   }
   window.scrollTo(0, 0);
 }
@@ -870,8 +883,8 @@ function main(): void {
   $<HTMLButtonElement>("loadBtn").disabled = !hasSave();
   /* 🔑 建物の絵と、押せる場所の位置を**同じ1か所（`city.ts` の SPOTS）から出す**。
         CSS に座標を書き写すと、絵を動かしたときに押せる場所だけ取り残される */
-  City.draw($<HTMLCanvasElement>("cityCanvas"));
-  for (const [key, at] of Object.entries(City.SPOTS)) {
+  Bg.draw($<HTMLCanvasElement>("cityCanvas"), "town");
+  for (const [key, at] of Object.entries(Bg.TOWN_SPOTS)) {
     const spot = $(`go${key[0]!.toUpperCase()}${key.slice(1)}`);
     spot.style.left = `${at.left}%`;
     spot.style.top = `${at.top}%`;

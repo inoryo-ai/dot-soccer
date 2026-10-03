@@ -1282,6 +1282,9 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 #cityCanvas {
   display: block;
   width: 100%;
+  /* 🔴 **比率は CSS で決め切る。** `height: auto` だけだと canvas の属性を見るので、
+        `bg.ts` が属性を書く → 箱が変わる → また描く、の堂々巡りになる（試合の盤と同じ）。 */
+  aspect-ratio: 16 / 9;
   height: auto;
   border: var(--w-hair) solid var(--edge);
   /* 🔑 ドット絵を滲ませない（盤と同じ） */

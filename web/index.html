@@ -121,7 +121,7 @@
 <!-- 🔴 ここが常のホーム（2026-10-02 オーナー指示）。施設を選んで入り、戻ってくる。
      🔑 押せる場所は **canvas の当たり判定ではなく、重ねた HTML のボタン**にする。
         canvas の中で当たりを取ると、キーボードでも読み上げでも辿れなくなる。
-     🔑 建物の絵（`src/web/city.ts`）と重ねる位置（`SPOTS`）は必ず揃える。 -->
+     🔑 建物の絵（`web/bg/town.js`）と重ねる位置（`bg.ts` の `TOWN_SPOTS`）は必ず揃える。 -->
 <section id="city" class="screen">
   <div class="city-wrap">
     <canvas id="cityCanvas" width="640" height="360" aria-hidden="true"></canvas>
@@ -368,6 +368,12 @@
 
 <!-- 🔑 module ではなく普通の script。カスタム要素をすぐ登録したいので、
      main.js（module＝遅延実行）より先に読む -->
+<!-- 🔑 デザイン由来の背景（街・商店街・事務所）。普通の script でグローバルに関数を置く。
+     `src/web/bg.ts` がそれを読んで画面へ敷く。読み込み順はここが先。 -->
+<script src="bg/lib.js"></script>
+<script src="bg/town.js"></script>
+<script src="bg/arcade.js"></script>
+<script src="bg/office.js"></script>
 <script src="scene/stadium.js"></script>
 <script type="module" src="js/web/main.js"></script>
 </body>

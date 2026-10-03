@@ -52,9 +52,9 @@ export const EXPECTED_JS = [
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js",
   "web/api.js", "web/bg.js", "web/bgcheck.js", "web/board.js", "web/ceremony.js",
-  "web/city.js", "web/face.js",
-  "web/faces.js", "web/fx.js", "web/iso.js", "web/lab.js", "web/main.js",
-  "web/field3d.js", "web/match3d.js", "web/pitch3d.js", "web/room.js",
+  "web/face.js",
+  "web/faces.js", "web/fx.js", "web/lab.js", "web/main.js",
+  "web/field3d.js", "web/match3d.js", "web/pitch3d.js",
   "web/stadium3d.js",
   "web/voxel.js",
 ] as const;
