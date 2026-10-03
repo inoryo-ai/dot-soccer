@@ -293,6 +293,7 @@ const PAGES: Record<string, string> = {
   "lab.ts": "lab.html",
   "pitch3d.ts": "pitch3d.html",
   "faces.ts": "faces.html",
+  "bgcheck.ts": "bgcheck.html",
 };
 
 function checkDomContract(): void {

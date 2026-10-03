@@ -29,5 +29,5 @@
   //    🔴 ここに足し忘れると `web/face.js が足りない` で組み立てが止まる。
   //       入口から辿れないファイルは出ないため。
   "files": ["src/web/main.ts", "src/web/lab.ts", "src/web/pitch3d.ts",
-            "src/web/faces.ts"]
+            "src/web/faces.ts", "src/web/bgcheck.ts"]
 }
