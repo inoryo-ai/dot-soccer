@@ -18,6 +18,7 @@
  */
 
 import type { LineupSpot } from "./api.ts";
+import * as Face from "./face.ts";
 
 /** 駒を置ける範囲（割合）。端まで行くと駒が盤から見切れる */
 const PAD = 0.03;
@@ -75,7 +76,15 @@ function chip(root: HTMLElement, s: LineupSpot, i: number): HTMLElement {
   const c = el("button", `board-chip ${POS_CLASS[s.pos] ?? ""}`);
   (c as HTMLButtonElement).type = "button";
   c.dataset.index = String(i);
-  c.append(el("span", "board-pos", s.pos), el("span", "board-name", s.name));
+  /* 🔑 顔・ポジション・名前の3つを載せる（2026-10-03 オーナー指示）。
+        名前だけだと、11人の中から目当ての選手を**読まないと**見つけられない。
+        顔があると形で探せるので、盤の上で目が止まる回数が減る。
+     🔑 顔は名前から決まる（`face.ts`）。保存するものは増えない。 */
+  const face = Face.toCanvas(Face.faceOf(s.name), 2);
+  face.className = "board-face";
+  const row = el("span", "board-tag");
+  row.append(el("span", "board-pos", s.pos), el("span", "board-name", s.name));
+  c.append(face, row);
   place(c, spots[i]![0], spots[i]![1]);
 
   /* 🔑 つまんでいる指に名前を付けて追う。途中で別の指が触っても混ざらない */

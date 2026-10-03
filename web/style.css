@@ -1690,6 +1690,13 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   z-index: 5;
   box-shadow: calc(var(--drop) * 2) calc(var(--drop) * 2) 0 rgba(20, 40, 25, .5);
 }
+.board-face {
+  display: block;
+  image-rendering: pixelated;
+  /* 🔑 顔は盤の上で**形で探す**ための目印。読む前に見つかるのが狙い */
+  margin-bottom: var(--px);
+}
+.board-tag { display: flex; align-items: center; gap: var(--px); }
 .board-pos {
   font-size: .62rem; font-weight: 900; line-height: 1.2;
   padding: 0 calc(var(--px) * 2);
