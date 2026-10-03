@@ -19,6 +19,16 @@
  * `skipToEnd` / `pause` / `resume` / `stop`。
  * 画面（`main.ts`）はこれしか触っていないので、**中身だけ入れ替わる**。
  *
+ * ─────────────────────────────────────────────────────────────
+ * 🔑 カメラの決め方（`distFor` / `focalFor` / `aim`）
+ * ─────────────────────────────────────────────────────────────
+ * 角度・見下ろし・引きの**基準値はオーナーが見て決めた3つ**（`CAM`）で、動かさない。
+ * その上に4つだけ足してある。どれも**指数でゆっくり**効かせる＝画が跳ねると酔う。
+ *   1. 引きを場面で変える  — ゴール前は寄り、中盤は引く（`distFor`）
+ *   2. 人のかたまりを入れる — 注視点をボールと近くの選手の重心のあいだに置く（`aim`）
+ *   3. 窓の縦も見て画角を決める（`focalFor`）
+ *   4. 画面の縦（world y）の追従だけ鈍くする（`FOLLOW_Y`／ボールが離れすぎたら `LEASH_FRAC` の綱で引き戻す）
+ *
  * 🔴 ここもゲームの規則を1行も持たない。`src/sim/` が出したコマを並べるだけ。
  */
 
@@ -55,14 +65,86 @@ const KIT: Record<string, Voxel.Kit> = {
           hair: "#3b2a1b", socks: "#e2574c", shoes: "#2b2b33" },
 };
 
-/** これより速ければ全力（m/s） */
-const SPRINT_MS = 5.2;
+/* 🗑 2026-10-03: ここにあった `SPRINT_MS = 5.2` を消した。
+      姿勢の境目は `voxel.ts` の `pickPose` が1か所で持つ。 */
 
-/* 🔑 2026-10-03 オーナー判断「角度90・見下ろし40・引き20がちょうどいい」 */
+/* 🔑 2026-10-03 オーナー判断「角度90・見下ろし40・引き20がちょうどいい」。
+      **この3つは基準値なので動かさない。** 引きだけは場面で変えるが、
+      `dist` は中盤（＝試合のほとんどの時間）の値として残す。 */
 const CAM = { yaw: Math.PI / 2, pitch: (40 * Math.PI) / 180, dist: 20, focal: 520 };
 
-/** カメラがボールを追う速さ。1に近いほど即座に追う（硬すぎると酔う） */
-const FOLLOW = 3.2;
+/**
+ * ゴール前まで来たときの引き（m）。中盤の `CAM.dist` より寄る。
+ *
+ * 🔑 なぜ寄るのか: ゴール前は1人の体の向きと足の位置が結果を決める場面で、
+ *    引いたままだと誰が誰だか分からない。中盤は逆に、どこへ展開するかが見たいので引く。
+ */
+const DIST_NEAR = 15.5;
+
+/* 寄り始めと引き切りの境目（ゴールラインからの距離・m）。
+   🔑 18m ＝ ペナルティエリアの深さ(16.5m)の少し外。ここへ入った時点でもう寄っている。
+      34m ＝ ピッチの3分の1。ここより中なら完全に引く。 */
+const ZOOM_NEAR_X = 18;
+const ZOOM_FAR_X = 34;
+
+/**
+ * 引きが目標値へ寄る速さ。
+ *
+ * 🔴 **注視点より必ず遅くする。** 引きはボールより大きな画の変化なので、
+ *    注視点と同じ速さで動かすと、パス1本ごとに画面全体が伸び縮みして酔う。
+ */
+const ZOOM = 1.1;
+
+/**
+ * カメラがボールを追う速さ。1に近いほど即座に追う（硬すぎると酔う）。
+ *
+ * 🔴 **左右と上下で速さを分ける。** yaw=90° では world x が画面の横・world y が
+ *    画面の縦（奥行き）になる。縦を横と同じ速さで追うと、横パスのたびに
+ *    地平線ごと上下して落ち着かない。縦だけ鈍くすると画が据わる。
+ * 🔴 この x／y の割り当ては **yaw が 90° のときだけ**成り立つ。
+ *    角度を振れるようにするなら、カメラの right/fwd に合わせて分解し直すこと。
+ */
+const FOLLOW_X = 3.2;     // 2026-10-03 までの FOLLOW と同じ値（横の見え方は変えない）
+const FOLLOW_Y = 1.7;
+
+/**
+ * 縦の「引き綱」。注視点と**ボール**のずれが綱の長さを超えたら、超えたぶんだけ追従を強める。
+ *
+ * 🔴 **縦をただ鈍くするだけでは駄目。** 見下ろし40°・引き20mだと、注視点より
+ *    手前に見えている芝は**11mしかない**（画面の下端まで）。横は24m入るので
+ *    多少遅れても画に残るが、縦は 25m/s の大きな展開で遅れが13m まで伸び、
+ *    **ボールが画面の下に消える**。鈍さと見失わないことは、強さを一定にすると両立しない。
+ * 🔑 強さは連続に変わる（しきい値で切り替えない）ので、綱が効き始めても画は折れない。
+ *
+ * ── 綱が張り始める離れは、**引きに比例**させる（`LEASH_FRAC` × いまの引き）──
+ *
+ * 🔴 固定値（6m）だと、寄ったときに前提が壊れる（2026-10-03 のレビューで直した）。
+ *    見下ろし40°では、注視点より手前に見える芝は**引きのおよそ 0.55 倍**。
+ *    引き20m なら 11m 見えているが、ゴール前で 15.5m まで寄ると **8.5m しか見えない**。
+ *    6m のままだと、いちばん寄っている＝いちばん余裕が無い場面で綱が遅れて効く。
+ * 🔑 0.30 は「引き20mで 6m」という、もとの目分量をそのまま比に直した数字。
+ *    見える芝（0.55×引き）の半分強で張り始める、という意味になる。
+ */
+const LEASH_FRAC = 0.30;
+const LEASH_GAIN = 0.55;
+
+/* 注視点に混ぜる「ボールの近くにいる選手」の範囲（m）と混ぜる割合 */
+const CROWD_R = 14;
+const CROWD_W = 0.35;
+
+/**
+ * 画角を決めるときの基準の窓（px）。
+ *
+ * 🔑 オーナーが決めた焦点距離 520 は **16:9 の窓**で見て決めた値なので、
+ *    16:9 のときに 520×倍率 がそのまま出るように基準を置く。
+ */
+const REF = { w: 1280, h: 720 };
+
+/** 0..1 に収めて、両端をなめらかにする。境目で寄り方が折れるのを防ぐ */
+function smooth01(t: number): number {
+  const u = t < 0 ? 0 : t > 1 ? 1 : t;
+  return u * u * (3 - 2 * u);
+}
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
@@ -80,6 +162,21 @@ let lastStamp = 0;
 let rafId = 0;
 let clock = 0;                      // 観客の揺れ用。再生を止めても進む
 
+/** 観客の盛り上がり（0〜1）。得点で 1 になり、ゆっくり冷める */
+let excite = 0;
+/** 冷めきるまでの秒数 */
+const EXCITE_FADE = 7;
+
+/**
+ * 観客を沸かせる。**得点した瞬間に画面側から呼ぶ。**
+ *
+ * 🔑 ここに「いつ沸くか」の判定を置かない。得点を知っているのは画面（`main.ts`）で、
+ *    描画は言われたとおり沸くだけ。判定を両方に置くと、片方を直したときにずれる。
+ */
+export function cheer(): void {
+  excite = 1;
+}
+
 let onUpdate: ((s: PitchState) => void) | null = null;
 let onFinish: (() => void) | null = null;
 let onHalfTime: (() => void) | null = null;
@@ -92,6 +189,9 @@ const phases: number[] = [];
 
 /* カメラの注視点。ボールへ滑らかに寄る */
 const look = { x: C.PITCH_X / 2, y: C.PITCH_Y / 2 };
+
+/* いまの引き。目標（場面で決まる値）へ滑らかに寄る。**生の目標値を直接使わない** */
+let camDist = CAM.dist;
 
 /* ボールの転がり。**進んだ距離**から出す（時間で回すと止まっても回り続ける） */
 let ballSpin = 0;
@@ -161,6 +261,9 @@ export function load(data: Replay, matchEvents: MatchEvent[], homeTeamName: stri
   const first = data.frames[0]!;
   look.x = first[0]! / k;
   look.y = first[1]! / k;
+  /* 🔴 引きも1コマ目の場面に合わせて**置き直す**。前の試合の値から始めると、
+        キックオフの直後に理由のない寄り（または引き）が1秒ほど走る */
+  camDist = distFor(look.x);
   ballPrev = null;
   ballSpin = 0;
   ballDir = 0;
@@ -235,6 +338,80 @@ export function state(): PitchState {
   return { tick, home, away, event: latest, done: !playing };
 }
 
+/* ------------------------------------------------------------ カメラ */
+
+/**
+ * 場面に合った引き（m）。ゴールラインに近いほど寄る。
+ *
+ * 🔴 ここが返すのは**目標**で、画に出る値ではない。これを直接 `cam.dist` に
+ *    入れると、ボールが境目を跨いだ瞬間に画がカクッと伸び縮みして酔う。
+ *    実際の寄りは `aim()` が指数でゆっくり追う。
+ */
+function distFor(ballX: number): number {
+  /* 🔑 「どちらかのゴールに近いか」だけを見る。ゴール口の中心までの距離にすると、
+        コーナーが中盤と同じ扱いになってしまう（コーナーはゴール前の攻防なので寄りたい） */
+  const toLine = Math.min(ballX, C.PITCH_X - ballX);
+  const u = smooth01((toLine - ZOOM_NEAR_X) / (ZOOM_FAR_X - ZOOM_NEAR_X));
+  return DIST_NEAR + (CAM.dist - DIST_NEAR) * u;
+}
+
+/**
+ * 画角（焦点距離）。**窓の縦も見る**。
+ *
+ * 🔴 横幅だけで決めていた（2026-10-03 まで）。横に長く縦の短い窓では
+ *    縦の画角が足りず、選手が膝から下しか画に入らない。
+ *    縦・横それぞれが要求する焦点距離を出して、**短い方＝広い方**を採る。
+ * 🔑 16:9 のときは横で決まるので、オーナーが見て決めた画はそのまま。
+ *    min を取るので、**前より寄ることは起きない**（広がる方向にだけ動く）。
+ */
+function focalFor(cv: HTMLCanvasElement): number {
+  const byWidth = CAM.focal * (cv.width / REF.w);
+  const byHeight = CAM.focal * (cv.height / REF.h);
+  return Math.min(byWidth, byHeight);
+}
+
+/**
+ * 注視点と引きを場面へ寄せる。1コマに1回だけ呼ぶ。
+ *
+ * @param men ボールの近くを数えるための全選手の位置（この関数は書き換えない）
+ */
+function aim(dt: number, ballX: number, ballY: number,
+             men: readonly { x: number; y: number }[]): void {
+  /* 🔑 ボールだけを見ると、走り込んでいる選手が画面の外に出て
+        「誰が空けたのか・誰が詰めたのか」が読めない。ボールの近くにいる
+        選手の重心へ少し寄せて、人のかたまりごと画に入れる。
+     🔴 **全員の重心は使えない。** 22人の重心はほぼセンターサークルに居座るので、
+        どこで何が起きていてもカメラが中央へ引っ張られ、ボールから目が離れる。 */
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (const m of men) {
+    if (Math.hypot(m.x - ballX, m.y - ballY) > CROWD_R) continue;
+    sx += m.x;
+    sy += m.y;
+    n += 1;
+  }
+  /* 寄せる先はボールと重心のあいだ。ずれる量は CROWD_R × CROWD_W（≒5m）で頭打ちになる */
+  const aimX = n > 0 ? ballX + (sx / n - ballX) * CROWD_W : ballX;
+  const aimY = n > 0 ? ballY + (sy / n - ballY) * CROWD_W : ballY;
+
+  /* 🔑 カメラは**遅れて寄る**。すぐ張り付くと、速いパスのたびに
+        画面全体が跳ねて何が起きたか読めない。
+        横（world x）は画に24m入るので、基準値のまま素直に追う。 */
+  look.x += (aimX - look.x) * (1 - Math.exp(-FOLLOW_X * dt));
+
+  /* 縦（world y）は鈍くする。ただし離れすぎたら引き綱で引き戻す（`LEASH_FRAC` の説明）。
+     🔴 **綱の長さは「ボール」との離れで測る**（2026-10-03 のレビューで直した）。
+        以前は寄せ先（`aimY`）との離れで測っていたが、`aimY` は重心を混ぜた点なので、
+        ボールは `aimY` からさらに最大 CROWD_R × CROWD_W ≒ 4.9m 離れうる。
+        つまり**守るつもりだったボールが、綱の外にいた**。 */
+  const offY = Math.abs(ballY - look.y);
+  const followY = FOLLOW_Y + Math.max(0, offY - camDist * LEASH_FRAC) * LEASH_GAIN;
+  look.y += (aimY - look.y) * (1 - Math.exp(-followY * dt));
+
+  camDist += (distFor(ballX) - camDist) * (1 - Math.exp(-ZOOM * dt));
+}
+
 /* -------------------------------------------------------------- 描く */
 
 function draw(dt: number): void {
@@ -256,30 +433,10 @@ function draw(dt: number): void {
   const by = lerp(1);
   const owner = fa[2]!;
 
-  /* 🔑 カメラは**遅れてボールへ寄る**。すぐ張り付くと、速いパスのたびに
-        画面全体が跳ねて何が起きたか読めない */
-  const ease = 1 - Math.exp(-FOLLOW * dt);
-  look.x += (bx - look.x) * ease;
-  look.y += (by - look.y) * ease;
-
-  const cam: Voxel.Cam = {
-    yaw: CAM.yaw, pitch: CAM.pitch, dist: CAM.dist,
-    /* 盤が横に広いほど画角を広げる。狭い窓で寄りすぎると足元しか見えない */
-    focal: CAM.focal * (cv.width / 1280),
-    target: { x: look.x, y: look.y, z: 0 },
-    cx: cv.width / 2,
-    cy: cv.height * 0.56,
-  };
-
-  /* 🔴 空 → 観客席 → ピッチ の順。屋根と照明塔は空へ伸びるので、
-        空より後・ピッチより先に描く必要がある */
-  Stadium.draw(c, cam, clock);
-  Field.draw(c, cam);
-
-  /* 🔴 奥から手前へ。カメラからの距離で並べ替えてから描く */
+  /* 🔴 選手の座標を**カメラより先に**出す。注視点がボールの近くにいる選手の
+        重心を混ぜるので、全員の位置が分かる前にカメラを組むと1コマ遅れる。
+        並べ替えに使う奥行き `d` だけは、カメラが決まってから入れる。 */
   const list: { i: number; x: number; y: number; sp: number; d: number }[] = [];
-  const eyeX = look.x - Math.cos(CAM.yaw) * CAM.dist;
-  const eyeY = look.y - Math.sin(CAM.yaw) * CAM.dist;
   for (let i = 0; i < rp.roster.length; i++) {
     const x = lerp(3 + i * 2);
     const y = lerp(4 + i * 2);
@@ -287,18 +444,54 @@ function draw(dt: number): void {
     const dy = (fb[4 + i * 2]! - fa[4 + i * 2]!) / k;
     const sp = Math.hypot(dx, dy) / rp.sample_ticks;
     if (sp > 0.25) facings[i] = Math.atan2(dy, dx);
-    phases[i] = (phases[i]! + sp * dt * 0.9) % 1000;
-    list.push({ i, x, y, sp, d: Math.hypot(x - eyeX, y - eyeY) });
+    /* 🔴 **実際の秒数で進める**（2026-10-03 のレビューで判明）。
+          ここは「進んだ距離に比例して進む歩調カウンタ」だった（`sp * dt * 0.9`）が、
+          `voxel.ts` の姿勢は**秒を前提**に周期を書いている。距離で進めると、
+          止まっている選手は `sp≈0` なので**呼吸も止まり**、
+          減速しながら滑り込む選手は滑り込みの途中で絵が止まる。
+       🔑 足並みは `load()` で入れた一人ずつ違う初期値がそろえない。 */
+    phases[i] = (phases[i]! + dt) % 1000;
+    list.push({ i, x, y, sp, d: 0 });
+  }
+
+  aim(dt, bx, by, list);
+
+  const cam: Voxel.Cam = {
+    yaw: CAM.yaw, pitch: CAM.pitch, dist: camDist,
+    focal: focalFor(cv),
+    target: { x: look.x, y: look.y, z: 0 },
+    cx: cv.width / 2,
+    cy: cv.height * 0.56,
+  };
+
+  /* 🔴 空 → 観客席 → ピッチ の順。屋根と照明塔は空へ伸びるので、
+        空より後・ピッチより先に描く必要がある */
+  /* 🔑 盛り上がりは**時間とともに冷める**。得点した瞬間に 1 を入れて、
+        あとはここで落とす。入れっぱなしにすると、客席が90分跳ね続ける。 */
+  excite = Math.max(0, excite - dt / EXCITE_FADE);
+  Stadium.draw(c, cam, clock, excite);
+  Field.draw(c, cam);
+
+  /* 🔴 奥から手前へ。並べ替えの奥行きは**カメラと同じ式**（`basisOf`）から取る。
+        目の位置を手で組み直していた（2026-10-03 まで）が、見下ろし角ぶんの
+        cos が抜けていた。引きが場面で変わるようになったので、自前の式だと
+        寄った瞬間だけ並びが狂って奥の選手が手前に出る。
+     🔑 選手は全員 z=0 なので、奥行きに z の項は要らない（全員同じ値になり順番に効かない）。 */
+  const basis = Voxel.basisOf(cam);
+  for (const p of list) {
+    p.d = (p.x - basis.eye.x) * basis.fwd.x + (p.y - basis.eye.y) * basis.fwd.y;
   }
   list.sort((m, n) => n.d - m.d);
 
   for (const { i, x, y, sp } of list) {
     const who = rp.roster[i]!;
     const kit = KIT[who.pos === "GK" ? "gk" : (who.team === 0 ? "home" : "away")]!;
-    const pose: Pose = i === owner ? "hold"
-                     : sp > SPRINT_MS ? "sprint"
-                     : sp > 0.6 ? "run"
-                     : "stand";
+    /* 🔴 姿勢の選び方を**ここに書かない**（2026-10-03 のレビューで直した）。
+          以前はここに三項演算子で境目を持っていたので、同じ数字（5.2 と 0.6）が
+          `voxel.ts` / `match3d.ts` / `pitch3d.ts` の3か所に散り、
+          確認台で境目を詰めても試合画面が1ドットも変わらなかった。
+          境目は `voxel.ts` の `pickPose` の1か所だけに置く。 */
+    const pose: Pose = Voxel.pickPose({ speed: sp, hasBall: i === owner });
     const at = { x, y, z: 0 };
     Voxel.drawShadow(c, cam, at);
     Voxel.drawPlayer(c, cam, { at, facing: facings[i]!, pose, t: phases[i]!, kit });

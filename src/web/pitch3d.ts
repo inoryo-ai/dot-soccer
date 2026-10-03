@@ -32,7 +32,8 @@ const KITS: Record<string, Voxel.Kit> = {
           hair: "#3b2a1b", socks: "#e2574c", shoes: "#2b2b33" },
 };
 
-const SPRINT_MS = 5.2;
+/* 🗑 2026-10-03: ここにあった `SPRINT_MS = 5.2` を消した。
+      姿勢の境目は `voxel.ts` の `pickPose` が1か所で持つ。 */
 
 let replay: Replay | null = null;
 let frameIndex = 0;
@@ -113,7 +114,9 @@ function drawFrame(dt: number): void {
     const dy = (fb[4 + i * 2]! - fa[4 + i * 2]!) / k;
     const sp = Math.hypot(dx, dy) / rp.sample_ticks;
     if (sp > 0.25) facings[i] = Math.atan2(dy, dx);
-    phases[i] = (phases[i]! + sp * dt * 0.9) % 1000;
+    /* 🔴 **実際の秒数で進める。** `voxel.ts` の姿勢は秒を前提に周期を書いている。
+          進んだ距離で進めると、止まっている選手は呼吸も止まる。 */
+    phases[i] = (phases[i]! + dt) % 1000;
     const vx = x - (target.x - Math.cos(camYaw) * camDist);
     const vy = y - (target.y - Math.sin(camYaw) * camDist);
     list.push({ i, x, y, sp, d: Math.hypot(vx, vy) });
@@ -123,10 +126,8 @@ function drawFrame(dt: number): void {
   for (const { i, x, y, sp } of list) {
     const who = rp.roster[i]!;
     const kit = KITS[who.pos === "GK" ? "gk" : (who.team === 0 ? "home" : "away")]!;
-    const pose: Pose = i === owner ? "hold"
-                     : sp > SPRINT_MS ? "sprint"
-                     : sp > 0.6 ? "run"
-                     : "stand";
+    /* 🔴 姿勢の境目をここに持たない。`pickPose` の1か所だけに置く */
+    const pose: Pose = Voxel.pickPose({ speed: sp, hasBall: i === owner });
     const at = { x, y, z: 0 };
     Voxel.drawShadow(c, cam, at);
     Voxel.drawPlayer(c, cam, { at, facing: facings[i]!, pose, t: phases[i]!, kit });

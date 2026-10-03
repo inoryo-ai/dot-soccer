@@ -30,17 +30,37 @@ const KIT: Voxel.Kit = {
   hair: "#3b2a1b", socks: "#f2a714", shoes: "#2b2b33",
 };
 
+/**
+ * ボタンに出す姿勢。
+ *
+ * 🔴 **`Pose` に足した姿勢はここにも足す。** ここに無い姿勢はボタンが出ないので、
+ *    「作ったのに一度も見ていない動き」になる（2026-10-03 まで kick・cheer・tired が
+ *    まさにそれで、押しても**止まった絵**しか出ない状態に気づけなかった）。
+ */
 const POSES: { key: Pose; label: string }[] = [
   { key: "stand", label: "立つ" },
   { key: "run", label: "走る" },
   { key: "sprint", label: "全力" },
   { key: "hold", label: "持つ" },
   { key: "kick", label: "蹴る" },
+  { key: "header", label: "競る" },
+  { key: "tackle", label: "スライディング" },
+  { key: "down", label: "倒れる" },
   { key: "cheer", label: "喜ぶ" },
   { key: "tired", label: "息切れ" },
 ];
 
+/** 日本語ラベルを引く。自動選択のときに「いま何が選ばれたか」を画面に出すため */
+function labelOf(p: Pose): string {
+  const hit = POSES.find((q) => q.key === p);
+  /* 🔴 既定値で誤魔化さない。ラベルが無い＝`POSES` への足し忘れなので、
+        そのまま鍵の文字列を出して気づけるようにする */
+  return hit?.label ?? `(ラベル未登録: ${p})`;
+}
+
 let pose: Pose = "run";
+/** 自動選択。`pickPose()` に速さを流し込んで、姿勢の切り替わりを見る台 */
+let auto = false;
 let facing = (200 * Math.PI) / 180;
 let camYaw = (90 * Math.PI) / 180;
 let camPitch = (32 * Math.PI) / 180;
@@ -53,11 +73,31 @@ function renderPoseRow(): void {
   for (const p of POSES) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = `chip${p.key === pose ? " is-on" : ""}`;
+    b.className = `chip${!auto && p.key === pose ? " is-on" : ""}`;
     b.textContent = p.label;
-    b.addEventListener("click", () => { pose = p.key; renderPoseRow(); });
+    b.addEventListener("click", () => { pose = p.key; auto = false; renderPoseRow(); });
     row.append(b);
   }
+  /* 🔑 姿勢を選ぶ関数（`pickPose`）も**目で確かめられる**ようにしておく。
+        試合画面はこれを呼ぶので、境目でガタつかないかはここで見るのがいちばん早い */
+  const a = document.createElement("button");
+  a.type = "button";
+  a.className = `chip${auto ? " is-on" : ""}`;
+  a.textContent = "自動（速さで切替）";
+  a.addEventListener("click", () => { auto = !auto; renderPoseRow(); });
+  row.append(a);
+}
+
+/**
+ * 自動選択に流す速さ（m/s）。0.2〜7.0 を往復する。
+ *
+ * 🔴 乱数は引かない（D-16）。同じ `t` なら必ず同じ速さ＝同じ姿勢になる。
+ * 🔴 **振れ幅を中心値と同じにしない。** `3.5 + 3.5*sin` だと谷で丸め誤差ぶんの
+ *    マイナスが出ることがあり、`pickPose` が「速さは0以上」で例外を投げて
+ *    描画のループごと止まる。中心より小さい振れ幅にしておく。
+ */
+function sweepSpeed(t: number): number {
+  return 3.6 + 3.4 * Math.sin(t * 0.55);
 }
 
 function drawPlayer(t: number): void {
@@ -80,8 +120,28 @@ function drawPlayer(t: number): void {
     cy: cv.height * 0.56,
   };
   const at = { x: 0, y: 0, z: 0 };
-  Voxel.drawShadow(c, cam, at);
-  Voxel.drawPlayer(c, cam, { at, facing, pose, t: t * speed, kit: KIT });
+  const now = t * speed;
+
+  /* 自動選択のときは `pickPose()` に任せる。ボタンで選んだときはそのまま */
+  const sp = sweepSpeed(now);
+  const shown: Pose = auto ? Voxel.pickPose({ speed: sp, hasBall: false, tired: 0 }) : pose;
+
+  /* 🔑 影にも姿勢を渡す。倒れている姿勢だけ影が後ろへ伸びる
+        （体が1.5m 後ろに寝ているのに足元の丸のままだと浮いて見える） */
+  Voxel.drawShadow(c, cam, at, { pose: shown, facing });
+  Voxel.drawPlayer(c, cam, { at, facing, pose: shown, t: now, kit: KIT });
+
+  if (auto) {
+    /* 🔑 何が選ばれたかを**画面に出す**。選び方の境目（走る↔全力）は
+          数字を見ないと詰められない */
+    c.font = "bold 16px system-ui, sans-serif";
+    c.lineWidth = 4;
+    c.strokeStyle = "rgba(20, 40, 70, .85)";
+    c.fillStyle = "#ffffff";
+    const msg = `pickPose: ${labelOf(shown)}  （速さ ${sp.toFixed(1)} m/s）`;
+    c.strokeText(msg, 12, 28);
+    c.fillText(msg, 12, 28);
+  }
 }
 
 function fmtDeg(rad: number): string {

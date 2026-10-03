@@ -739,10 +739,14 @@ function startMatch(): void {
         .then(() => Pitch.resume());
     },
     onUpdate: (s) => {
-      /* 🔴 スコアが動いた瞬間に知らせる。数字が増えるだけだと見逃す */
+      /* 🔴 スコアが動いた瞬間に知らせる。数字が増えるだけだと見逃す。
+         🔴 **先に `lastScore` を進めてから**知らせる。知らせる処理が投げると、
+            ここに到達せず**毎コマ同じ得点を検出して投げ続ける**ことになり、
+            得点板も時計も止まったまま例外だけが流れる画面になる。 */
       const now = `${s.home}-${s.away}`;
-      if (lastScore !== null && lastScore !== now) showGoal(s.event);
+      const scored = lastScore !== null && lastScore !== now;
       lastScore = now;
+      if (scored) announceGoal(sides, s);
       $("sbScore").textContent = `${s.home} - ${s.away}`;
       $("sbClock").textContent = minuteText(s.tick);
       const t = $("ticker");
@@ -784,6 +788,28 @@ function scorersUpTo(events: MatchEvent[], tick: number): Ceremony.Scorer[] {
 
 /** 「結果まで飛ばす」を押したか。押したら節目の演出も出さない */
 let skipAll = false;
+
+/**
+ * 得点が入ったことを知らせる。**ここが「いつ沸くか」を知っている唯一の場所。**
+ *
+ * 🔑 描画（観客）も演出も、判定は持たずに言われたとおり動く。
+ *    判定を両方に置くと、片方を直したときに静かにずれる。
+ */
+function announceGoal(sides: Ceremony.Sides, s: { event: MatchEvent | null;
+                                                  home: number; away: number }): void {
+  const ev = s.event;
+  showGoal(ev);
+  /* 観客を沸かせる。時間とともに冷める（`match3d.ts` の EXCITE_FADE） */
+  Pitch.cheer();
+
+  /* 🔑 演出は**得点者が分かるときだけ**出す。分からないまま出すと
+        「誰が入れたのか分からない幕」が1.5秒出るだけで、情報が増えない。
+     🔴 飛ばしているときは出さない。 */
+  if (skipAll || ev === null || ev.type !== "ゴール" || !ev.player) return;
+  void call(() => Ceremony.goal(sides, { time: ev.time, team: ev.team, player: ev.player ?? "—" },
+                                s.home, s.away));
+}
+
 let goalTimer = 0;
 
 function showGoal(ev: MatchEvent | null): void {
