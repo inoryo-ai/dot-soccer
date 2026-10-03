@@ -30,7 +30,8 @@ export const DIST = join(WEB, "dist");
 
 /* 🔑 `lab.html` は**見比べ用の検証ページ**。ゲーム本体からは辿れない。
       配るのは、オーナーが同じURLで開いて見比べられるようにするため。 */
-export const STATIC_FILES = ["index.html", "style.css", "lab.html", "pitch3d.html"] as const;
+export const STATIC_FILES = ["index.html", "style.css", "lab.html", "pitch3d.html",
+                             "design-preview.html"] as const;
 
 /**
  * そのまま配る入れもの（中身は触らない）。
