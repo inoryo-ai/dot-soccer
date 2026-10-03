@@ -6,8 +6,8 @@
  *    どれも「頂点を投影して塗る」だけで足りる。
  */
 
-import { basisOf, isFrontFacing, project, projectPoly } from "./voxel.ts";
-import type { Basis, Cam, P2, Vec3 } from "./voxel.ts";
+import { basisOf, project, projectPoly } from "./voxel.ts";
+import type { Basis, Cam, Vec3 } from "./voxel.ts";
 
 /* ピッチの実寸（m）。競技規則の数字 */
 export const PITCH_X = 105;
@@ -155,28 +155,51 @@ export function draw(c: CanvasRenderingContext2D, cam: Cam): void {
 }
 
 /**
- * ボール。**転がる立方体**として描く（2026-10-03 オーナー指示）。
+ * ボール。**丸い球**として描く（2026-10-03 オーナー指示で立方体から変更）。
  *
+ * ─────────────────────────────────────────────────────────────
+ * 🔴 球を「面に分ける」とは作らない
+ * ─────────────────────────────────────────────────────────────
+ * 箱と同じやり方（面に割って塗る）で球を作ると、なめらかに見せるには
+ * 何百面も要る。ボールは画面で十数ピクセルしかないので、それは丸損。
+ *
+ * **輪郭は円を1つ描けば足りる**（球はどこから見ても円）。
+ * 要るのは「回っていることが読めるか」だけなので、
+ * **黒い面だけを3Dの点として回して**円の上に落とす。
+ *
+ * 🔑 黒い面の位置は**正二十面体の12頂点**。本物のサッカーボールの
+ *    黒い五角形は、まさにこの12か所にある。
  * 🔑 回転は時間ではなく**進んだ距離**から出す。時間で回すと、止まっているのに
  *    回り続けて「転がっている」ように見えない。距離で回せば、止まれば止まる。
- * 🔑 面ごとに明るさを変える（`voxel.ts` と同じ考え方）。でないと回っても気づけない。
  */
 const BALL_R = 0.30;        // 半径（m）。実物より大きいが、見えることを優先する
 
-const BALL_FACES: { idx: [number, number, number, number]; lit: number }[] = [
-  { idx: [4, 5, 7, 6], lit: 1.00 },
-  { idx: [0, 2, 3, 1], lit: 0.52 },
-  { idx: [2, 6, 7, 3], lit: 0.88 },
-  { idx: [1, 5, 4, 0], lit: 0.66 },
-  { idx: [3, 7, 5, 1], lit: 0.80 },
-  { idx: [0, 4, 6, 2], lit: 0.60 },
-];
+/** 黒い面の角の大きさ（球の半径に対する比）。本物の五角形はおよそこのくらい */
+const PATCH = 0.34;
 
-function tone(k: number): string {
-  const v = Math.round(253 * k);
-  const g = Math.round(250 * k);
-  const b2 = Math.round(240 * k);
-  return `rgb(${v}, ${g}, ${b2})`;
+/** 正二十面体の12頂点（単位ベクトル）。黄金比で作る */
+const PATCHES: Vec3[] = (() => {
+  const g = (1 + Math.sqrt(5)) / 2;
+  const n = Math.hypot(1, g);
+  const out: Vec3[] = [];
+  for (const s1 of [-1, 1]) {
+    for (const s2 of [-1, 1]) {
+      out.push({ x: 0, y: s1 / n, z: (s2 * g) / n });
+      out.push({ x: s1 / n, y: (s2 * g) / n, z: 0 });
+      out.push({ x: (s2 * g) / n, y: 0, z: s1 / n });
+    }
+  }
+  return out;
+})();
+
+/** 単位ベクトル `a` まわりに `v` を `spin` だけ回す（ロドリゲスの式） */
+function spinAround(v: Vec3, ax: number, ay: number, ca: number, sa: number): Vec3 {
+  const dot = v.x * ax + v.y * ay;              // 軸の z は 0
+  return {
+    x: v.x * ca + ay * v.z * sa + ax * dot * (1 - ca),
+    y: v.y * ca - ax * v.z * sa + ay * dot * (1 - ca),
+    z: v.z * ca + (ax * v.y - ay * v.x) * sa,
+  };
 }
 
 export function drawBall(c: CanvasRenderingContext2D, cam: Cam, p: Vec3,
@@ -184,14 +207,29 @@ export function drawBall(c: CanvasRenderingContext2D, cam: Cam, p: Vec3,
   const b = basisOf(cam);
 
   /* 影は地面に落とす（ボールが浮いていても足元に出す） */
-  const s = project(b, cam, { x: p.x, y: p.y, z: 0 });
-  if (s !== null) {
-    const r0 = Math.max(2, (cam.focal / s.d) * BALL_R * 0.9);
+  const s0 = project(b, cam, { x: p.x, y: p.y, z: 0 });
+  if (s0 !== null) {
+    const r0 = Math.max(2, (cam.focal / s0.d) * BALL_R * 0.9);
     c.fillStyle = "rgba(10, 40, 15, .30)";
     c.beginPath();
-    c.ellipse(s.x, s.y, r0, r0 * 0.45, 0, 0, Math.PI * 2);
+    c.ellipse(s0.x, s0.y, r0, r0 * 0.45, 0, 0, Math.PI * 2);
     c.fill();
   }
+
+  const s = project(b, cam, p);
+  if (s === null) return;
+  const r = Math.max(2, (cam.focal / s.d) * BALL_R);
+
+  /* 白い球。上から光が当たっている前提で、少し上寄りを明るくする */
+  const g = c.createRadialGradient(s.x - r * 0.3, s.y - r * 0.4, r * 0.1,
+                                   s.x, s.y, r);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.65, "#f3f1e8");
+  g.addColorStop(1, "#b9b7ad");
+  c.beginPath();
+  c.arc(s.x, s.y, r, 0, Math.PI * 2);
+  c.fillStyle = g;
+  c.fill();
 
   /* 🔑 転がる軸は**進む向きと直交**する水平の軸。
         進行方向を向いたまま前へ倒れるように回す。 */
@@ -200,42 +238,35 @@ export function drawBall(c: CanvasRenderingContext2D, cam: Cam, p: Vec3,
   const ca = Math.cos(spin);
   const sa = Math.sin(spin);
 
-  const pts: Vec3[] = [];
-  for (let i = 0; i < 8; i++) {
-    const lx = (i & 1 ? 1 : -1) * BALL_R;
-    const ly = (i & 2 ? 1 : -1) * BALL_R;
-    const lz = (i & 4 ? 1 : -1) * BALL_R;
-    /* 軸 (ax, ay, 0) まわりの回転（ロドリゲスの式。軸は単位ベクトル） */
-    const dot = lx * ax + ly * ay;
-    const crx = ay * lz;
-    const cry = -ax * lz;
-    const crz = ax * ly - ay * lx;
-    pts.push({
-      x: lx * ca + crx * sa + ax * dot * (1 - ca) + p.x,
-      y: ly * ca + cry * sa + ay * dot * (1 - ca) + p.y,
-      z: lz * ca + crz * sa + p.z,
-    });
-  }
-
-  type F = { q: P2[]; d: number; lit: number };
-  const faces: F[] = [];
-  for (const f of BALL_FACES) {
-    const q = f.idx.map((i) => project(b, cam, pts[i]!));
-    if (q.some((v) => v === null)) continue;
-    const qq = q as P2[];
-    if (!isFrontFacing(qq)) continue;
-    faces.push({ q: qq, d: (qq[0]!.d + qq[1]!.d + qq[2]!.d + qq[3]!.d) / 4, lit: f.lit });
-  }
-  faces.sort((m, n) => n.d - m.d);
-  for (const f of faces) {
+  /* 黒い面。**球からはみ出させない**ため、円の内側だけに描く */
+  c.save();
+  c.beginPath();
+  c.arc(s.x, s.y, r, 0, Math.PI * 2);
+  c.clip();
+  c.fillStyle = "#23242a";
+  for (const v of PATCHES) {
+    const n = spinAround(v, ax, ay, ca, sa);
+    /* カメラから見て裏側（球の向こう側）なら描かない */
+    const toward = -(n.x * b.fwd.x + n.y * b.fwd.y + n.z * b.fwd.z);
+    if (toward <= 0.02) continue;
+    const ex = n.x * b.right.x + n.y * b.right.y + n.z * b.right.z;
+    const ey = n.x * b.up.x + n.y * b.up.y + n.z * b.up.z;
+    const px = s.x + ex * r;
+    const py = s.y - ey * r;
+    /* 🔑 球のふちに行くほど**縁に向かう向きだけ**潰れて見える。
+          潰さないと、ふちの面が正面と同じ大きさの丸になって球に見えない。 */
+    const rot = Math.atan2(-ey, ex);
     c.beginPath();
-    c.moveTo(f.q[0]!.x, f.q[0]!.y);
-    for (let i = 1; i < 4; i++) c.lineTo(f.q[i]!.x, f.q[i]!.y);
-    c.closePath();
-    c.fillStyle = tone(f.lit);
+    c.ellipse(px, py, Math.max(0.6, r * PATCH * toward), Math.max(0.6, r * PATCH),
+              rot, 0, Math.PI * 2);
     c.fill();
-    c.strokeStyle = "#20304a";
-    c.lineWidth = 1;
-    c.stroke();
   }
+  c.restore();
+
+  /* ふちを締める。背景が明るいと球の輪郭が溶ける */
+  c.beginPath();
+  c.arc(s.x, s.y, r, 0, Math.PI * 2);
+  c.strokeStyle = "rgba(32, 48, 74, .55)";
+  c.lineWidth = 1;
+  c.stroke();
 }
