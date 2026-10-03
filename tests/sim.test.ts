@@ -14,7 +14,7 @@ import { buildJobs, summarize } from "../src/sim/batch.ts";
 import type { JobResult } from "../src/sim/batch.ts";
 import { Match, play, seedFor } from "../src/sim/engine.ts";
 import { ValueError } from "../src/sim/errors.ts";
-import { Player, judgeType } from "../src/sim/model.ts";
+import { FORMATIONS, Player, Tactics, effectiveSlots, judgeType } from "../src/sim/model.ts";
 import type { Hidden, PlayerData } from "../src/sim/model.ts";
 import {
   PRESET_ORDER,
@@ -490,5 +490,51 @@ describe("一括対戦の集計", () => {
     const s = summarize(results, teams, 10, 1);
     assert.ok(s.warnings.some((w) => w.includes("上限")));
     assert.ok(s.warnings.some((w) => w.includes("下限")));
+  });
+});
+
+describe("立ち位置の上書き（事務所でドラッグして動かしたもの）", () => {
+  /** 全員を自陣へ下げた配置。GK は規則の上限 0.30 を超えない */
+  const pullBack = (t: ReturnType<typeof buildPreset>): void => {
+    const base = effectiveSlots(t.tactics);
+    t.tactics.slots = base.map(([pos, x, y]) =>
+      [pos === "GK" ? x : Math.max(0.05, x - 0.12), y] as const);
+  };
+
+  test("🔴 動かすと試合の結果が変わる（変わらなければ、盤の上だけで効いていない）", () => {
+    const seen = new Set<string>();
+    for (const shift of [false, true]) {
+      const a = buildPreset("バランス型");
+      if (shift) pullBack(a);
+      const r = play(a, buildPreset("プレス型"), 1234, false);
+      seen.add(`${r.score.join("-")}/${JSON.stringify(r.stats)}`);
+    }
+    assert.equal(seen.size, 2, "配置を変えても試合がまったく同じ＝上書きが効いていない");
+  });
+
+  test("上書きしても決定論は崩れない（同じ配置・同じシードなら同じ結果）", () => {
+    const build = (): ReturnType<typeof buildPreset> => {
+      const t = buildPreset("バランス型");
+      pullBack(t);
+      return t;
+    };
+    const r1 = play(build(), buildPreset("プレス型"), 77, true);
+    const r2 = play(build(), buildPreset("プレス型"), 77, true);
+    assert.deepEqual(r1.score, r2.score);
+    assert.deepEqual(r1.events, r2.events);
+  });
+
+  test("上書きが無いチームは、既定の枠がそのまま出る", () => {
+    const t = buildPreset("バランス型");
+    assert.equal(t.tactics.slots, null);
+    assert.deepEqual(effectiveSlots(t.tactics), FORMATIONS[t.tactics.formation]);
+  });
+
+  test("🔴 おかしな上書きは作った時点で弾く（黙って直さない）", () => {
+    assert.throws(() => new Tactics({ formation: "4-4-2", slots: [[0.1, 0.1]] }), ValueError);
+    assert.throws(() => new Tactics({
+      formation: "4-4-2",
+      slots: FORMATIONS["4-4-2"]!.map(([, x, y], i) => [i === 0 ? 0.9 : x, y] as const),
+    }), ValueError);
   });
 });

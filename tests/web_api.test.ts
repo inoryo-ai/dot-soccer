@@ -202,4 +202,86 @@ describe("遊びの流れ", () => {
     assert.equal(after.manager.style, 2);
     assert.equal(after.manager.rigidity, -2);
   });
+
+  /* ------------------------------------------------------------ 配置（立ち位置）
+     🔴 ここが緩いと「盤の上では動いているのに、試合では元の位置」になる。
+        画面だけ動いて中身が変わらない不具合は、遊んでいて気づけない。 */
+
+  test("配置は既定ではフォーメーションどおり。11人ぶん出る", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const lineup = api.view().lineup;
+    assert.equal(lineup.length, 11);
+    assert.equal(lineup[0]!.pos, "GK");
+    assert.equal(lineup[0]!.x, 0.04);
+    assert.equal(lineup[0]!.locked_x, 0.30);
+    assert.equal(lineup[1]!.locked_x, null);
+    jsonOk(lineup);
+  });
+
+  test("動かした位置がそのまま返る（小数2桁に丸まる）", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    spots[10] = [0.666666, 0.333333];
+    const after = api.setLineup(spots);
+    assert.equal(after.lineup[10]!.x, 0.67);
+    assert.equal(after.lineup[10]!.y, 0.33);
+    jsonOk(after.lineup);
+  });
+
+  test("🔴 GK を前線まで連れて行くのは弾く（自ゴールが無人になる）", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    spots[0] = [0.80, 0.50];
+    throwsGameError(() => api.setLineup(spots), "ゴールキーパー");
+    /* 弾かれたあとも元のまま（半端に入らない） */
+    assert.equal(api.view().lineup[0]!.x, 0.04);
+  });
+
+  test("🔴 数が合わない・範囲の外は黙って直さずに弾く", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    throwsGameError(() => api.setLineup(spots.slice(0, 10)));
+    const bad = spots.map((s) => [...s] as [number, number]);
+    bad[5] = [1.4, 0.5];
+    throwsGameError(() => api.setLineup(bad));
+  });
+
+  test("戻すとフォーメーションの形に帰る", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    spots[10] = [0.60, 0.20];
+    assert.equal(api.setLineup(spots).lineup[10]!.y, 0.20);
+    assert.equal(api.resetLineup().lineup[10]!.y, 0.62);
+  });
+
+  test("🔴 フォーメーションを選び直したら立ち位置の上書きは捨てる", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    spots[10] = [0.60, 0.20];
+    api.setLineup(spots);
+    const after = api.setTactics(3, 3, "バランス", "3-4-3");
+    /* 3-4-3 の既定どおりに戻っている（4-4-2 のために置いた座標が残らない） */
+    assert.equal(after.lineup[10]!.y, 0.80);
+  });
+
+  test("🔴 動かした配置がセーブに残る（残らないと、開き直すと元の位置）", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    const spots = api.view().lineup.map((s) => [s.x, s.y] as [number, number]);
+    spots[9] = [0.55, 0.25];
+    api.setLineup(spots);
+    const saved = JSON.parse(jsonOk(api.saveDict())) as unknown;
+    api.reset();
+    const back = api.loadSave(saved);
+    assert.equal(back.lineup[9]!.x, 0.55);
+    assert.equal(back.lineup[9]!.y, 0.25);
+  });
+
+  test("既定のままならセーブに slots を書かない（昔のセーブと同じ中身）", () => {
+    api.setTactics(3, 3, "バランス", "4-4-2");
+    api.resetLineup();
+    const saved = api.saveDict() as unknown as { teams: Record<string, { tactics: object }> };
+    for (const team of Object.values(saved.teams)) {
+      assert.ok(!("slots" in team.tactics), "既定なのに slots が書かれている");
+    }
+  });
 });

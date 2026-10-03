@@ -8,6 +8,7 @@
 import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
+import * as Board from "./board.ts";
 import * as City from "./city.ts";
 import * as Fx from "./fx.ts";
 import * as Pitch from "./pitch.ts";
@@ -528,6 +529,27 @@ function renderTacticsForm(): void {
 
   renderPolicyRows();
   $("policyMax").textContent = String(B().policy_max_rules);
+  renderBoard();
+}
+
+/**
+ * 配置盤。**動かした瞬間に `src/sim/` へ入れて、返ってきた値で描き直す。**
+ *
+ * 🔑 盤の中に「いまの配置」を貯めない。貯めると、規則に弾かれた動きが
+ *    盤の上だけ残って「画面では動いているのに試合では元の位置」になる。
+ */
+function renderBoard(): void {
+  Board.render($("lineupBoard"), V().lineup, {
+    commit(spots) {
+      const out = call(() => api.setLineup(spots));
+      /* 弾かれたら盤を描き直して**元の位置に戻す**（嘘の表示を残さない） */
+      if (!out) { renderBoard(); return; }
+      view = out;
+      $("lineupMsg").textContent = "配置を変えました。";
+      saveGame(true);
+    },
+    say(text) { $("lineupMsg").textContent = text; },
+  });
 }
 
 function fillSelect(node: HTMLSelectElement, options: readonly string[], current: string): void {
@@ -939,6 +961,26 @@ function main(): void {
     renderPolicyRows();
   });
   $("tacticsSave").addEventListener("click", saveTactics);
+  $("lineupReset").addEventListener("click", () => {
+    const out = call(() => api.resetLineup());
+    if (!out) return;
+    view = out;
+    $("lineupMsg").textContent = "フォーメーションの形に戻しました。";
+    renderBoard();
+    saveGame(true);
+  });
+  /* 🔑 フォーメーションを選び直したら盤も入れ替わる。
+        「決める」を押すまで古い形のままだと、何を触っているのか分からない */
+  $("tFormation").addEventListener("change", () => {
+    const out = call(() => api.setTactics(Number($<HTMLInputElement>("tLine").value),
+                                          Number($<HTMLInputElement>("tWidth").value),
+                                          $<HTMLSelectElement>("tAttitude").value,
+                                          $<HTMLSelectElement>("tFormation").value));
+    if (!out) return;
+    view = out;
+    $("lineupMsg").textContent = "";
+    renderBoard();
+  });
 
   /* ---- 試合の操作 ---- */
   $("mcPlay").addEventListener("click", () => {

@@ -1442,6 +1442,107 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   .city-wrap { width: 1920px; }
 }
 
+/* ============================================================ 配置盤
+   事務所 → 戦術 で、選手をつまんで立ち位置を動かす盤。
+
+   🔑 盤は**ピッチと同じ横長**にする（105:68）。縦にすると、
+      攻める向きが上なのか右なのか分からなくなる。
+   🔑 駒は `left` と `bottom` で置く。`bottom` にしておくと
+      「y が大きい＝上」という規則の層の向きと画面の向きが揃う。 */
+.board {
+  position: relative;
+  width: 100%;
+  /* 🔴 **大きくしすぎない**（2026-10-03 の目視）。画面幅いっぱいにすると縦が 686px になり、
+        一番外の列（y=0.14 と 0.86）が固定ヘッダーと下のコマンド帯の裏に入って、
+        つまめない駒ができる。 */
+  max-width: calc(var(--px) * 210);
+  aspect-ratio: 105 / 68;
+  border: var(--w-frame) solid var(--ui-edge);
+  background: var(--turf);
+  overflow: hidden;
+  touch-action: none;             /* 🔴 これが無いと、指でつまむと画面ごとスクロールする */
+  user-select: none;
+}
+
+.board-grass {
+  position: absolute;
+  inset: 0;
+  /* 芝の縞。盤でも縞を敷くと、駒がどのくらい動いたか目で測れる */
+  background: repeating-linear-gradient(90deg,
+              var(--turf) 0 calc(var(--px) * 16),
+              var(--turf-dark) calc(var(--px) * 16) calc(var(--px) * 32));
+}
+.board-mid, .board-circle, .board-pa, .board-goal { position: absolute; }
+.board-mid { left: 50%; top: 0; bottom: 0; width: var(--w-hair); background: var(--line); }
+.board-circle {
+  left: 50%; top: 50%;
+  width: 17%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: var(--w-hair) solid var(--line);
+  border-radius: 50%;
+}
+.board-pa {
+  top: 21%; height: 58%; width: 16%;
+  border: var(--w-hair) solid var(--line);
+}
+.board-pa-l { left: 0; border-left: 0; }
+.board-pa-r { right: 0; border-right: 0; }
+.board-goal {
+  top: 44.5%; height: 11%; width: calc(var(--px) * 3);
+  background: var(--line);
+}
+.board-goal-l { left: 0; }
+.board-goal-r { right: 0; }
+
+.board-dir {
+  position: absolute;
+  left: 0; right: 0; top: calc(var(--px) * 2);
+  text-align: center;
+  font-size: .72rem;
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 40, 25, .8);
+  pointer-events: none;
+}
+
+.board-chip {
+  position: absolute;
+  transform: translate(-50%, 50%);     /* `left`/`bottom` の点が駒の中心 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: calc(var(--px) * 1) calc(var(--px) * 2);
+  min-width: calc(var(--px) * 26);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 40, 25, .45);
+  font: inherit;
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+}
+.board-chip:focus-visible { outline: var(--w-frame) solid var(--warn); outline-offset: var(--px); }
+.board-chip.is-held {
+  cursor: grabbing;
+  z-index: 5;
+  box-shadow: calc(var(--drop) * 2) calc(var(--drop) * 2) 0 rgba(20, 40, 25, .5);
+}
+.board-pos {
+  font-size: .62rem; font-weight: 900; line-height: 1.2;
+  padding: 0 calc(var(--px) * 2);
+  color: var(--ink-on-dark);
+  background: var(--ui);
+}
+.board-name {
+  font-size: .68rem; font-weight: 800; line-height: 1.3;
+  white-space: nowrap;
+}
+.bd-gk .board-pos { background: var(--gk); }
+.bd-df .board-pos { background: var(--ui-dk); }
+.bd-mf .board-pos { background: var(--accent-dark); }
+.bd-fw .board-pos { background: var(--home-dark); }
+
 /* 🔴 動きを減らす設定の人には、刻んだ動きも出さない（点滅と跳ねは特につらい） */
 @media (prefers-reduced-motion: reduce) {
   .boot-fill { transition: none; }

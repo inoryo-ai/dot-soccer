@@ -16,11 +16,13 @@
 import * as C from "../sim/constants.ts";
 import { Career, SAVE_VERSION, SaveError } from "../sim/career.ts";
 import type { CareerTrainingResult, SaveData, SeasonSummary } from "../sim/career.ts";
+import { Match } from "../sim/engine.ts";
 import type { MatchEvent, MatchStatsOut, Replay } from "../sim/engine.ts";
 import { ValueError } from "../sim/errors.ts";
 import type { Fixture, StandingsRow, StoredMatchResult } from "../sim/league.ts";
-import { ATTITUDES, FORMATIONS, POLICY_ACTIONS, POLICY_CONDITIONS, PolicyRule } from "../sim/model.ts";
-import type { Player } from "../sim/model.ts";
+import { ATTITUDES, FORMATIONS, GK_MAX_X_FRAC, POLICY_ACTIONS, POLICY_CONDITIONS,
+         PolicyRule, Tactics, effectiveSlots } from "../sim/model.ts";
+import type { Player, SlotSpot } from "../sim/model.ts";
 import { PRESET_PLANS, TRAININGS_PER_PLAYER, defaultUserPlan } from "../sim/presets.ts";
 import type { Plan } from "../sim/presets.ts";
 import { pyRoundN } from "../sim/pymath.ts";
@@ -170,6 +172,25 @@ export function squad(): PlayerView[] {
   ];
 }
 
+/**
+ * 配置盤の1枠。**誰がどこに立つか**を、試合とまったく同じ計算で出したもの。
+ *
+ * 🔑 `name` は `Match.assignSlots` が決める。枠に選手を割り当てる規則は
+ *    `src/sim/` にしかないので、画面で別の割り当てを作らない。
+ */
+export interface LineupSpot {
+  /** 枠の番号（0 が GK）。これで動かす先を指す */
+  index: number;
+  pos: string;
+  name: string;
+  /** 0=自ゴール 1=相手ゴール */
+  x: number;
+  /** 0=下 1=上 */
+  y: number;
+  /** この枠は動かせる範囲が狭いか（GK だけ true） */
+  locked_x: number | null;
+}
+
 export interface View {
   team: string;
   season: number;
@@ -183,6 +204,7 @@ export interface View {
   standings: StandingsRow[];
   squad: PlayerView[];
   tactics: { line_height: number; zone_width: number; attitude: string; formation: string };
+  lineup: LineupSpot[];
   manager: { style: number; rigidity: number; substitution: number; selection: number };
   policy: { condition: string; action: string }[];
   history: SeasonSummary[];
@@ -212,6 +234,7 @@ export function view(): View {
       attitude: me.tactics.attitude,
       formation: me.tactics.formation,
     },
+    lineup: lineup(),
     manager: {
       style: me.manager.style,
       rigidity: me.manager.rigidity,
@@ -309,7 +332,67 @@ export function setTactics(lineHeight: number, zoneWidth: number, attitude: stri
   t.line_height = Math.max(1, Math.min(5, Math.trunc(Number(lineHeight))));
   t.zone_width = Math.max(1, Math.min(5, Math.trunc(Number(zoneWidth))));
   t.attitude = attitude;
+  /* 🔴 フォーメーションを変えたら立ち位置の上書きは捨てる。
+        枠の数は4つとも11で同じなので検査は通ってしまうが、
+        4-4-2 のために置いた座標を 3-4-3 に当てても意味が無い。
+        黙って引き継ぐと「選び直したのに前の形のまま」になる。 */
+  if (t.formation !== formation) t.slots = null;
   t.formation = formation;
+  return view();
+}
+
+/* ------------------------------------------------------------ 配置（立ち位置） */
+
+/** いまの配置を、**試合で使うのとまったく同じ計算**で出す */
+function lineup(): LineupSpot[] {
+  const me = current().me;
+  const slots = effectiveSlots(me.tactics);
+  const pairs = Match.assignSlots(me.players, slots);
+  return pairs.map(([player, slot], i) => ({
+    index: i,
+    pos: slot[0],
+    name: player.name,
+    x: slot[1],
+    y: slot[2],
+    locked_x: slot[0] === "GK" ? GK_MAX_X_FRAC : null,
+  }));
+}
+
+/**
+ * 立ち位置を上書きする。`spots` はフォーメーションの枠と**同じ順**で 11 個。
+ *
+ * 🔑 値は小数2桁に丸めてから渡す。丸めないと、画面のピクセルから出た
+ *    端数がそのままセーブに入り、同じ配置なのにファイルが毎回変わる。
+ * 🔴 正しさの判定は `Tactics` に任せる（ここに規則を書かない）。
+ */
+export function setLineup(spots: readonly (readonly [number, number])[]): View {
+  const me = current().me;
+  const rounded = spots.map(([x, y]) =>
+    [pyRoundN(x, 2), pyRoundN(y, 2)] as SlotSpot);
+  /* 🔑 作って通れば正しい。判定は `Tactics` の中にしかない。
+        ここで `ValueError` を `GameError` に**必ず**包み直す。包み忘れると
+        「想定していない失敗です」という出し方になり、
+        直せる操作ミス（GKを前に出しすぎ）が不具合に見える。 */
+  let checked: Tactics;
+  try {
+    checked = new Tactics({
+      line_height: me.tactics.line_height,
+      zone_width: me.tactics.zone_width,
+      attitude: me.tactics.attitude,
+      formation: me.tactics.formation,
+      slots: rounded,
+    });
+  } catch (e) {
+    if (e instanceof ValueError) throw new GameError(e.message);
+    throw e;
+  }
+  me.tactics.slots = checked.slots;
+  return view();
+}
+
+/** 上書きを捨てて、フォーメーションの既定の並びに戻す */
+export function resetLineup(): View {
+  current().me.tactics.slots = null;
   return view();
 }
 

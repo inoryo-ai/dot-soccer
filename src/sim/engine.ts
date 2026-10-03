@@ -12,7 +12,7 @@
 import { ValueError } from "./errors.ts";
 import * as C from "./constants.ts";
 import { atan2, cos, exp, PI, sin, TAU } from "./detmath.ts";
-import { ATTITUDES, FORMATIONS } from "./model.ts";
+import { ATTITUDES, effectiveSlots } from "./model.ts";
 import type { Player, Position, Slot, Team } from "./model.ts";
 import { PyRandom } from "./pyrandom.ts";
 import { cmpStr, fmtF, hypot, pyMod, pyRound, pyRoundN } from "./pymath.ts";
@@ -256,7 +256,9 @@ export class Match {
       new TeamState(teamB, 1, -1, baseAttitude(teamB)),
     ];
     for (const ts of this.teams) {
-      const formation = FORMATIONS[ts.team.tactics.formation]!;
+      /* 🔑 立ち位置の上書き（事務所でドラッグして動かしたもの）はここで効く。
+            `effectiveSlots` が唯一の計算。画面も同じものを呼ぶ */
+      const formation = effectiveSlots(ts.team.tactics);
       const slots = Match.assignSlots(ts.team.players, formation);
       this.actors.push(slots.map(([p, base]) => new Actor(p, ts.idx, base)));
     }
