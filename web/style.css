@@ -855,7 +855,15 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   background: none;
 }
 
+/* 🔴 3Dに一本化したので、盤は**画面いっぱい**にする（D-33）。
+      ドット絵のときは「整数倍でないと縞がムラになる」ので倍率を整数に縛っていたが、
+      3Dにはドットの格子が無い。出す場所の実寸そのままで描くのが一番きれいで、
+      拡大のぼけも出ない（実際の画素数は `match3d.ts` の `fit()` が合わせる）。
+   🔑 **CSS で大きさを決め切る。** `width: auto` のままだと canvas の属性値を見るので、
+      `fit()` が属性を書く → 箱が変わる → また `fit()` が走る、の堂々巡りになる。 */
 .screen-match .pitch-wrap {
+  position: absolute;
+  inset: 0;
   max-width: none;
   width: auto;
   padding: 0;
@@ -864,7 +872,12 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   border: 0;
   box-shadow: none;
 }
-.screen-match #pitch { width: auto; border: 0; }
+.screen-match #pitch {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  image-rendering: auto;
+}
 
 /* 重ねるものは、盤の上に浮かせる */
 /* 🔴 実況と操作を**画面の真ん中から外す**（2026-10-03 の目視）。
@@ -1431,10 +1444,8 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
    🔑 高さも条件に入れる。960×720 の盤に得点板・実況・操作を足すと約 940px 必要で、
       縦が足りない窓で2倍にすると操作ボタンが画面の外へ出る。
       足りないときは今までどおり幅に合わせて伸ばす（滲まないので実害は小さい）。 */
-@media (min-width: 1200px) and (min-height: 940px) {
-  .pitch-wrap { max-width: max-content; }
-  #pitch { width: 960px; }
-}
+/* 🗑 2026-10-03: 盤を整数倍で止める指定をやめた（D-33）。
+      ドット絵をやめたので、縞のムラを避けるために倍率を縛る理由が無くなった。 */
 
 /* 街も同じ考え方。窓が 1920px 以上あるときだけ **3倍（1920×1080）** まで上げる。
    ここがフルHDちょうど */

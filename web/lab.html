@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>見比べ — ドット絵 と ブロック3D（.soccer）</title>
+<title>選手パーツの確認台 — ブロック3D（.soccer）</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="style.css">
 <style>
@@ -29,7 +29,6 @@
 }
 .lab-pane canvas { display: block; width: 100%; height: auto; }
 /* ドット絵の側だけ拡大を滲ませない。3Dの側は面を塗るので不要 */
-#oldCanvas { image-rendering: pixelated; }
 .lab-tag {
   position: absolute;
   left: 0; top: 0;
@@ -61,15 +60,11 @@
 
 <div class="lab">
   <div class="lab-head">
-    <h1 style="margin:0;font-size:1.3rem;">見比べ — いまのドット絵 と ブロック3D</h1>
-    <span class="lab-note">左＝現行（8方向×4コマを手描き）／右＝3D（モデル1体・関節を回すだけ）</span>
+    <h1 style="margin:0;font-size:1.3rem;">選手パーツの確認台 — ブロック3D（2頭身）</h1>
+    <span class="lab-note">選手1体だけを、姿勢・向き・カメラ・体つきを変えながら見る台。試合の中では22人が重なるので、1つずつ確かめられない。</span>
   </div>
 
   <div class="lab-stage">
-    <div class="lab-pane">
-      <span class="lab-tag">いまのドット絵</span>
-      <canvas id="oldCanvas" width="320" height="360"></canvas>
-    </div>
     <div class="lab-pane">
       <span class="lab-tag">ブロック3D（2頭身）</span>
       <canvas id="newCanvas" width="640" height="720"></canvas>
@@ -140,7 +135,7 @@
   </div>
 
   <p class="lab-note" style="margin-top:calc(var(--px) * 5);">
-    🔑 右は <strong>箱6個を面に分けて、奥から手前へ塗っているだけ</strong>です。
+    🔑 <strong>箱6個を面に分けて、奥から手前へ塗っているだけ</strong>です。
     WebGL も外部ライブラリも使っていません（要件 §6）。
     GPU を使わないので、同じ入力なら必ず同じ絵になります（D-16 の決定論が保てます）。
   </p>

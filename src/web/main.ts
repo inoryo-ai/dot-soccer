@@ -12,7 +12,9 @@ import * as Board from "./board.ts";
 import * as Ceremony from "./ceremony.ts";
 import * as City from "./city.ts";
 import * as Fx from "./fx.ts";
-import * as Pitch from "./pitch.ts";
+/* 🔑 試合の描画は3Dに一本化した（D-33）。外から見える形は前のままなので、
+      ここは読み込み先が変わるだけ。別名は `Pitch` のまま置く。 */
+import * as Pitch from "./match3d.ts";
 import * as Room from "./room.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
@@ -86,9 +88,10 @@ const BG_SCENE: Record<string, string> = {
   boot: "title",
   setup: "menu",
   stadium: "result",
-  /* 🔑 `match` は上の 396/1080 がスタンド・屋根・LEDボードで、下は何も描かない
-        （デザイン側の `grassTop = H`）。そこへ本物の盤を敷く。 */
-  match: "match",
+  /* 🗑 2026-10-03: `match` を外した（D-33）。
+        試合の描画を3Dにして**観客席も屋根も自前で描くようになった**ので、
+        後ろにデザインの2Dスタンド帯を敷くと**スタジアムが二重に見える**。
+        上は2Dの客席、下は3Dの客席、という割れ方をしていた。 */
 };
 
 function showScreen(id: string): void {
