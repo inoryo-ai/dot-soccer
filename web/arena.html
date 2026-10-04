@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>練習場 1対1 — 学習の前の動きを見る（.soccer）</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+/* 🔑 検証用（D-48）。ゲーム本体には出ない。試合の画面（match3d）をそのまま使う */
+.ar { max-width: 1500px; margin: 0 auto; padding: calc(var(--px) * 8); }
+.ar-head { display: flex; gap: calc(var(--px) * 6); align-items: baseline; flex-wrap: wrap; }
+.ar-note { color: var(--ink-dim); font-size: .82rem; line-height: 1.8; }
+.ar-stage {
+  position: relative;
+  margin-top: calc(var(--px) * 6);
+  background: #8fd0ef;
+  border: var(--w-frame) solid var(--ui-edge);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+.ar-stage canvas#view3d { display: block; width: 100%; height: 100%; }
+.ar-score {
+  position: absolute;
+  left: 0; top: 0;
+  z-index: 2;
+  padding: calc(var(--px) * 2) calc(var(--px) * 6);
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--home);
+  background: var(--ui-edge);
+}
+.ar-mini {
+  position: absolute;
+  right: calc(var(--px) * 4); bottom: calc(var(--px) * 4);
+  z-index: 2;
+  width: 220px; height: 150px;
+  background: rgba(0, 0, 0, .25);
+}
+.ar-ctrl {
+  display: flex;
+  gap: calc(var(--px) * 5);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: calc(var(--px) * 6);
+  padding: calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.ar-ctrl label { font-size: .82rem; font-weight: 700; color: var(--ink-dim); }
+/* 🔑 共通の style.css は入力欄を横いっぱいに広げるので、このページだけ中身の幅にする */
+.ar-ctrl select, .ar-ctrl input[type="number"] { width: auto; flex: 0 0 auto; font-size: 1rem; padding: 2px 6px; }
+.ar-ctrl input[type="range"] { width: 11rem; flex: 0 0 auto; }
+.ar-log { margin-top: calc(var(--px) * 5); font-size: .9rem; line-height: 1.8; }
+.ar-log li.now { font-weight: 900; }
+</style>
+</head>
+<body>
+
+<div class="ar">
+  <div class="ar-head">
+    <h1 style="margin:0;font-size:1.3rem;">練習場 1対1（＋GK）</h1>
+    <span class="ar-note">
+      ゴールの前を <strong>28×20m</strong> に区切った練習場（黄色のコーン）。2人が攻めと守りを交互に受け持ちます。
+      物理は11対11の試合と同じ。いまの判断は<strong>学習の前</strong>（学習した方針と比べる相手）です。
+    </span>
+  </div>
+
+  <pre id="err" hidden style="white-space:pre-wrap;margin:calc(var(--px) * 4) 0;padding:calc(var(--px) * 4);background:#fff0ee;border:var(--w-frame) solid var(--danger-dark);color:#7a1a12;font-size:.78rem;"></pre>
+
+  <div class="ar-ctrl">
+    <label for="pa">選手A（オレンジ）</label><select id="pa"></select>
+    <label for="pb">選手B（青）</label><select id="pb"></select>
+    <label for="gk">GK</label><select id="gk"></select>
+    <label for="seed">シード</label><input id="seed" type="number" value="1" min="0" style="width:6rem;">
+    <label for="n">攻撃の回数</label><input id="n" type="number" value="20" min="2" max="200" step="2" style="width:5rem;">
+    <button id="runBtn" class="btn">練習を回す</button>
+  </div>
+
+  <div class="ar-stage">
+    <span id="score" class="ar-score">—</span>
+    <canvas id="view3d" width="1280" height="720"></canvas>
+    <canvas id="mini" class="ar-mini" width="220" height="150"></canvas>
+  </div>
+
+  <div class="ar-ctrl">
+    <button id="playBtn" class="btn">一時停止</button>
+    <label for="speed">速さ</label>
+    <input id="speed" type="range" min="25" max="600" value="100">
+    <span id="speedVal" style="font-weight:800;">1.0x</span>
+  </div>
+
+  <ol id="log" class="ar-log"></ol>
+</div>
+
+<script type="module" src="js/web/arena_view.js"></script>
+</body>
+</html>

@@ -31,7 +31,7 @@ export const DIST = join(WEB, "dist");
 /* 🔑 `lab.html` は**見比べ用の検証ページ**。ゲーム本体からは辿れない。
       配るのは、オーナーが同じURLで開いて見比べられるようにするため。 */
 export const STATIC_FILES = ["index.html", "style.css", "lab.html", "pitch3d.html",
-                             "design-preview.html", "faces.html", "bgcheck.html"] as const;
+                             "design-preview.html", "faces.html", "bgcheck.html", "arena.html"] as const;
 
 /**
  * そのまま配る入れもの（中身は触らない）。
@@ -48,10 +48,10 @@ export const STATIC_DIRS = ["bg", "scene"] as const;
 
 /** ブラウザで使う JS（`web/dist/js/` の下）。ここに無いものが出たら組み立て失敗。 */
 export const EXPECTED_JS = [
-  "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
-  "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
+  "sim/actor.js", "sim/arena.js", "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
+  "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/physics.js", "sim/pyrandom.js",
   "sim/sha512.js", "sim/training.js", "sim/utility.js", "sim/value_table.js",
-  "web/api.js", "web/bg.js", "web/bgcheck.js", "web/board.js", "web/ceremony.js",
+  "web/api.js", "web/arena_view.js", "web/bg.js", "web/bgcheck.js", "web/board.js", "web/ceremony.js",
   "web/face.js",
   "web/faces.js", "web/fx.js", "web/lab.js", "web/main.js",
   "web/field3d.js", "web/match3d.js", "web/pitch3d.js",

@@ -454,7 +454,14 @@ function draw(dt: number): void {
     list.push({ i, x, y, sp, d: 0 });
   }
 
-  aim(dt, bx, by, list);
+  /* 🔑 練習場（D-48）では、ボールと区切りの真ん中のあいだを見る。ボールだけを追うと、
+        区切りの入口で始まる攻撃のあいだ**ゴールが画の端に切れる**（2026-10-05 の目視） */
+  if (rp.area !== undefined) {
+    const [ax0, ay0, ax1, ay1] = rp.area;
+    aim(dt, (bx + (ax0 + ax1) / 2) / 2, (by + (ay0 + ay1) / 2) / 2, list);
+  } else {
+    aim(dt, bx, by, list);
+  }
 
   const cam: Voxel.Cam = {
     yaw: CAM.yaw, pitch: CAM.pitch, dist: camDist,
@@ -471,6 +478,8 @@ function draw(dt: number): void {
   excite = Math.max(0, excite - dt / EXCITE_FADE);
   Stadium.draw(c, cam, clock, excite);
   Field.draw(c, cam);
+  /* 練習場（D-48）だけ: 区切った場所を描く。試合のリプレイには `area` が無い */
+  if (rp.area !== undefined) Field.drawArea(c, cam, ...rp.area);
 
   /* 🔴 奥から手前へ。並べ替えの奥行きは**カメラと同じ式**（`basisOf`）から取る。
         目の位置を手で組み直していた（2026-10-03 まで）が、見下ろし角ぶんの
@@ -545,6 +554,14 @@ function drawMinimap(rp: Replay, fa: number[], fb: number[], t: number, k: numbe
 
   const at = (x: number, y: number): { x: number; y: number } =>
     ({ x: mx + (x / C.PITCH_X) * mw, y: my + (y / C.PITCH_Y) * mh });
+  if (rp.area !== undefined) {
+    const [ax0, ay0, ax1, ay1] = rp.area;
+    const p0 = at(ax0, ay0);
+    const p1 = at(ax1, ay1);
+    c.strokeStyle = "#f5c518";
+    c.strokeRect(Math.round(p0.x) + 0.5, Math.round(p0.y) + 0.5,
+                 Math.round(p1.x - p0.x), Math.round(p1.y - p0.y));
+  }
   const lerp = (i: number): number => (fa[i]! + (fb[i]! - fa[i]!) * t) / k;
 
   for (let i = 0; i < rp.roster.length; i++) {

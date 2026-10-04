@@ -306,6 +306,7 @@ const PAGES: Record<string, string> = {
   "pitch3d.ts": "pitch3d.html",
   "faces.ts": "faces.html",
   "bgcheck.ts": "bgcheck.html",
+  "arena_view.ts": "arena.html",
 };
 
 function checkDomContract(): void {

@@ -43,7 +43,7 @@ export const VALUE_TABLE: ValueTable | null = {
   cellY: 4.857142857142857,
   nx: 21,
   ny: 14,
-  inputs: "115a4c8ce6576ab7",
+  inputs: "2f2e9c6ed42dd864",
   matches: 240,
   iteration: 2,
   // 1行が攻める向きの x の1マス（自ゴール側から）。列が y

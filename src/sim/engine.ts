@@ -11,11 +11,11 @@
 
 import { ValueError } from "./errors.ts";
 import * as C from "./constants.ts";
-import { atan2, cos, exp, PI, sin, TAU } from "./detmath.ts";
+import { cos, exp, PI, sin, TAU } from "./detmath.ts";
 import { ATTITUDES, effectiveSlots } from "./model.ts";
-import type { Player, Position, Slot, Team } from "./model.ts";
+import type { Player, Slot, Team } from "./model.ts";
 import { PyRandom } from "./pyrandom.ts";
-import { cmpStr, fmtF, hypot, pyMod, pyRound, pyRoundN } from "./pymath.ts";
+import { cmpStr, fmtF, hypot, pyRound, pyRoundN } from "./pymath.ts";
 import { findIssues } from "./training.ts";
 import { Score, chooseBest } from "./utility.ts";
 import { VALUE_TABLE, tableLevel } from "./value_table.ts";
@@ -26,82 +26,10 @@ import { VALUE_TABLE, tableLevel } from "./value_table.ts";
  */
 const VALUE_LEVEL = VALUE_TABLE === null ? C.VALUE_LEVEL_FALLBACK : tableLevel(VALUE_TABLE);
 import type { Choice } from "./utility.ts";
+import { Actor } from "./actor.ts";
+import * as Phys from "./physics.ts";
 
-export class Actor {
-  player: Player;
-  team_idx: number;
-  pos: Position;
-  base_x_frac: number;
-  base_y_frac: number;
-  x = 0.0;
-  y = 0.0;
-  stamina: number;
-  max_stamina: number;
-  max_speed: number;
-  fwd_weight: number;
-  sup_weight: number;
-  // ---- 一人一人が考えて動くために持つもの（2026-09-30 追加） ----
-  seat_dx = 0.0;          // 持ち場そのものの個人差
-  seat_dy = 0.0;
-  decide_offset = 0;      // いつ考え直すか
-  lag = 0;                // 状況の変化にどれだけ遅れるか
-  intent = "KEEP_SHAPE";  // いま何をしているか
-  aim_x = 0.0;            // そのために向かう一点
-  aim_y = 0.0;
-  mark: Actor | null = null;   // 誰を捕まえているか
-  seen_epoch = -1;        // どの局面まで見たか
-  heading = 0.0;          // 向き（急には変えられない）
-
-  constructor(player: Player, teamIdx: number, base: Slot) {
-    this.player = player;
-    this.team_idx = teamIdx;
-    this.pos = base[0];
-    this.base_x_frac = base[1];
-    this.base_y_frac = base[2];
-    this.max_stamina = player.maxStamina;
-    this.stamina = this.max_stamina;
-    this.max_speed = C.SPEED_MIN_MPS
-      + player.speed / 100.0 * (C.SPEED_MAX_MPS - C.SPEED_MIN_MPS);
-    this.fwd_weight = C.FORWARD_WEIGHT[this.pos]!;
-    this.sup_weight = C.SUPPORT_WEIGHT[this.pos]!;
-    // 🔑 個人差は Match 側が乱数で入れる（D-08: 乱数は Match の中だけで引く）。
-  }
-
-  get name(): string {
-    return this.player.name;
-  }
-
-  get staminaRatio(): number {
-    return this.max_stamina ? this.stamina / this.max_stamina : 0.0;
-  }
-
-  currentSpeed(): number {
-    const f = C.STAMINA_SPEED_FLOOR + (1.0 - C.STAMINA_SPEED_FLOOR) * this.staminaRatio;
-    return this.max_speed * f;
-  }
-
-  /**
-   * `effort`（最大速度の何割で走るか）で走るときの速さ。
-   *
-   * 🔴 **疲れが下げるのは全力の上限だけ。**（2026-10-05）以前は速さ全体に疲れを掛けていたので、
-   *    疲れた選手はジョグまで遅くなり、後半の走行が前半の −27%（現実は −2.4%）・
-   *    最後の15分の高強度の走りがゼロ（現実は −20〜45%）だった。疲れた選手もジョグはできる。全力が出なくなる
-   */
-  pace(effort: number): number {
-    return Math.min(this.max_speed * effort, this.currentSpeed());
-  }
-
-  /**
-   * 疲れていると能力が出し切れない（§9「少ないほど速度が落ちる」の技術面への拡張）。
-   *
-   * 速度だけに効かせると『走り続ける戦術』に代償が無く、
-   * プレス型が一方的に強いバランスになる（実測で 80.5% だった）。
-   */
-  eff(value: number): number {
-    return value * (C.STAMINA_SKILL_FLOOR
-                    + (1.0 - C.STAMINA_SKILL_FLOOR) * this.staminaRatio);
-  }
-}
+export { Actor };
 
 /** ボールを持った人の行動（D-41）。何をするかと、実行に要る値だけを持つ。 */
 export interface PassAction {
@@ -212,6 +140,8 @@ export interface Replay {
   pitch: [number, number];
   roster: RosterEntry[];
   frames: number[][];
+  /** 練習場（`arena.ts`）だけ: 区切った場所 [x0, y0, x1, y1]。試合では無い */
+  area?: [number, number, number, number];
 }
 
 export interface MatchResult {
@@ -1134,12 +1064,7 @@ export class Match {
    *    ボールを毎ティック見るのは、寄せ役・マーク役・こぼれ球だけ。
    */
   private aimPoint(ts: TeamState, a: Actor): [number, number] {
-    if (a.pos === "GK") {
-      const gx = ts.ownGoalX();
-      const depth = ts.direction > 0 ? C.GK_DEPTH_M : -C.GK_DEPTH_M;
-      const ty = C.PITCH_Y / 2 + (this.ball_y - C.PITCH_Y / 2) * C.GK_SIDE_TRACK;
-      return [gx + depth, ty];
-    }
+    if (a.pos === "GK") return Phys.keeperAim(ts.ownGoalX(), ts.direction, this.ball_y);
     let tx: number;
     let ty: number;
     if (a.intent === "ENGAGE" || a.intent === "CHASE_LOOSE") {
@@ -1190,33 +1115,9 @@ export class Match {
    *    1秒に変えられるのは `TURN_RATE_RAD`（約49度）まで。
    *    大きく向きを変えている間は速度も落ちる。
    */
-  /** `dt` 秒ぶん目標へ進む（向きを変えられる量も進める量も `dt` に比例）。 */
+  /** `dt` 秒ぶん目標へ進む（式は `physics.ts` の `stepActor`）。進んだ距離をチームの走行に足す。 */
   private step(a: Actor, tx: number, ty: number, effort = 1.0, dt = 1.0, paced = false): void {
-    const dx = tx - a.x;
-    const dy = ty - a.y;
-    const dist = hypot(dx, dy);
-    if (dist < C.ARRIVE_EPSILON) return;
-
-    const want = atan2(dy, dx);
-    // 🔑 差を -π〜π に畳む。畳まないと「10度の差」が「350度の差」に化け、
-    //    その場でぐるぐる回り続ける（Python の % は割る数と同じ符号＝pyMod）
-    const diff = pyMod(want - a.heading + PI, TAU) - PI;
-    const turnMax = C.TURN_RATE_RAD * dt;
-    const turn = Math.max(-turnMax, Math.min(turnMax, diff));
-    a.heading += turn;
-
-    let speed = a.pace(effort);
-    if (paced && C.ARRIVE_TIME_S > 0) speed = Math.min(speed, Math.max(C.WALK_SPEED_MPS, dist / C.ARRIVE_TIME_S));
-    if (dist <= C.SPRINT_DISTANCE_M) speed *= C.JOG_SPEED_RATIO;  // 近い目標に全力で走らない
-    if (Math.abs(diff) > turnMax) speed *= C.TURN_SLOW_RATIO;  // 曲がりきれていない間は出せない
-
-    const stepLen = Math.min(dist, speed * dt);
-    a.x += cos(a.heading) * stepLen;
-    a.y += sin(a.heading) * stepLen;
-    a.x = Math.max(0.0, Math.min(C.PITCH_X, a.x));
-    a.y = Math.max(0.0, Math.min(C.PITCH_Y, a.y));
-    a.stamina = Math.max(0.0, a.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
-    this.teams[a.team_idx]!.stats.distance_m += stepLen;
+    this.teams[a.team_idx]!.stats.distance_m += Phys.stepActor(a, tx, ty, effort, dt, paced);
   }
 
   private trackStamina(): void {
@@ -1285,16 +1186,7 @@ export class Match {
     const t = VALUE_TABLE;
     if (t === null) return this.pathValue(ts, x, y, null);
     // 攻める向きにそろえる（自ゴール側が 0）
-    const ax = ts.direction > 0 ? x : C.PITCH_X - x;
-    const fx = Math.max(0.0, Math.min(t.nx - 1.0, ax / t.cellX - 0.5));
-    const fy = Math.max(0.0, Math.min(t.ny - 1.0, y / t.cellY - 0.5));
-    const ix = Math.min(t.nx - 2, Math.floor(fx));
-    const iy = Math.min(t.ny - 2, Math.floor(fy));
-    const wx = fx - ix;
-    const wy = fy - iy;
-    const v = (i: number, j: number): number => t.values[i * t.ny + j]!;
-    return (v(ix, iy) * (1 - wx) * (1 - wy) + v(ix + 1, iy) * wx * (1 - wy)
-            + v(ix, iy + 1) * (1 - wx) * wy + v(ix + 1, iy + 1) * wx * wy);
+    return Phys.tableValueAt(t, ts.direction > 0 ? x : C.PITCH_X - x, y);
   }
 
   /**
@@ -1376,32 +1268,10 @@ export class Match {
     return defender === null ? 1.0 : this.dribbleChanceStats(shooter, defender);
   }
 
-  /**
-   * (x, y) から (gx, gy) へ向かうとき、**前にいる**最も近い相手（`DRIBBLE_DUEL_M` 以内）。
-   *
-   * 🔴 **後ろや横の相手とはドリブルの勝負をしない。** 以前は 8m 以内なら向きに関係なく勝負になり、
-   *    後ろから追う相手が毎秒「抜けるかどうか」の勝負を仕掛けられた。ゴールが空いていても
-   *    運ぶたびに奪われ、空いた場面で失った 1,610回のうち 1,315回がこれだった（2026-10-04）。
-   *    後ろの相手が奪えるのは、追いついて奪い合いの距離（`TACKLE_RADIUS_M`）に入ったとき（`contest`）だけ。
-   */
+  /** (x, y) から (gx, gy) へ向かうとき、**前にいる**最も近い相手（式は `physics.ts`・D-42）。 */
   private opponentAhead(oppIdx: number, x: number, y: number, gx: number, gy: number,
                         closing = 0.0): Actor | null {
-    const dx = gx - x;
-    const dy = gy - y;
-    let best: Actor | null = null;
-    let bestD = C.DRIBBLE_DUEL_M + closing;
-    for (const o of this.actors[oppIdx]!) {
-      const ox = o.x - x;
-      const oy = o.y - y;
-      const dd = hypot(ox, oy);
-      // 前にいない相手は、すぐ後ろ（`DRIBBLE_BEHIND_M`）まで追いついたときだけ勝負になる（後ろから突く）
-      if (ox * dx + oy * dy <= 0 && dd > C.DRIBBLE_BEHIND_M + closing) continue;
-      if (dd < bestD) {
-        best = o;
-        bestD = dd;
-      }
-    }
-    return best;
+    return Phys.opponentAhead(this.actors[oppIdx]!, x, y, gx, gy, closing);
   }
 
   /**
@@ -1517,17 +1387,9 @@ export class Match {
     return { action: act, score: dribble };
   }
 
-  /**
-   * ピッチの外へ出さない。
-   *
-   * 🔴 `step` だけで制限していたので、**運ぶ・ドリブルでは外へ出られた**。
-   *    運ぶ速度を上げた 2026-10-01 に実際に X=105.7m（ゴールラインの外）まで出た。
-   *    画面では選手が消えるだけで例外は出ない
-   *    （`tests/replay.test.ts` の「全員がピッチの中」が捕まえた）。
-   */
+  /** ピッチの外へ出さない（式は `physics.ts`）。 */
   private static keepInside(a: Actor): void {
-    a.x = Math.max(0.0, Math.min(C.PITCH_X, a.x));
-    a.y = Math.max(0.0, Math.min(C.PITCH_Y, a.y));
+    Phys.keepInside(a);
   }
 
   /** 判断待ちの間、保持者はゴール方向へボールを運ぶ。 */
@@ -1580,14 +1442,7 @@ export class Match {
   }
 
   private countWithin(teamIdx: number, x: number, y: number, r: number): number {
-    const r2 = r * r;
-    let n = 0;
-    for (const o of this.actors[teamIdx]!) {
-      const dx = o.x - x;
-      const dy = o.y - y;
-      if (dx * dx + dy * dy <= r2) n += 1;
-    }
-    return n;
+    return Phys.countWithin(this.actors[teamIdx]!, x, y, r);
   }
 
   /** 奪い合い（§9）。守備側が近くにいると technique＋physical で勝負。 */
@@ -1629,25 +1484,9 @@ export class Match {
   private tackleChance(holder: Actor | null, challenger: Actor, ts: TeamState,
                        x: number, y: number): number {
     const opp = this.teams[1 - ts.idx]!;
-    const c = challenger.player;
-    const stat = (k: "technique" | "physical" | "speed"): number =>
-      holder === null ? 50.0 : holder.eff(holder.player[k]);
-    const press = Math.max(0, Math.min(100, c.press + opp.press_delta));
-    // 奪う側は体の強さ、守る側は技術が効く（要件 GD-05「相性が生まれる」）
-    const tacklePower = 2.0 * (C.TACKLE_PHYSICAL_SHARE * challenger.eff(c.physical)
-                               + (1 - C.TACKLE_PHYSICAL_SHARE) * challenger.eff(c.technique));
-    const shieldPower = 2.0 * (C.TACKLE_SHIELD_SHARE * stat("technique")
-                               + (1 - C.TACKLE_SHIELD_SHARE) * stat("physical"));
-    const p = (C.TACKLE_BASE
-               + C.TACKLE_WEIGHT * (tacklePower - shieldPower)
-               // 🔑 速い選手は体を入れられる前に離せる。physical 一本槍の型に
-               //    勝ち筋を作るための項（要件 GD-05「相性が生まれる」）
-               - C.TACKLE_SPEED_WEIGHT * (stat("speed") - challenger.eff(c.speed))
-               // 🔑 近くに味方がいれば預け先があり、体を張って守れる
-               - C.TACKLE_SUPPORT_RELIEF * Math.min(
-                 C.TACKLE_SUPPORT_MAX, this.countWithin(ts.idx, x, y, C.SUPPORT_RADIUS_M) - 1)
-               + C.TACKLE_PRESS_BONUS * press);
-    return Math.max(0.03, Math.min(0.85, p));
+    const press = Math.max(0, Math.min(100, challenger.player.press + opp.press_delta));
+    return Phys.tackleChance(holder, challenger, press,
+                             this.countWithin(ts.idx, x, y, C.SUPPORT_RADIUS_M) - 1);
   }
 
   /**
@@ -1659,22 +1498,6 @@ export class Match {
                        closing = 0.0): number {
     const chaser = this.nearestOpponentAt(1 - ts.idx, x, y, C.VALUE_CHASE_RADIUS_M + closing);
     return chaser === null ? 0.0 : this.tackleChance(shooter, chaser, ts, x, y);
-  }
-
-  /** (x, y) からゴールの真ん中への線の近く（`SHOT_BLOCK_LANE_M`）にいる相手のフィールド選手の数。GKは数えない。 */
-  private shotBlockers(oppIdx: number, x: number, y: number, gx: number, gy: number): number {
-    const vx = gx - x;
-    const vy = gy - y;
-    const ln2 = vx * vx + vy * vy;
-    if (ln2 <= 0) return 0;
-    let n = 0;
-    for (const o of this.actors[oppIdx]!) {
-      if (o.pos === "GK") continue;
-      const t = ((o.x - x) * vx + (o.y - y) * vy) / ln2;
-      if (t <= 0.0 || t >= 1.0) continue;
-      if (hypot(o.x - (x + vx * t), o.y - (y + vy * t)) <= C.SHOT_BLOCK_LANE_M) n += 1;
-    }
-    return n;
   }
 
   /** (x, y) から `radius` 以内で最も近い相手。 */
@@ -1726,25 +1549,7 @@ export class Match {
    */
   private expectedGoalAt(shooter: Actor | null, ts: TeamState, x: number, y: number,
                          dist: number, closing = 0.0): number {
-    const opp = this.teams[1 - ts.idx]!;
-    const gk = this.actors[opp.idx]!.find((a) => a.pos === "GK")!;
-    const kick = shooter === null ? 50.0 : shooter.eff(shooter.player.kick);
-    const tech = shooter === null ? 50.0 : shooter.eff(shooter.player.technique);
-    const kickF = 0.6 + kick / 100.0 * C.SHOOT_KICK_WEIGHT;
-    // 🔑 決めるのは蹴る力だけではない。技術は「落ち着いて流し込む」ほうに効く
-    const techF = (1.0 - C.SHOOT_TECHNIQUE_WEIGHT / 2.0 + tech / 100.0 * C.SHOOT_TECHNIQUE_WEIGHT);
-    const gkSkill = (gk.player.technique + gk.player.physical + gk.player.speed) / 3.0;
-    const gkF = Math.max(0.3, 1.0 - C.SHOOT_GK_WEIGHT * (gkSkill - 50.0) / 200.0);
-    const near = this.countWithin(opp.idx, x, y, 4.0 + closing);
-    const pressure = Math.max(0.3, 1.0 - C.SHOOT_PRESSURE_PENALTY * near);
-    // 🔴 **撃つ線の上にいるフィールドの相手はシュートを止める**（D-44）。現実ではシュートの約4分の1がブロックされる。
-    //    これが無いと、密集した箱の外からでも寄せられていなければ当たりが良く見え、
-    //    選手が遠目から撃ち続けた（侵入あたりシュート 0.7〜0.9・決定率 6%）
-    const blockers = this.shotBlockers(opp.idx, x, y, ts.targetGoalX(), C.PITCH_Y / 2);
-    const block = (1.0 - C.SHOT_BLOCK_PER_DEFENDER) ** blockers;
-    const xg = (C.SHOOT_BASE * exp(-C.SHOOT_DISTANCE_DECAY * dist)
-                * kickF * techF * gkF * pressure * block);
-    return Math.max(0.005, Math.min(0.85, xg));
+    return Phys.expectedGoalAt(shooter, this.actors[1 - ts.idx]!, ts.targetGoalX(), x, y, dist, closing);
   }
 
   /** 出す。通るかどうかは候補を採点したときの `p`（`onBallChoices`）。 */
@@ -1845,9 +1650,7 @@ export class Match {
 
   /** 運ぶ・抜いたときに着く場所。決めた向きへ1回ぶん進む。 */
   private dribbleTarget(holder: Actor, act: DribbleAction): [number, number] {
-    const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
-    return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + act.dirX * stepLen)),
-            Math.max(0.0, Math.min(C.PITCH_Y, holder.y + act.dirY * stepLen))];
+    return Phys.dribbleTarget(holder, act.dirX, act.dirY);
   }
 
   /** 目の前の相手を抜ける確率。🔑 採点（`onBallChoices`）と実行（`dribble`）の唯一の式。 */
@@ -1855,13 +1658,9 @@ export class Match {
     return this.dribbleChanceStats(holder, defender);
   }
 
-  /** `dribbleChance` の本体。`holder` が null なら能力50の誰か（`pathValue` が使う）。 */
+  /** `dribbleChance` の本体（式は `physics.ts`）。`holder` が null なら能力50の誰か（`pathValue` が使う）。 */
   private dribbleChanceStats(holder: Actor | null, defender: Actor): number {
-    const c = defender.player;
-    const mine = holder === null ? 50.0
-      : (holder.eff(holder.player.speed) + holder.eff(holder.player.technique)) / 2.0;
-    const p = C.DRIBBLE_BASE + C.DRIBBLE_WEIGHT * (mine - defender.eff(c.physical));
-    return Math.max(0.08, Math.min(0.95, p));
+    return Phys.dribbleChance(holder, defender);
   }
 
   /** 運ぶ。前に相手がいれば抜きにかかり、失敗すれば奪われる。 */

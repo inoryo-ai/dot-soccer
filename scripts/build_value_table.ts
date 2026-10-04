@@ -55,12 +55,27 @@ const SHRINK = 30;
  * 表を左右する規則のファイル。これが変わったら表は古い（check [12]）。
  * 🔴 改行は LF にそろえてから指紋を取る（Windows の作業コピーは CRLF、CI は LF）。
  */
-export const INPUT_FILES = ["src/sim/engine.ts", "src/sim/constants.ts", "src/sim/presets.ts",
-                            "src/sim/training.ts", "src/sim/model.ts"];
+/**
+ * 表の中身を決めるファイル＝試合とプリセットが**たどって読み込むファイルすべて**（表そのものを除く）。
+ *
+ * 🔴 2026-10-05 まで手で5つ並べていた。物理を `physics.ts`・`actor.ts` に分けたとき（D-48）、
+ *    その2つが指紋から漏れ、**物理を変えても表が古いと言われない**状態になった。手で並べず、読み込みをたどって出す
+ */
+export function inputFiles(root = ROOT): string[] {
+  const seen = new Set<string>();
+  const visit = (rel: string): void => {
+    if (seen.has(rel) || rel === "src/sim/value_table.ts") return;
+    seen.add(rel);
+    const src = readFileSync(join(root, rel), "utf8");
+    for (const m of src.matchAll(/from "\.\/([A-Za-z0-9_]+\.ts)"/g)) visit(`src/sim/${m[1]}`);
+  };
+  for (const entry of ["src/sim/engine.ts", "src/sim/presets.ts"]) visit(entry);
+  return [...seen].sort();
+}
 
 export function inputsFingerprint(root = ROOT): string {
   const h = createHash("sha256");
-  for (const f of INPUT_FILES) h.update(codeOnly(readFileSync(join(root, f), "utf8")));
+  for (const f of inputFiles(root)) h.update(codeOnly(readFileSync(join(root, f), "utf8")));
   return h.digest("hex").slice(0, 16);
 }
 

@@ -131,16 +131,17 @@ function seg(b: Basis, cam: Cam, p0: Vec3, p1: Vec3): [P2, P2] | null {
 
 /** 地面に置く線（まっすぐ）。幅を持たせた細い四角形にする */
 function line(c: CanvasRenderingContext2D, b: Basis, cam: Cam,
-              x0: number, y0: number, x1: number, y1: number): void {
+              x0: number, y0: number, x1: number, y1: number,
+              color: string = C.line, width: number = LINE_W): void {
   const dx = x1 - x0;
   const dy = y1 - y0;
   const len = Math.hypot(dx, dy) || 1;
-  const nx = (-dy / len) * (LINE_W / 2);
-  const ny = (dx / len) * (LINE_W / 2);
+  const nx = (-dy / len) * (width / 2);
+  const ny = (dx / len) * (width / 2);
   fill(c, b, cam, [
     at(x0 + nx, y0 + ny, 0.01), at(x1 + nx, y1 + ny, 0.01),
     at(x1 - nx, y1 - ny, 0.01), at(x0 - nx, y0 - ny, 0.01),
-  ], C.line);
+  ], color);
 }
 
 /** 長方形の枠（4本の線） */
@@ -487,6 +488,32 @@ function spinAround(v: Vec3, ax: number, ay: number, ca: number, sa: number): Ve
     y: v.y * ca - ax * v.z * sa + ay * dot * (1 - ca),
     z: v.z * ca + (ax * v.y - ay * v.x) * sa,
   };
+}
+
+/* 練習場の区切り（D-48）。**白線と混ざらない色**にする（本物の練習のマーカーと同じ黄色）。
+   辺に沿ってコーンを置く。コーンは立っているので、引いた画でも区切りが読める */
+const AREA_COLOR = "#f5c518";
+const AREA_LINE_W = 0.16;
+const CONE_STEP_M = 4.0;
+const CONE_R = 0.22;
+const CONE_H = 0.45;
+
+/** 練習場の区切り（`Replay.area`）を描く。ピッチ（`draw`）の後・選手の前に呼ぶ。 */
+export function drawArea(c: CanvasRenderingContext2D, cam: Cam,
+                         x0: number, y0: number, x1: number, y1: number): void {
+  const b = basisOf(cam);
+  /* ゴールライン側（x1）は白線そのものなので引かない。残りの3辺に線とコーン */
+  const edges: [number, number, number, number][] = [[x0, y0, x1, y0], [x1, y1, x0, y1], [x0, y0, x0, y1]];
+  for (const [ax, ay, bx, by] of edges) line(c, b, cam, ax, ay, bx, by, AREA_COLOR, AREA_LINE_W);
+  for (const [ax, ay, bx, by] of edges) {
+    const n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / CONE_STEP_M));
+    for (let i = 0; i <= n; i++) {
+      const px = ax + (bx - ax) * i / n;
+      const py = ay + (by - ay) * i / n;
+      fill(c, b, cam, [at(px - CONE_R, py, 0.01), at(px + CONE_R, py, 0.01), at(px, py, CONE_H)],
+           AREA_COLOR);
+    }
+  }
 }
 
 export function drawBall(c: CanvasRenderingContext2D, cam: Cam, p: Vec3,

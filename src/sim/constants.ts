@@ -483,3 +483,20 @@ export const REPLAY_COORD_SCALE = 10;
 // ------------------------------------------------------------------- バッチ
 export const BATCH_WIN_RATE_WARN_HIGH = 0.70;     // 全体勝率がこれを超えたら警告
 export const BATCH_WIN_RATE_WARN_LOW = 0.30;      // 床も測る（学習台帳「床と天井の両方を測る」）
+
+// ------------------------------------------------------------------ 練習場（D-48・`arena.ts`）
+//
+// 🔑 1対1は今のピッチ（105×68m）全体では広すぎる（オーナー指摘 2026-10-05）。ゴールの前を区切って使う。
+// 出典: Casamichana & Castellano ほか「Effect of the pitch size and presence of goalkeepers on the work load of
+//       players during small-sided soccer games」（PMC5260560）— 小さいピッチ 28×20m（560m²）。GKがいると
+//       負荷が変わるのはこの大きさ。戦術の練習に勧められる1人あたりの広さは 65〜110m²（Casamichana 2013）
+//       https://pmc.ncbi.nlm.nih.gov/articles/PMC5260560
+export const ARENA_DEPTH_M = 28.0;               // ゴールラインから前へ（m）
+export const ARENA_WIDTH_M = 20.0;               // 横幅（ゴールの真ん中から左右 10m ずつ）
+export const ARENA_MAX_TICKS = 15;               // 1回の攻撃の長さの上限（秒）。これを過ぎたら時間切れ＝攻めの失敗
+export const ARENA_PAUSE_TICKS = 2;              // 攻撃と攻撃のあいだに、終わった場面を止めて見せるコマ数（結果には効かない）
+export const ARENA_START_SPREAD_M = 6.0;         // 攻めが始める横の位置のばらつき（真ん中から±）
+export const ARENA_DEFENDER_START_M = 12.0;      // 守りが始める位置（区切りの入口から前へ。ほぼエリアの端）
+export const ARENA_ATTACKS = 20;                 // 1回の練習で攻める回数（2人が10回ずつ）
+/** 学習の前の攻めが比べる運ぶ向き（ゴールの真ん中への向きからのずれ・ラジアン） */
+export const ARENA_DRIBBLE_ANGLES: readonly number[] = [0.0, -0.6, 0.6, -1.2, 1.2];
