@@ -62,14 +62,22 @@ const SHRINK = 30;
  *    その2つが指紋から漏れ、**物理を変えても表が古いと言われない**状態になった。手で並べず、読み込みをたどって出す
  */
 export function inputFiles(root = ROOT): string[] {
+  return importClosure(["src/sim/engine.ts", "src/sim/presets.ts"], ["src/sim/value_table.ts"], root);
+}
+
+/**
+ * `entries` から `src/sim/` の中で読み込みをたどったファイルすべて（`exclude` は含めず、その先もたどらない）。
+ * 🔑 学習した重みの指紋（`scripts/s1.ts`）も同じ関数で出す。手で並べると漏れる
+ */
+export function importClosure(entries: readonly string[], exclude: readonly string[], root = ROOT): string[] {
   const seen = new Set<string>();
   const visit = (rel: string): void => {
-    if (seen.has(rel) || rel === "src/sim/value_table.ts") return;
+    if (seen.has(rel) || exclude.includes(rel)) return;
     seen.add(rel);
     const src = readFileSync(join(root, rel), "utf8");
     for (const m of src.matchAll(/from "\.\/([A-Za-z0-9_]+\.ts)"/g)) visit(`src/sim/${m[1]}`);
   };
-  for (const entry of ["src/sim/engine.ts", "src/sim/presets.ts"]) visit(entry);
+  for (const entry of entries) visit(entry);
   return [...seen].sort();
 }
 
