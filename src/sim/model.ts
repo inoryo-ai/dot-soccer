@@ -116,11 +116,12 @@ export class Player {
   technique = 50;
   physical = 50;
   zone_man = 0;
-  press = 10;
-  support = 10;
-  overlap = 10;
-  run_space = 10;
-  goal_wait = 10;
+  // 🔑 初期値は C.HIDDEN_DEFAULT が唯一の定義（選びやすさ 1 倍の基準にも使う・engine.ts の tendency）
+  press = C.HIDDEN_DEFAULT;
+  support = C.HIDDEN_DEFAULT;
+  overlap = C.HIDDEN_DEFAULT;
+  run_space = C.HIDDEN_DEFAULT;
+  goal_wait = C.HIDDEN_DEFAULT;
 
   // --- 生まれ持った性質（特訓で動かない・D-11） ---------------------
   // 🔴 タイプ判定にも特訓にも関与しない。`hidden` には入れないこと

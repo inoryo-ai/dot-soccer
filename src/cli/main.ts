@@ -19,7 +19,7 @@ import { play } from "../sim/engine.ts";
 import type { MatchStatsOut } from "../sim/engine.ts";
 import { formatTable } from "../sim/batch.ts";
 import { Player } from "../sim/model.ts";
-import { PRESET_ORDER, abilityTotals, checkNoClamping } from "../sim/presets.ts";
+import { PRESET_ORDER, abilityTotals, checkFairBuild } from "../sim/presets.ts";
 import { fmtF, ljust, pyFloatStr, rjust } from "../sim/pymath.ts";
 import { CARDS, CARD_KEYS, applyTraining, getCard, issueText, specialName } from "../sim/training.ts";
 import { runBatch } from "../node/batch_pool.ts";
@@ -180,14 +180,15 @@ function cmdPresets(dataDir: string | null): number {
   const written = writeDataFiles(dir);
   stdout(`== プリセット書き出し: ${written.length}件 → ${dir} ==`);
   for (const p of written) stdout(`  ${p.split("/").pop()}`);
-  stdout("\n[能力合計（そろっているか）]");
+  // 🔑 D-43: 能力合計は割り振りで変わる（一点突破ほど少ない）。そろえるのは土台と特訓の回数
+  stdout("\n[能力合計（割り振りで変わる・参考）]");
   for (const [name, total] of Object.entries(abilityTotals())) stdout(`  ${name}: ${total}`);
-  const problems = checkNoClamping();
+  const problems = checkFairBuild();
   if (problems.length > 0) {
     for (const problem of problems) stdout(`⚠ ${problem}`);
     return 1;
   }
-  stdout("✅ 全チームの能力合計が一致（上限で切られていない）");
+  stdout("✅ 土台と特訓の回数が全チームで一致");
   return 0;
 }
 

@@ -102,6 +102,20 @@ export function specialName(cardA: string, cardB: string): string {
 }
 
 /** スペシャルの倍率。小数切り捨て（負の値は絶対値を切り捨ててから符号を戻す）。 */
+/**
+ * 見える能力の伸び（D-43）。**伸びるほど伸びにくい**（69以下で満額、70〜84で-1、85以上で-2・最低1）。
+ *
+ * 🔴 伸びが一定だと、試合への効き方もほぼ比例なので「1枚に全部注ぐ」が必ず最善になる
+ *    （プリセットが「スタミナ100・他は素人の40」になり、AIがその極端さを使い切って勝率 87% まで偏った）。
+ *    逓減があって初めて「何を捨てて何を伸ばすか」に内側の最適が生まれる（オーナー指摘 2026-10-04）。
+ * 🔑 隠しパラメーターは逓減させない。タイプの変わり方（3〜10回・D-03）を守るため。
+ */
+export function visibleGain(current: number, cardGain: number): number {
+  let cut = 0;
+  for (const [from, c] of C.TRAINING_DIMINISH) if (current >= from) cut = c;
+  return Math.max(1, cardGain - cut);
+}
+
 function scaled(gain: number): number {
   const v = Math.floor(Math.abs(gain) * C.SPECIAL_MULTIPLIER);
   return gain < 0 ? -v : v;
@@ -135,7 +149,8 @@ export function applyTraining(player: Player, cards: readonly string[]): Trainin
   const deltas: Record<string, number> = {};
   for (const key of cards) {
     const c = getCard(key);
-    const vg = special ? scaled(c.visible_gain) : c.visible_gain;
+    const gain = visibleGain(player.get(c.visible_key), c.visible_gain);
+    const vg = special ? scaled(gain) : gain;
     const hg = special ? scaled(c.hidden_gain) : c.hidden_gain;
     deltas[c.visible_key] = (deltas[c.visible_key] ?? 0) + vg;
     deltas[c.hidden_key] = (deltas[c.hidden_key] ?? 0) + hg;

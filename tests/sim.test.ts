@@ -18,10 +18,12 @@ import { FORMATIONS, Player, Tactics, effectiveSlots, judgeType } from "../src/s
 import type { Hidden, PlayerData } from "../src/sim/model.ts";
 import {
   PRESET_ORDER,
-  abilityTotals,
+  ALL_PRESET_PLANS,
+  POSITION_BASE,
+  TRAININGS_PER_PLAYER,
   buildPreset,
-  checkNoClamping,
-  expectedAbilityTotal,
+  checkFairBuild,
+  expectedTotalFor,
 } from "../src/sim/presets.ts";
 import {
   CARDS,
@@ -358,16 +360,39 @@ describe("課題（要件定義書 §8: 1試合で同じもの1回まで、最�
   });
 });
 
-describe("プリセット（要件定義書 §11「能力合計はほぼそろえる」）", () => {
-  test("能力合計が全チームでそろっている", () => {
-    const totals = abilityTotals();
-    const values = new Set(Object.values(totals));
-    assert.equal(values.size, 1, `能力合計がそろっていない: ${JSON.stringify(totals)}`);
-    assert.deepEqual([...values], [expectedAbilityTotal()]);
+describe("プリセット（要件定義書 §11・D-43「同じ土台に同じ回数の特訓」）", () => {
+  test("土台の合計がポジション間でそろい、全チームが特訓20回", () => {
+    assert.deepEqual(checkFairBuild(), []);
   });
 
-  test("上限100で切られていない", () => {
-    assert.deepEqual(checkNoClamping(), []);
+  test("個人差は能力合計を変えない（どのチームも配分どおりの合計）", () => {
+    for (const [name, [plan]] of Object.entries(ALL_PRESET_PLANS)) {
+      assert.equal(buildPreset(name).abilityTotal(), expectedTotalFor(plan), name);
+    }
+  });
+
+  test("🔴 一点突破には代償がある: 1枚に20回の合計 ＜ 分散した20回の合計（D-43）", () => {
+    // 伸びが一定だった頃はどちらも同じ合計で、試合への効き方がほぼ比例なので
+    // 「1枚に全部注ぐ」が必ず最善になり、プリセットが素人の能力（40）を抱えたまま偏った
+    const spread = expectedTotalFor({ running: 3, man_mark: 3, press: 3, pass: 3, dash: 3, shoot: 3, zone: 2 });
+    for (const key of Object.keys(CARDS)) {
+      const allIn = expectedTotalFor({ [key]: TRAININGS_PER_PLAYER });
+      assert.ok(allIn < spread, `${key} を20回: ${allIn} / 分散: ${spread}`);
+    }
+  });
+
+  test("🔴 プロの土台: 特訓していない能力も素人にならない（どの能力も46以上）", () => {
+    for (const base of Object.values(POSITION_BASE)) {
+      for (const v of Object.values(base)) assert.ok(v >= 46, JSON.stringify(base));
+    }
+  });
+
+  test("AIチームの選手にも個人差がある（11人が同じ能力にならない・D-43）", () => {
+    for (const name of PRESET_ORDER) {
+      const df = buildPreset(name).players.filter((p) => p.position === "DF")
+        .map((p) => JSON.stringify(p.visible));
+      assert.ok(new Set(df).size > 1, `${name} のDFが全員同じ能力`);
+    }
   });
 
   test("6チームのタイプ構成がばらけている", () => {
@@ -460,6 +485,10 @@ describe("実装中に実際に踏んだ不具合を固定する", () => {
     const fired = m.events.filter((e) => e.type === "方針の発動");
     assert.ok(fired.length > 0, "チーム方針が一度も発動していない");
     assert.ok(fired.every((e) => e.detail.includes("→")));
+  });
+
+  test("🔴 「相手GKのキックが弱い」の線はGKの土台より上にある（土台を上げたのに線を据え置くと、方針が二度と発動しない・D-43）", () => {
+    assert.ok(C.POLICY_OPP_GK_WEAK_KICK > POSITION_BASE.GK.kick);
   });
 
   test("徹底的な監督（rigidity +2）ほど方針が発動しにくい（§10）", () => {

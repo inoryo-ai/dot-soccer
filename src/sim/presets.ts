@@ -1,9 +1,14 @@
 /**
- * プリセット6チームの生成（要件定義書 §11）。
+ * プリセット6チームの生成（要件定義書 §11・D-43）。
  *
- * 「同じ初期能力の選手に違う特訓を20回ずつ行って作る。能力合計はほぼそろえる。」
- * 初期値をすべて40にしているのは、特訓20回（+3×20=+60）で**ちょうど100に届き、
- * 上限で切られない**ため。切られると能力合計がチーム間でずれて比較が成立しない。
+ * 「同じ土台の選手に違う特訓を20回ずつ行って作る。」
+ * 🔑 D-43（2026-10-04 オーナー指示）で作り方を変えた:
+ *    ①土台は**ポジション別のプロの能力**（合計280。以前は全員40＝素人）
+ *    ②見える能力は**伸びるほど伸びにくい**（`training.ts` の `visibleGain`）。
+ *      だから能力の合計は割り振りで変わる。一点突破は合計が少ない＝それが代償
+ *    ③プリセットは「得意を中心に、支える能力も育てた」割り振り（以前は1枚に20回の一点突破）
+ *    ④AIチームにもプレイヤーと同じ個人差を付ける（以前はプレイヤーだけ）
+ *    そろえるのは「土台」と「特訓の回数」。能力合計ではない（phase0 定義書 §8）。
  */
 
 import { RuntimeError, ValueError } from "./errors.ts";
@@ -23,20 +28,31 @@ export const BENCH: readonly (readonly [Position, number])[] = [
   ["GK", 1], ["DF", 1], ["MF", 2], ["FW", 1],          // 控え5
 ];
 
-const FIELD_BASE = { kick: 40, speed: 40, stamina: 40, technique: 40, physical: 40 };
-const GK_BASE = { kick: 45, speed: 45, stamina: 45, technique: 50, physical: 50 };
+/**
+ * ポジション別の土台（D-43）。どれも合計 280。**得意の向きだけが違う**。
+ * DF＝体の強さと速さ・持久力、MF＝持久力と技術、FW＝キックと速さ。
+ * 🔴 合計をそろえないと、ポジションの割り当てだけで強さが変わる（検査 [5]）。
+ */
+export const POSITION_BASE: Readonly<Record<Position, Readonly<Record<C.VisibleKey, number>>>> = {
+  GK: { kick: 55, speed: 52, stamina: 53, technique: 60, physical: 60 },
+  DF: { kick: 50, speed: 58, stamina: 58, technique: 50, physical: 64 },
+  MF: { kick: 54, speed: 56, stamina: 62, technique: 62, physical: 46 },
+  FW: { kick: 64, speed: 62, stamina: 52, technique: 56, physical: 46 },
+};
 
 /** 特訓の配分（カード → 回数）。**並び順に意味がある**（特訓する順）。 */
 export type Plan = Record<string, number>;
 export type PresetPlan = readonly [Plan, readonly (readonly [string, string])[]];
 
 // チーム名 → (特訓の配分, チーム方針)
+// 🔑 D-43: 得意のカードに10回、その型を支えるカードに残り10回（一点突破にしない）。
+//    以前の「1枚に20回」は、伸びが一定だったから最善に見えただけ（phase0 定義書 §8）
 export const PRESET_PLANS: Readonly<Record<string, PresetPlan>> = {
-  "走力型": [{ running: 20 }, []],
-  "プレス型": [{ press: 20 }, [["OPP_GK_WEAK_KICK", "HIGH_PRESS"]]],
-  "パス型": [{ pass: 20 }, []],
-  "裏抜け型": [{ dash: 20 }, [["OPP_HIGH_LINE", "THROUGH_BALLS"]]],
-  "堅守型": [{ man_mark: 20 }, [["LEADING_LATE", "LINE_DOWN"]]],
+  "走力型": [{ running: 10, press: 4, pass: 3, dash: 3 }, []],
+  "プレス型": [{ press: 10, running: 4, man_mark: 3, dash: 3 }, [["OPP_GK_WEAK_KICK", "HIGH_PRESS"]]],
+  "パス型": [{ pass: 10, running: 4, shoot: 3, dash: 3 }, []],
+  "裏抜け型": [{ dash: 10, shoot: 4, running: 3, pass: 3 }, [["OPP_HIGH_LINE", "THROUGH_BALLS"]]],
+  "堅守型": [{ man_mark: 10, running: 4, press: 3, pass: 3 }, [["LEADING_LATE", "LINE_DOWN"]]],
   // 全カード均等（7枚で20回 → 3,3,3,3,3,3,2）。マンツーマンとゾーンが打ち消し合うので
   // zone_man は伸びず、狙いどおり「バランス」で止まる。
   "バランス型": [{ running: 3, man_mark: 3, press: 3, pass: 3, dash: 3, shoot: 3, zone: 2 }, []],
@@ -48,7 +64,7 @@ export const PRESET_ORDER: readonly string[] = Object.keys(PRESET_PLANS);
 // `batch` の勝率表（提出済みの成果物）は PRESET_ORDER の6チームのまま変えない。
 // リーグは偶数チームでなければ日程が組めないため、対戦相手として7チーム目を足す。
 export const EXTRA_PRESET_PLANS: Readonly<Record<string, PresetPlan>> = {
-  "シュート型": [{ shoot: 20 }, [["TRAILING_LATE", "PUSH_UP"]]],
+  "シュート型": [{ shoot: 10, dash: 4, pass: 3, running: 3 }, [["TRAILING_LATE", "PUSH_UP"]]],
 };
 export const ALL_PRESET_PLANS: Readonly<Record<string, PresetPlan>> = {
   ...PRESET_PLANS, ...EXTRA_PRESET_PLANS,
@@ -82,8 +98,7 @@ export const ALL_PLAN_CARDS: Readonly<Record<string, readonly string[]>> = Objec
 );
 
 function makePlayer(team: string, pos: Position, n: number): Player {
-  const base = pos === "GK" ? GK_BASE : FIELD_BASE;
-  return new Player({ name: `${team}${pos}${n}`, position: pos, ...base });
+  return new Player({ name: `${team}${pos}${n}`, position: pos, ...POSITION_BASE[pos] });
 }
 
 function squadOf(teamName: string): [Player[], Player[]] {
@@ -123,6 +138,10 @@ export function buildPreset(name: string): Team {
   //    呼ぶたびに変わると保存済みのプリセットと食い違う
   const traitRng = new PyRandom(`traits:${name}`);
   for (const p of [...starters, ...bench]) giveTraits(p, traitRng);
+  // 🔴 D-43: AIチームにも**プレイヤーと同じ個人差**を付ける。以前はプレイヤーだけで、
+  //    11人が同じ能力のAIは、判断が賢くなると個人差のあるチームにプリセット相手 72〜77% で負けた
+  const personalRng = new PyRandom(`personal:${name}`);
+  for (const p of [...starters, ...bench]) personalize(p, personalRng);
   return new Team({
     name,
     players: starters,
@@ -240,8 +259,7 @@ export function buildUserTeam(teamName: string, seed: number, formation = "4-4-2
       }
     }
     if (name === null) throw new RuntimeError("選手名の候補が足りない");
-    const base = pos === "GK" ? GK_BASE : FIELD_BASE;
-    return new Player({ name, position: pos, ...base });
+    return new Player({ name, position: pos, ...POSITION_BASE[pos] });
   };
 
   const starters: Player[] = [];
@@ -259,25 +277,35 @@ export function buildUserTeam(teamName: string, seed: number, formation = "4-4-2
                     tactics: new Tactics({ formation }) });
 }
 
-/** 特訓が上限で切られなかった場合の能力合計（全チームで同じ値になるはず）。 */
-export function expectedAbilityTotal(): number {
-  const sum = (o: Record<string, number>): number => Object.values(o).reduce((a, b) => a + b, 0);
-  const gkTotal = sum(GK_BASE);
-  const fieldTotal = sum(FIELD_BASE) + C.VISIBLE_GAIN * TRAININGS_PER_PLAYER;
-  const all = [...SQUAD, ...BENCH];
-  const nGk = all.filter(([pos]) => pos === "GK").reduce((a, [, c]) => a + c, 0);
-  const nField = all.filter(([pos]) => pos !== "GK").reduce((a, [, c]) => a + c, 0);
-  return gkTotal * nGk + fieldTotal * nField;
+/**
+ * その配分で育てた編成の能力合計（個人差を付ける前＝個人差は合計を変えない）。
+ * 🔑 プレイヤーもAIも、同じ配分なら必ずこの値になる（同じ作り方の検査に使う）。
+ */
+export function expectedTotalFor(plan: Plan): number {
+  const [starters, bench] = squadOf("検算");
+  train(starters, plan);
+  train(bench, plan);
+  let total = 0;
+  for (const pl of [...starters, ...bench]) for (const v of Object.values(pl.visible)) total += v;
+  return total;
 }
 
-/** 上限100で切られていないか。切られると能力合計がずれて、チーム比較が成立しない。 */
-export function checkNoClamping(): string[] {
-  const expected = expectedAbilityTotal();
+/**
+ * 土台がポジション間でそろっているか、特訓の回数が全チームで同じかを調べる（D-43）。
+ * 🔑 能力合計はそろえない（割り振りで変わるのが正しい）。そろえるのは土台と回数。
+ */
+export function checkFairBuild(): string[] {
   const problems: string[] = [];
-  for (const [name, total] of Object.entries(abilityTotals())) {
-    if (total !== expected) {
-      problems.push(`${name}: 能力合計 ${total}（期待 ${expected}）＝上限で切られている`);
-    }
+  const sum = (o: Readonly<Record<string, number>>): number =>
+    Object.values(o).reduce((acc, v) => acc + v, 0);
+  const totals = Object.entries(POSITION_BASE).map(([pos, b]) => [pos, sum(b)] as const);
+  const first = totals[0]![1];
+  for (const [pos, t] of totals) {
+    if (t !== first) problems.push(`${pos} の土台の合計 ${t}（他は ${first}）＝ポジションだけで強さが変わる`);
+  }
+  for (const [name, [plan]] of Object.entries(ALL_PRESET_PLANS)) {
+    const n = sum(plan);
+    if (n !== TRAININGS_PER_PLAYER) problems.push(`${name} の特訓が ${n}回（${TRAININGS_PER_PLAYER}回のはず）`);
   }
   return problems;
 }

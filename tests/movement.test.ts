@@ -36,6 +36,7 @@ import { Match, play } from "../src/sim/engine.ts";
 import type { Actor, Replay, RosterEntry } from "../src/sim/engine.ts";
 import { buildPreset } from "../src/sim/presets.ts";
 import { fmtF, hypot, mean, pyMod } from "../src/sim/pymath.ts";
+import { RELEASE_STILL_MAX, releaseCounts } from "../scripts/measure.ts";
 
 // ------------------------------------------------------------------ 物差し
 //
@@ -234,6 +235,9 @@ describe("考える仕組みそのものが生きている", () => {
   const attackingBoard = (ballX: number): Match => {
     const m = new Match(buildPreset("バランス型"), buildPreset("パス型"), 3, false);
     m.run();
+    // 🔑 90分走った後は全員が疲れていて、走る意思を選びにくい（D-44 の体力の配分）。
+    //    ここで見たいのは「局面で選ぶものが変わるか」なので、体力は満タンに戻してから見る
+    for (const side of m.actors) for (const a of side) a.stamina = a.max_stamina;
     const holder = m.actors[0]!.find((a) => a.pos === "MF")!;
     holder.x = ballX;
     holder.y = C.PITCH_Y / 2;
@@ -289,5 +293,49 @@ describe("🔴 向きを変えるには時間がかかる（瞬時に変えら�
     const turned = Math.abs(pyMod(a.heading - before + PI, TAU) - PI);
     assert.ok(turned <= C.TURN_RATE_RAD + 1e-9,
               `1秒で ${fmtF(turned * 180 / PI, 0)}度 回っている`);
+  });
+});
+
+describe("🔴 出した人はその秒のうちにボールを持たない選手へ戻る（D-46・オーナー指摘）", () => {
+  // 2026-10-05「パスという行動をした直後に選手が硬直してる。本来パスした後は味方にボールが
+  // 渡った渡ってないに限らず、オフザボールの動きになるべき」。直す前は出した秒の移動が 0.00m（100%）。
+  const counts = (): number[] => {
+    const total = [0, 0, 0, 0];
+    for (const [home, away, seed] of [["バランス型", "プレス型", 7], ["パス型", "走力型", 3],
+                                      ["堅守型", "裏抜け型", 5]] as const) {
+      releaseCounts(play(buildPreset(home), buildPreset(away), seed, true, true))
+        .forEach((c, i) => { total[i]! += c; });
+    }
+    return total;
+  };
+
+  test("🔴 出した秒にほぼ動かなかったパスは上限以下", () => {
+    const [n, , still] = counts() as [number, number, number, number];
+    assert.ok(n > 100, `パスが ${n}本しか数えられていない（物差しが壊れている）`);
+    assert.ok(still / n <= RELEASE_STILL_MAX,
+              `出した秒にほぼ動かなかった ${fmtF(100 * still / n, 0)}%（上限 ${fmtF(100 * RELEASE_STILL_MAX, 0)}%）`);
+  });
+
+  test("蹴る動作の秒数は1秒より短い（1秒なら出した秒に動く時間が残らない）", () => {
+    assert.ok(C.PASS_KICK_SECONDS > 0 && C.PASS_KICK_SECONDS < 1);
+  });
+});
+
+describe("🔴 疲れが下げるのは全力の上限だけ（D-47）", () => {
+  // 2026-10-05 実測: 速さ全体に疲れを掛けていたので、後半の走行が前半の −27%（現実 −2.4%）・
+  // 最後の15分の高強度がゼロ（現実 −20〜45%）だった。疲れた選手もジョグはできる
+  const m = new Match(buildPreset("バランス型"), buildPreset("堅守型"), 3, false);
+  const a = m.actors[0]![5]!;
+
+  test("体力が空でもジョグ（最大速度の半分）は落ちない", () => {
+    a.stamina = 0;
+    assert.equal(a.pace(0.5), a.max_speed * 0.5);
+  });
+
+  test("体力が空だと全力は上限まで落ちる", () => {
+    a.stamina = 0;
+    assert.equal(a.pace(1.0), a.max_speed * C.STAMINA_SPEED_FLOOR);
+    a.stamina = a.max_stamina;
+    assert.equal(a.pace(1.0), a.max_speed);
   });
 });

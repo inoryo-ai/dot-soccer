@@ -18,6 +18,13 @@ import { PyRandom } from "./pyrandom.ts";
 import { cmpStr, fmtF, hypot, pyMod, pyRound, pyRoundN } from "./pymath.ts";
 import { findIssues } from "./training.ts";
 import { Score, chooseBest } from "./utility.ts";
+import { VALUE_TABLE, tableLevel } from "./value_table.ts";
+
+/**
+ * 価値の表の「ふつうの高さ」。一定値（持ち場を保つ・守る）はこの何倍かで置く（D-44）。
+ * 表がまだ無いとき（最初の表を作る足場）だけ `VALUE_LEVEL_FALLBACK`。
+ */
+const VALUE_LEVEL = VALUE_TABLE === null ? C.VALUE_LEVEL_FALLBACK : tableLevel(VALUE_TABLE);
 import type { Choice } from "./utility.ts";
 
 export class Actor {
@@ -74,6 +81,17 @@ export class Actor {
   }
 
   /**
+   * `effort`（最大速度の何割で走るか）で走るときの速さ。
+   *
+   * 🔴 **疲れが下げるのは全力の上限だけ。**（2026-10-05）以前は速さ全体に疲れを掛けていたので、
+   *    疲れた選手はジョグまで遅くなり、後半の走行が前半の −27%（現実は −2.4%）・
+   *    最後の15分の高強度の走りがゼロ（現実は −20〜45%）だった。疲れた選手もジョグはできる。全力が出なくなる
+   */
+  pace(effort: number): number {
+    return Math.min(this.max_speed * effort, this.currentSpeed());
+  }
+
+  /**
    * 疲れていると能力が出し切れない（§9「少ないほど速度が落ちる」の技術面への拡張）。
    *
    * 速度だけに効かせると『走り続ける戦術』に代償が無く、
@@ -92,7 +110,13 @@ export interface PassAction {
   p: number;          // 通る確率（採点に使ったものをそのまま実行に使う）
   offside: boolean;   // 受け手がオフサイドの位置にいる
 }
-export type OnBall = { kind: "SHOOT" } | PassAction | { kind: "DRIBBLE" };
+/** 運ぶ向き（単位ベクトル）。ゴールの真ん中へ／自分の筋をまっすぐ前へ（D-45）。 */
+export interface DribbleAction {
+  kind: "DRIBBLE";
+  dirX: number;
+  dirY: number;
+}
+export type OnBall = { kind: "SHOOT" } | PassAction | DribbleAction;
 
 export interface MatchStats {
   goals: number;
@@ -661,15 +685,40 @@ export class Match {
       }
       for (const a of this.actors[ts.idx]!) {
         if (a === owner) continue;                // 保持者はボール処理側で動かす
-        this.think(ts, a, hasBall, owner, oppDeep, a === engager);
-        const [tx, ty] = this.aimPoint(ts, a);
-        // 🔴 持ち場を守る意思ほど本気度が低く、90分の3分の2がそれだった。
-        //    カバー範囲が広い選手は、守るときでも歩かない
-        let effort = C.EFFORT[a.intent] ?? 0.7;
-        if (a.intent === "HOLD_ZONE" || a.intent === "KEEP_SHAPE") effort *= a.player.roamEffort;
-        this.step(a, tx, ty, effort);
+        this.moveOffBall(ts, a, hasBall, owner, oppDeep, a === engager, 1.0);
       }
     }
+  }
+
+  /** ボールを持っていない1人を、考えて（必要なら）`dt` 秒ぶん動かす。 */
+  private moveOffBall(ts: TeamState, a: Actor, hasBall: boolean, owner: Actor | null,
+                      oppDeep: number, isEngager: boolean, dt: number): void {
+    this.think(ts, a, hasBall, owner, oppDeep, isEngager);
+    const [tx, ty] = this.aimPoint(ts, a);
+    // 🔴 持ち場を守る意思ほど本気度が低く、90分の3分の2がそれだった。
+    //    カバー範囲が広い選手は、守るときでも歩かない
+    let effort = (C.EFFORT[a.intent] ?? 0.7) * C.EFFORT_SCALE;
+    if (a.intent === "HOLD_ZONE" || a.intent === "KEEP_SHAPE") effort *= a.player.roamEffort;
+    this.step(a, tx, ty, effort, dt, !C.URGENT_INTENTS.has(a.intent));
+  }
+
+  /**
+   * 出した人・撃った人は、**蹴ったその秒のうちに**ボールを持たない選手へ戻る（D-46）。
+   *
+   * 🔴 2026-10-05 オーナー指摘「パスという行動をした直後に選手が硬直してる。本来パスした後は
+   *    味方にボールが渡った渡ってないに限らず、オフザボールの動きになるべき」。
+   *    1秒の中で「全員が動く → ボールを処理する」の順なので、保持者は蹴った秒に**1歩も動かなかった**
+   *    （実測: パスの秒の移動 0.00m が 100%。運んでいる間は 2.4m/秒）。
+   *    さらに意思が受ける前のまま残り、次に考える番（最大5秒後）まで古い目標へ向かった。
+   * 🔑 通っても・切られても・こぼれても・オフサイド（相手GKのキックで即再開）でも同じ。
+   *    外れた・止められたシュートも同じ（撃った秒の停止が 100% だった）。蹴った後の残り時間で、その場の局面に合わせて考え直して動く。
+   */
+  private afterRelease(passer: Actor, ts: TeamState): void {
+    const owner = this.owner;
+    passer.seen_epoch = -1;                          // 受ける前の意思を捨てて、いまの局面で考え直す
+    const oppDeep = this.lastDefenderX(this.teams[1 - ts.idx]!);
+    this.moveOffBall(ts, passer, owner !== null && owner.team_idx === ts.idx, owner, oppDeep,
+                     false, 1.0 - C.PASS_KICK_SECONDS);
   }
 
   // ------------------------------------------------------- 一人ぶんの判断
@@ -728,6 +777,8 @@ export class Match {
   private seat(ts: TeamState, a: Actor, attacking: boolean | null = null): [number, number] {
     let [bx, by] = this.basePosition(ts, a);
     const att = attacking ?? (this.owner !== null && this.owner.team_idx === ts.idx);
+    // 🔑 **持っているときは横に広がる**（D-45）。現実の保持チームの幅は 43〜48m（守っているときより広い）
+    if (att) by = C.PITCH_Y / 2 + (by - C.PITCH_Y / 2) * C.ATTACK_STRETCH;
     // 🔑 前後する量の**個人差を大きく取る**。全員が同じだけ動くと、
     //    陣形ごと塊で平行移動して見える（実測 0.603 / 上限 0.60）。
     //    受け持ちの広い選手だけが大きく上下し、狭い選手はあまり動かない
@@ -780,13 +831,15 @@ export class Match {
   }
 
   /**
-   * 隠しパラメーターを「その意思の選びやすさ」の倍率にする（0〜100 → 床〜床+1）。
+   * 隠しパラメーターを「その意思の選びやすさ」の倍率にする。**特訓していない選手（10）が 1 倍**。
    *
-   * 🔑 床が無いと、特訓していない選手（10）は何をしても持ち場から動かない。
-   *    くじの頃は 10 対 35 で2割は動いていた（D-12「一人一人考えて動く」）。
+   * 🔴 D-44 で「床＋値/100」から**比**に変えた。床 0.4 の形だと、特訓していない選手 0.5 に対して
+   *    裏抜け型のFW（run_space 30）が 0.7 で、差が 1.4 倍しかなく、裏へ走るのが全体の 0.3% まで消えた
+   *    （型の個性が試合の動きに出ない＝要件定義書 §6 の核が崩れる）。くじの頃は 10 対 30 で 3 倍だった。
+   * 🔑 `TENDENCY_K` を足してから比を取るので、0 でも動く（0 のとき K/(10+K) 倍）。
    */
   private static tendency(hidden: number): number {
-    return C.OFFBALL_TENDENCY_FLOOR + Math.max(0, hidden) / 100.0;
+    return (Math.max(0, hidden) + C.TENDENCY_K) / (C.HIDDEN_DEFAULT + C.TENDENCY_K);
   }
 
   /**
@@ -830,8 +883,11 @@ export class Match {
     // ---- 候補ごとの行き先（選んだ後で行き先を探し直さない）
     // KEEP_SHAPE は持ち場に立ち尽くすのではなく、play に合わせて動き直す
     const keepPull = p.holdTrack * (seesBall ? 1.0 : 0.3);
+    // 🔴 **持っているときは幅を保つ**（D-45）。横はボールへ寄せすぎない（`ATTACK_WIDTH_HOLD`）。
+    //    縦と同じだけ横もボールへ寄せていたので、持ち場は中央から平均15mなのに実際は8mにいて、
+    //    攻める側の幅が 27.9m（現実は 43〜48m）になった（オーナー指摘「ボールを追って団子」「サイドが使えない」）
     const keep: [number, number] = [seatX + (this.ball_x - seatX) * keepPull,
-                                    seatY + (this.ball_y - seatY) * keepPull];
+                                    seatY + (this.ball_y - seatY) * keepPull * C.ATTACK_WIDTH_HOLD];
     // オフサイドにならない位置まで。ここを「ラインの向こう側」にすると
     // 裏抜け型が毎試合6点取る壊れた強さになる
     const behind: [number, number] = [oppDeep - d * C.ONSIDE_MARGIN_M, seatY + lane];
@@ -850,18 +906,21 @@ export class Match {
      *    （実測: 攻撃時の意思の 44.5% が HOLD_BOX、0〜6m から1試合25本）。
      */
     const worth = (label: string, [x, y]: [number, number]): Score =>
-      new Score(label, this.threat(gx, x, y))
+      new Score(label, this.possessionValue(ts, x, y))
+        // 🔑 **味方がもういる場所へ行かない**（間隔を取る・D-45）。相手の空きしか見ていなかったので、
+        //    同じ場所へ何人も向かって団子になり、ゴール前で待つだけで全体の 21% を占めた
+        .times("味方との間隔", 1.0 / (1.0 + C.TEAMMATE_CROWD_PENALTY * this.teammatesNear(ts.idx, a, x, y)))
         .times("空き", this.space(oppIdx, x, y))
         .times("届くか", exp(-C.OFFBALL_REACH_DECAY * hypot(x - this.ball_x, y - this.ball_y)));
 
     const choices: Choice<[string, [number, number]]>[] = [
       { action: ["KEEP_SHAPE", keep],
         // 🔑 持ち場を保つ価値は場所によらない一定値。見えていないときは保つ側へ倒れる
-        score: new Score("隊形を保つ", C.KEEP_SHAPE_VALUE)
+        score: new Score("隊形を保つ", C.KEEP_SHAPE_RATIO * VALUE_LEVEL)
           .times("ボールが見えていない", seesBall ? 1.0 : C.KEEP_SHAPE_BLIND_BONUS) },
       { action: ["SUPPORT", support],
         score: worth("顔を出す先", support)
-          .plus("保持者が囲まれている", C.SUPPORT_RESCUE_VALUE * this.holderPressure(ts))
+          .plus("保持者が囲まれている", C.SUPPORT_RESCUE_RATIO * VALUE_LEVEL * this.holderPressure(ts))
           .times("support", Match.tendency(p.support) * a.sup_weight * react)
           .times("体力", Match.fatigue(a)) },
       { action: ["RUN_BEHIND", behind],
@@ -878,6 +937,16 @@ export class Match {
     a.intent = intent;
     a.mark = null;
     [a.aim_x, a.aim_y] = this.withinRoam(ts, a, tx, ty);
+  }
+
+  /** (x, y) の `TEAMMATE_SPACING_M` 以内にいる味方の数（自分と保持者は数えない）。 */
+  private teammatesNear(teamIdx: number, self: Actor, x: number, y: number): number {
+    let n = 0;
+    for (const o of this.actors[teamIdx]!) {
+      if (o === self || o === this.owner || o.pos === "GK") continue;
+      if (hypot(o.x - x, o.y - y) <= C.TEAMMATE_SPACING_M) n += 1;
+    }
+    return n;
   }
 
   /** 保持者の周り（`PRESSURE_RADIUS_M`）に寄せている相手の数。味方が持っていなければ 0。 */
@@ -937,14 +1006,15 @@ export class Match {
     const choices: Choice<string>[] = [
       // zone_man が負＝持ち場を守る側に倒れる
       { action: "HOLD_ZONE",
-        score: new Score("持ち場を守る", C.HOLD_ZONE_VALUE)
+        score: new Score("持ち場を守る", C.HOLD_ZONE_RATIO * VALUE_LEVEL)
           .times("zone（zone_man が負）", 1.0 + Math.max(0, -p.zone_man) / 100.0) },
     ];
     if (seesBall) {
       // 近いほど、press が高いほどカバーに出る。見えていなければ出ない
       choices.push({
         action: "COVER",
-        score: new Score("ボールの危なさ", this.threat(ownGx, this.ball_x, this.ball_y))
+        score: new Score("ボールの危なさ",
+                         this.possessionValue(this.teams[1 - ts.idx]!, this.ball_x, this.ball_y))
           .times("届く距離", distToBall <= reach ? 1.0 : C.COVER_FAR_RATIO)
           .times("press", Match.tendency(press))
           .times("体力", Match.fatigue(a)),
@@ -965,15 +1035,47 @@ export class Match {
     if (target !== null && this.sees(a, target.x, target.y)) {
       choices.push({
         action: "MARK",
-        score: new Score("その相手の危なさ", this.threat(ownGx, target.x, target.y))
+        score: new Score("その相手の危なさ",
+                         this.possessionValue(this.teams[1 - ts.idx]!, target.x, target.y))
           .times("zone_man", Match.tendency(p.zone_man))
           .times("体力", Match.fatigue(a)),
+      });
+    }
+
+    // 🔴 **抜かれたら、まずボールよりゴール側へ戻る**（D-42）。
+    //    空いたゴールの場面の 63% で、守る側のフィールド選手が**1人もボールよりゴール側にいなかった**
+    //    （全員が置き去り）。持ち場を守る・カバーする、のどれもボールの後ろから始まるので、
+    //    置き去りにされた選手が戻る意思が無かった。価値は「ボールの危なさ」そのもので、
+    //    ゴール側に誰もいないときほど高い
+    const goalDir = ownGx > this.ball_x ? 1 : -1;
+    const behindBall = (a.x - this.ball_x) * goalDir < 0;
+    if (behindBall) {
+      // 🔴 **戻るのは足りない分だけ**（2026-10-05）。「ゴール側に誰かいるか」しか見ていなかったので、
+      //    ボールが危ない場所に入ると**ボールより前にいる全員**（FWまで）が全力で戻り、戻る意思だけで
+      //    1チーム31km（走行の4分の1・守備の時間の3割）を走っていた。現実の戻りは短い全力で、
+      //    ゴール側に味方がそろうほど、他の選手は陣形（持ち場）へ戻る（足りなさ＝(NEED−人数)/NEED・D-47）
+      const goalSide = this.actors[ts.idx]!.filter(
+        (o) => o.pos !== "GK" && (o.x - this.ball_x) * goalDir > 0).length;
+      const shortfall = Math.max(0, C.RECOVER_NEED - goalSide) / C.RECOVER_NEED;
+      choices.push({
+        action: "RECOVER",
+        score: new Score("ボールの危なさ",
+                         this.possessionValue(this.teams[1 - ts.idx]!, this.ball_x, this.ball_y))
+          .times("ゴール側の味方の足りなさ", shortfall)
+          .times("戻る速さ", C.RECOVER_WEIGHT),
       });
     }
 
     a.intent = chooseBest(choices).action;
     a.mark = a.intent === "MARK" ? target : null;
 
+    if (a.intent === "RECOVER") {
+      // ボールと自ゴールを結ぶ線の上、ボールよりゴール側へ全力で戻る
+      a.aim_x = this.ball_x + (ownGx - this.ball_x) * C.RECOVER_DEPTH;
+      a.aim_y = this.ball_y + (C.PITCH_Y / 2 - this.ball_y) * C.RECOVER_DEPTH;
+      a.aim_y = a.aim_y * 0.8 + seatY * 0.2;
+      return;     // 🔑 戻るときは持ち場の届く範囲（withinRoam）で止めない。置き去りのまま歩く選手になる
+    }
     if (a.intent === "COVER") {
       // ボールと自ゴールを結ぶ線の上に立つ（抜かれても後ろに残る）。
       // 🔑 同じ一点へ何人も向かうとそこで塊になるので、
@@ -995,6 +1097,17 @@ export class Match {
       const pull = seesBall ? a.player.holdTrack : 0.0;
       a.aim_x = seatX + (this.ball_x - seatX) * pull;
       a.aim_y = seatY + (this.ball_y - seatY) * pull;
+      // 🔴 **ボールが自ゴールに近いほど、ボールとゴールを結ぶ線へ寄って真ん中を閉じる**（D-42）。
+      //    持ち場に立つだけだと、ゴールから30m以内で「前にGKしかいない」場面が1チーム1試合 37回あった
+      //    （現実はまれ）。くじの頃はそこでも撃たずに失っていたので目立たなかったが、
+      //    撃つようになったらシュートが1チーム30本を超えた（2026-10-04）。守備の第一原則は「ゴール側に立つ」
+      const toGoal = hypot(ownGx - this.ball_x, C.PITCH_Y / 2 - this.ball_y);
+      if (seesBall && toGoal < C.COMPACT_RANGE_M && Math.abs(ownGx - this.ball_x) > 1.0) {
+        const t = Math.max(0.0, Math.min(1.0, (a.aim_x - this.ball_x) / (ownGx - this.ball_x)));
+        const lineY = this.ball_y + (C.PITCH_Y / 2 - this.ball_y) * t;
+        const c = C.COMPACT_PULL * (1.0 - toGoal / C.COMPACT_RANGE_M);
+        a.aim_y += (lineY - a.aim_y) * c;
+      }
     }
     [a.aim_x, a.aim_y] = this.withinRoam(ts, a, a.aim_x, a.aim_y);
   }
@@ -1033,17 +1146,14 @@ export class Match {
       tx = this.ball_x;
       ty = this.ball_y;
     } else if (a.intent === "MARK" && a.mark !== null) {
-      // 🔴 **追いつけない相手のゴール側には入れない。**
-      //    以前は速さに関係なく常にゴール側を取れたので、
-      //    マンマークに弱点が無く、堅守型が全員に勝っていた。
-      //    速い選手はマーカーを置き去りにできる＝速さがマンマークの天敵。
-      if (a.max_speed >= a.mark.max_speed) {
-        tx = a.mark.x - ts.direction * 1.4;
-        ty = a.mark.y;
-      } else {
-        tx = a.mark.x;                        // 後ろから追う形になる
-        ty = a.mark.y;
-      }
+      // 🔑 **速い選手はマーカーを置き去りにできる＝速さがマンマークの天敵。**
+      //    （2026-09-30: 常にゴール側に瞬時に入れた頃は弱点が無く、堅守型が全員に勝っていた。
+      //     いまは「ゴール側へ向かって走る」だけで、着けるかどうかは step の速さと向きで決まる）
+      // 🔴 D-42: 遅い選手も**ゴール側を狙う**（着けるかどうかは速さで決まる）。以前は遅いと
+      //    相手の位置そのものを追い、必ず後ろに付いた。ドリブルの勝負が「前にいる相手だけ」になったので、
+      //    後ろに付くマーカーは一度も勝負できず、堅守型の勝率が 0〜15% に落ちた
+      tx = a.mark.x - ts.direction * 1.4;
+      ty = a.mark.y;
     } else {
       tx = a.aim_x;
       ty = a.aim_y;
@@ -1080,7 +1190,8 @@ export class Match {
    *    1秒に変えられるのは `TURN_RATE_RAD`（約49度）まで。
    *    大きく向きを変えている間は速度も落ちる。
    */
-  private step(a: Actor, tx: number, ty: number, effort = 1.0): void {
+  /** `dt` 秒ぶん目標へ進む（向きを変えられる量も進める量も `dt` に比例）。 */
+  private step(a: Actor, tx: number, ty: number, effort = 1.0, dt = 1.0, paced = false): void {
     const dx = tx - a.x;
     const dy = ty - a.y;
     const dist = hypot(dx, dy);
@@ -1090,14 +1201,16 @@ export class Match {
     // 🔑 差を -π〜π に畳む。畳まないと「10度の差」が「350度の差」に化け、
     //    その場でぐるぐる回り続ける（Python の % は割る数と同じ符号＝pyMod）
     const diff = pyMod(want - a.heading + PI, TAU) - PI;
-    const turn = Math.max(-C.TURN_RATE_RAD, Math.min(C.TURN_RATE_RAD, diff));
+    const turnMax = C.TURN_RATE_RAD * dt;
+    const turn = Math.max(-turnMax, Math.min(turnMax, diff));
     a.heading += turn;
 
-    let speed = a.currentSpeed() * effort;
+    let speed = a.pace(effort);
+    if (paced && C.ARRIVE_TIME_S > 0) speed = Math.min(speed, Math.max(C.WALK_SPEED_MPS, dist / C.ARRIVE_TIME_S));
     if (dist <= C.SPRINT_DISTANCE_M) speed *= C.JOG_SPEED_RATIO;  // 近い目標に全力で走らない
-    if (Math.abs(diff) > C.TURN_RATE_RAD) speed *= C.TURN_SLOW_RATIO;  // 曲がりきれていない間は出せない
+    if (Math.abs(diff) > turnMax) speed *= C.TURN_SLOW_RATIO;  // 曲がりきれていない間は出せない
 
-    const stepLen = Math.min(dist, speed);
+    const stepLen = Math.min(dist, speed * dt);
     a.x += cos(a.heading) * stepLen;
     a.y += sin(a.heading) * stepLen;
     a.x = Math.max(0.0, Math.min(C.PITCH_X, a.x));
@@ -1146,23 +1259,149 @@ export class Match {
     const choice = chooseBest(this.onBallChoices(holder, ts));
     const kind = choice.action.kind;
     this.onBallCounts.set(kind, (this.onBallCounts.get(kind) ?? 0) + 1);
-    if (choice.action.kind === "SHOOT") this.shoot(holder, ts);
-    else if (choice.action.kind === "PASS") this.pass(holder, ts, choice.action);
-    else this.dribble(holder, ts);
+    if (choice.action.kind === "SHOOT") {
+      this.shoot(holder, ts);
+      // 入れば笛（喜んで自陣へ戻る）。外れ・セーブなら試合は続くので、撃った人も動く
+      if (this.restart === null) this.afterRelease(holder, ts);
+    }
+    else if (choice.action.kind === "PASS") {
+      this.pass(holder, ts, choice.action);
+      this.afterRelease(holder, ts);
+    }
+    else this.dribble(holder, ts, choice.action);
   }
 
   // ------------------------------------------------- ボールを持った人の判断（D-41）
 
   /**
-   * そこでボールを持っていることの価値＝**そこから点になる見込み**（得点の単位）。
+   * そこでボールを持っていることの価値（得点の単位・D-44）。**試合の結果から作った表を引く。**
    *
-   * 🔑 これが「同じ物差し」。撃つ・出す・運ぶを、どれも
-   *    「やった後にどれだけ点に近づくか」で比べる。撃つなら入る確率そのもの、
-   *    出すなら受け手の位置の価値、運ぶなら運んだ先の価値。
-   *    失ったときは**相手側から見た同じ値**を引く（自陣で失うほど高くつく）。
+   * 🔑 表（`value_table.ts`）は「その場所で持っていた攻撃が、そのあと撃ったシュートの入る確率の合計」の平均。
+   *    セルの中心の値を、まわり4つから直線で混ぜて引く（セルの境で値が飛ばないように）。
+   * 🔑 表がまだ無いときだけ、まっすぐ運んで撃つ道の見積もり（`pathValue`）を使う
+   *    （最初の表を作るための足場。`scripts/build_value_table.ts` が1回目に使う）。
    */
-  private threat(goalX: number, x: number, y: number): number {
-    return C.THREAT_PEAK * exp(-C.THREAT_DECAY * hypot(goalX - x, C.PITCH_Y / 2 - y));
+  private possessionValue(ts: TeamState, x: number, y: number): number {
+    const t = VALUE_TABLE;
+    if (t === null) return this.pathValue(ts, x, y, null);
+    // 攻める向きにそろえる（自ゴール側が 0）
+    const ax = ts.direction > 0 ? x : C.PITCH_X - x;
+    const fx = Math.max(0.0, Math.min(t.nx - 1.0, ax / t.cellX - 0.5));
+    const fy = Math.max(0.0, Math.min(t.ny - 1.0, y / t.cellY - 0.5));
+    const ix = Math.min(t.nx - 2, Math.floor(fx));
+    const iy = Math.min(t.ny - 2, Math.floor(fy));
+    const wx = fx - ix;
+    const wy = fy - iy;
+    const v = (i: number, j: number): number => t.values[i * t.ny + j]!;
+    return (v(ix, iy) * (1 - wx) * (1 - wy) + v(ix + 1, iy) * wx * (1 - wy)
+            + v(ix, iy + 1) * (1 - wx) * wy + v(ix + 1, iy + 1) * wx * wy);
+  }
+
+  /**
+   * そこでボールを持っていることの価値＝**そこから点になる見込み**（得点の単位・D-42）。
+   *
+   * 🔑 これが「同じ物差し」。撃つ・出す・運ぶを、どれも「やった後にどれだけ点に近づくか」で比べる。
+   *
+   * 🔴 **価値は撃つ確率から導く。勘で決めた曲線を使わない。**
+   *    D-41 では `0.42 × exp(-0.06 × 距離)` という曲線を使っていた。ゴール目前でこれが 0.42 なのに、
+   *    GKがいれば実際に撃って入る確率は 0.25 前後。「持っている価値」が「撃って入る確率」を上回るので、
+   *    **ゴールの目の前でも撃たずに運び続け、GKに奪われた**（2026-10-04 オーナー指摘
+   *    「ゴールが完全に空いていても選手が止まってシュートまで辿り着けない」。空いた場面の 81% が奪われて終わった）。
+   *
+   *    点は撃たないと入らない。だから価値は
+   *        そこの価値 ＝ max（そこで撃って入る確率, もう一歩運べる確率 × 一歩先の価値）
+   *    で、ゴールへまっすぐ運ぶ道のりの上で一番良い「撃つ地点」を探して求める。
+   *    運んだほうが得なのは「本当に入る確率が上がるとき」だけになり、目前では必ず撃つ側が勝つ。
+   *
+   * `shooter` はそこで受ける・持つ人（能力が効く）。null なら能力50の誰か。
+   * 失ったときは**相手側から見た同じ値**を引く（`ts` に相手を渡す）。
+   */
+  /**
+   * 運んだ先 (x, y) の価値。**その選手がその先をまっすぐ運んで撃つ見込み**（`pathValue`）と、
+   * そこで持っている価値（表）の大きいほう。
+   *
+   * 🔑 表は平均の攻撃の値なので、目の前が本当に空いている選手には低すぎる。
+   *    表だけだと「この空いた道を運べば良いシュートが撃てる」が見えず、空いたゴールを前に
+   *    パスへ逃げた（撃つ基準を上げたら、空いた場面から撃てた割合が 50% → 20% に落ちた）。
+   * 🔴 まっすぐの道の見積もりは**持っている本人が運ぶときだけ**使う。パスの受け手に使うと、
+   *    たまたま一直線上が空いた遠い味方が高く見えて後ろへ戻した（D-44 で表に替えた理由）。
+   */
+  private carryValue(holder: Actor, ts: TeamState, x: number, y: number): number {
+    return Math.max(this.pathValue(ts, x, y, holder), this.possessionValue(ts, x, y));
+  }
+
+  private pathValue(ts: TeamState, x: number, y: number, shooter: Actor | null): number {
+    const gx = ts.targetGoalX();
+    const gy = C.PITCH_Y / 2;
+    const oppIdx = 1 - ts.idx;
+    let px = x;
+    let py = y;
+    let carry = 1.0;
+    let best = 0.0;
+    for (let i = 0; i < C.VALUE_MAX_STEPS; i++) {
+      const d = hypot(gx - px, gy - py);
+      // 撃つ地点の寄せ（4m以内の相手）も、i 秒ぶん寄ってきた後で数える
+      if (d <= C.SHOOT_RANGE_M) {
+        const xg = this.expectedGoalAt(shooter, ts, px, py, d, i * C.VALUE_CLOSING_M);
+        if (xg >= C.SHOT_MIN_XG) best = Math.max(best, carry * xg);   // 撃つ基準より下では撃たない
+      }
+      if (d <= C.DRIBBLE_ADVANCE_M) break;
+      const nx = px + (gx - px) / d * C.DRIBBLE_ADVANCE_M;
+      const ny = py + (gy - py) / d * C.DRIBBLE_ADVANCE_M;
+      if (d <= C.SHOOT_RANGE_M) {
+        // 🔴 **先の一歩ほど、寄ってくる相手が増える**（D-42）。今の配置だけで見ると、
+        //    たまたま一直線上に誰もいない遠い位置が「ゴール目前まで運べる」と高く見え、
+        //    44m後ろのDFへ戻すパスが価値0.45になった。i 歩目では、相手が i 秒ぶん寄ってくる
+        const closing = i * C.VALUE_CLOSING_M;
+        carry *= this.keepChanceAt(shooter, oppIdx, px, py, gx, gy, closing)
+          * (1.0 - this.tackleRiskAt(shooter, ts, nx, ny, closing));
+      } else {
+        // 射程の外では相手の位置を見ない（遠い先の配置は1秒後には変わっている。計算も重い）
+        carry *= C.VALUE_FAR_KEEP;
+      }
+      px = nx;
+      py = ny;
+    }
+    return best;
+  }
+
+  /**
+   * (x, y) からゴールへ一歩運ぶとき、ボールを失わずに済む確率。
+   * 前に相手がいれば、その相手を抜ける確率（`dribbleChance` と同じ式）。いなければ 1。
+   * 追いついてくる相手との奪い合いは別（`tackleRiskAt`）。
+   */
+  private keepChanceAt(shooter: Actor | null, oppIdx: number, x: number, y: number,
+                       gx: number, gy: number, closing = 0.0): number {
+    const defender = this.opponentAhead(oppIdx, x, y, gx, gy, closing);
+    return defender === null ? 1.0 : this.dribbleChanceStats(shooter, defender);
+  }
+
+  /**
+   * (x, y) から (gx, gy) へ向かうとき、**前にいる**最も近い相手（`DRIBBLE_DUEL_M` 以内）。
+   *
+   * 🔴 **後ろや横の相手とはドリブルの勝負をしない。** 以前は 8m 以内なら向きに関係なく勝負になり、
+   *    後ろから追う相手が毎秒「抜けるかどうか」の勝負を仕掛けられた。ゴールが空いていても
+   *    運ぶたびに奪われ、空いた場面で失った 1,610回のうち 1,315回がこれだった（2026-10-04）。
+   *    後ろの相手が奪えるのは、追いついて奪い合いの距離（`TACKLE_RADIUS_M`）に入ったとき（`contest`）だけ。
+   */
+  private opponentAhead(oppIdx: number, x: number, y: number, gx: number, gy: number,
+                        closing = 0.0): Actor | null {
+    const dx = gx - x;
+    const dy = gy - y;
+    let best: Actor | null = null;
+    let bestD = C.DRIBBLE_DUEL_M + closing;
+    for (const o of this.actors[oppIdx]!) {
+      const ox = o.x - x;
+      const oy = o.y - y;
+      const dd = hypot(ox, oy);
+      // 前にいない相手は、すぐ後ろ（`DRIBBLE_BEHIND_M`）まで追いついたときだけ勝負になる（後ろから突く）
+      if (ox * dx + oy * dy <= 0 && dd > C.DRIBBLE_BEHIND_M + closing) continue;
+      if (dd < bestD) {
+        best = o;
+        bestD = dd;
+      }
+    }
+    return best;
   }
 
   /**
@@ -1175,13 +1414,17 @@ export class Match {
   private onBallChoices(holder: Actor, ts: TeamState): Choice<OnBall>[] {
     const opp = this.teams[1 - ts.idx]!;
     const gx = ts.targetGoalX();
-    const oppGx = opp.targetGoalX();
     const choices: Choice<OnBall>[] = [];
 
     // ---- 撃つ
     const shotDist = hypot(gx - holder.x, C.PITCH_Y / 2 - holder.y);
-    if (shotDist <= C.SHOOT_RANGE_M) {
-      const xg = this.expectedGoal(holder, ts, shotDist);
+    const xgHere = shotDist <= C.SHOOT_RANGE_M ? this.expectedGoal(holder, ts, shotDist) : 0.0;
+    // 🔑 **入る確率が低すぎるシュートは選ばない**（シュートを選ぶ基準・D-44）。
+    //    点に結びつく見込みだけで比べると、遠目のシュートと崩しがほぼ同点になり（0.022 対 0.023）、
+    //    1チーム30本・決定率4%の撃ち合いになった。実際のチームは「この見込み以下は撃たない」を
+    //    戦術として持つ。将来ガンビット（「遠目でも撃て」）で動かせるつまみになる
+    if (shotDist <= C.SHOOT_RANGE_M && xgHere >= C.SHOT_MIN_XG) {
+      const xg = xgHere;
       choices.push({
         action: { kind: "SHOOT" },
         score: new Score("入る確率", xg)
@@ -1208,13 +1451,16 @@ export class Match {
       const near = this.countWithin(opp.idx, mate.x, mate.y, 6.0);
       // 🔑 技術が高い受け手は、寄せられていても収められる
       const relief = 1.0 - C.PASS_MARK_TECHNIQUE_RELIEF * (mate.eff(mate.player.technique) / 100.0);
-      const openness = 1.0 / (1.0 + C.PASS_MARK_PENALTY * near * relief);
+      // 🔑 D-44: 空きは**相手1人に付かれた受け手を基準（1.0）にした比**で効かせる。
+      //    価値の表は「そこで持った攻撃の平均」なので、平均的な寄せられ方はもう入っている。
+      //    空きをそのまま掛けると寄せを二重に数え、パスが一律に安く見えて遠目のシュートばかり選んだ
+      const openness = (1.0 + C.PASS_MARK_PENALTY * relief) / (1.0 + C.PASS_MARK_PENALTY * near * relief);
       const offside = Match.isOffside(mate, ts.direction, oppLast);
-      const score = new Score("受け手の位置の価値", this.threat(gx, mate.x, mate.y))
+      const score = new Score("受け手の位置の価値", this.possessionValue(ts, mate.x, mate.y))
         .times("受け手の空き", openness)
         .times("通る確率", p)
         .plus("奪われたら相手の好機",
-              -(1.0 - p) * this.threat(oppGx, (holder.x + mate.x) / 2, (holder.y + mate.y) / 2));
+              -(1.0 - p) * this.possessionValue(opp, (holder.x + mate.x) / 2, (holder.y + mate.y) / 2));
       if (offside) {
         // 🔑 1秒刻みなので、裏の選手は「並んでいた」かもしれない。出すと一定の割合で笛が鳴る。
         // 🔴 出し手には線が見えているので、**笛の割合より強く**避ける（OFFSIDE_PASS_APPEAL）。
@@ -1230,24 +1476,45 @@ export class Match {
     }
 
     // ---- 運ぶ（前に相手がいれば抜きにかかる）
-    const [nx, ny] = this.dribbleTarget(holder, ts);
-    const defender = this.nearestOpponent(ts.idx, holder, 8.0);
-    const pBeat = defender === null ? 1.0 : this.dribbleChance(holder, defender);
-    // 🔴 **目の前の1人だけでなく、その先の道のりも見る。** 1人しか見ないと、
-    //    箱の中の密集へ運ぶのが「抜ける確率 0.8 で得点の目の前」に見えて、
-    //    速い型が毎試合5点・勝率87%になった（2026-10-04 実測・D-41）。
-    //    実際の選手は「前が詰まっていたら運ばない」。
-    const dirLen = hypot(nx - holder.x, ny - holder.y) || 1.0;
-    const lx = holder.x + (nx - holder.x) / dirLen * C.DRIBBLE_LOOKAHEAD_M;
-    const ly = holder.y + (ny - holder.y) / dirLen * C.DRIBBLE_LOOKAHEAD_M;
-    const blockers = this.laneCrowdAt(holder.x, holder.y, lx, ly, opp.idx);
-    const dribble = new Score(defender === null ? "運んだ先の価値" : "抜いた先の価値",
-                              this.threat(gx, nx, ny))
-      .times("抜ける確率", pBeat)
-      .times("前が詰まっている", 1.0 / (1.0 + C.DRIBBLE_PATH_PENALTY * blockers))
-      .plus("奪われたら相手の好機", -(1.0 - pBeat) * this.threat(oppGx, holder.x, holder.y));
-    choices.push({ action: { kind: "DRIBBLE" }, score: dribble });
+    // 🔴 向きは2つ: **ゴールの真ん中へ**と、**自分の筋をまっすぐ前へ**（D-45）。
+    //    真ん中へしか運べないと、サイドの選手も運ぶたびに中央へ寄り、敵陣3分の1での保持が中央 86% になった
+    //    （オーナー指摘「真ん中しか使えていなくてサイドが全く使えていない」）。並びは真ん中が先（同点なら真ん中）
+    for (const dir of this.dribbleDirections(holder, ts)) {
+      choices.push(this.dribbleChoice(holder, ts, dir));
+    }
     return choices;
+  }
+
+  /** 運ぶ向きの候補（ゴールの真ん中へ／自分の筋をまっすぐ前へ）。 */
+  private dribbleDirections(holder: Actor, ts: TeamState): DribbleAction[] {
+    const dx = ts.targetGoalX() - holder.x;
+    const dy = C.PITCH_Y / 2 - holder.y;
+    const len = hypot(dx, dy) || 1.0;
+    const toGoal: DribbleAction = { kind: "DRIBBLE", dirX: dx / len, dirY: dy / len };
+    const forward: DribbleAction = { kind: "DRIBBLE", dirX: ts.direction, dirY: 0.0 };
+    // ほぼ同じ向きなら1つにする（真ん中の筋にいる選手は同じ候補を2回持たない）
+    return Math.abs(dy / len) < C.DRIBBLE_LANE_MIN_SIN ? [toGoal] : [toGoal, forward];
+  }
+
+  /** その向きへ運ぶ候補の採点。 */
+  private dribbleChoice(holder: Actor, ts: TeamState, act: DribbleAction): Choice<OnBall> {
+    const opp = this.teams[1 - ts.idx]!;
+    const [nx, ny] = this.dribbleTarget(holder, act);
+    const [ax, ay] = [holder.x + act.dirX * 100.0, holder.y + act.dirY * 100.0];
+    const defender = this.opponentAhead(opp.idx, holder.x, holder.y, ax, ay);
+    const duelKeep = defender === null ? 1.0 : this.dribbleChance(holder, defender);
+    // 🔑 次の1秒の奪い合いは、間（contest_cd）が残っていれば起きない（resolveBall: 0 のときだけ奪い合う）
+    const tackleRisk = this.contest_cd > 0 ? 0.0 : this.tackleRiskAt(holder, ts, nx, ny);
+    const pBeat = duelKeep * (1.0 - tackleRisk);
+    // 🔑 「その先の道のり」は運んだ先の価値（`carryValue` → `pathValue` と価値の表）が見ている
+    //    （前の相手を抜ける確率を道のりの上で掛けていく）。D-41 の「前が詰まっている」の減点は
+    //    同じものを二重に数えるので D-42 で外した。
+    const dribble = new Score(defender === null ? "運んだ先の価値" : "抜いた先の価値",
+                              this.carryValue(holder, ts, nx, ny))
+      .times("持ち続けられる確率", pBeat)
+      .plus("奪われたら相手の好機",
+            -(1.0 - pBeat) * this.possessionValue(opp, holder.x, holder.y));
+    return { action: act, score: dribble };
   }
 
   /**
@@ -1265,15 +1532,11 @@ export class Match {
 
   /** 判断待ちの間、保持者はゴール方向へボールを運ぶ。 */
   private carry(holder: Actor, ts: TeamState): void {
-    const gx = ts.targetGoalX();
-    const gy = C.PITCH_Y / 2;
-    const dx = gx - holder.x;
-    const dy = gy - holder.y;
-    const dist = hypot(dx, dy);
-    if (dist < 1.0) return;
-    const stepLen = holder.currentSpeed() * C.CARRY_SPEED_RATIO;
-    holder.x += dx / dist * stepLen;
-    holder.y += dy / dist * stepLen;
+    // 🔑 受けた直後のひと運びは**自分の筋をまっすぐ前へ**（D-45）。ゴールの真ん中へ向けていたので、
+    //    サイドで受けた選手も受けるたびに中央へ寄った
+    if (Math.abs(ts.targetGoalX() - holder.x) < 1.0) return;
+    const stepLen = holder.pace(C.CARRY_SPEED_RATIO);
+    holder.x += ts.direction * stepLen;
     holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
     ts.stats.distance_m += stepLen;
     Match.keepInside(holder);   // 運ぶ・ドリブルで外へ出さない
@@ -1340,25 +1603,7 @@ export class Match {
       }
     }
     if (challenger === null) return false;
-    const h = holder.player;
-    const c = challenger.player;
-    const press = Math.max(0, Math.min(100, c.press + opp.press_delta));
-    // 奪う側は体の強さ、守る側は技術が効く（要件 GD-05「相性が生まれる」）
-    const tacklePower = 2.0 * (C.TACKLE_PHYSICAL_SHARE * challenger.eff(c.physical)
-                               + (1 - C.TACKLE_PHYSICAL_SHARE) * challenger.eff(c.technique));
-    const shieldPower = 2.0 * (C.TACKLE_SHIELD_SHARE * holder.eff(h.technique)
-                               + (1 - C.TACKLE_SHIELD_SHARE) * holder.eff(h.physical));
-    let p = (C.TACKLE_BASE
-             + C.TACKLE_WEIGHT * (tacklePower - shieldPower)
-             // 🔑 速い選手は体を入れられる前に離せる。physical 一本槍の型に
-             //    勝ち筋を作るための項（要件 GD-05「相性が生まれる」）
-             - C.TACKLE_SPEED_WEIGHT * (holder.eff(h.speed) - challenger.eff(c.speed))
-             // 🔑 近くに味方がいれば預け先があり、体を張って守れる
-             - C.TACKLE_SUPPORT_RELIEF * Math.min(
-               C.TACKLE_SUPPORT_MAX,
-               this.countWithin(ts.idx, holder.x, holder.y, C.SUPPORT_RADIUS_M) - 1)
-             + C.TACKLE_PRESS_BONUS * press);
-    p = Math.max(0.03, Math.min(0.85, p));
+    const p = this.tackleChance(holder, challenger, ts, holder.x, holder.y);
     ts.stats.duels += 1;
     opp.stats.duels += 1;
     if (this.rng.random() < p) {
@@ -1369,7 +1614,81 @@ export class Match {
       return true;
     }
     opp.stats.duels_lost += 1;
+    // 🔴 奪えなかったら、次の奪い合いまで `TACKLE_COOLDOWN_TICKS` 秒あける（D-42）。
+    //    定数の説明は最初から「同じ保持局面で奪い合いが起きる**間隔**」だったが、
+    //    実装は持ち主が変わったときにしか間をあけず、近づいた相手が**毎秒**奪いに来ていた。
+    //    攻撃の回数が1チーム1試合 176回（現実は100回前後）になっていた原因
+    this.contest_cd = C.TACKLE_COOLDOWN_TICKS;
     return false;
+  }
+
+  /**
+   * 奪い合いで奪われる確率。`holder` が null なら能力50の誰か。
+   * 🔑 実際の奪い合い（`contest`）と、持ち続けられるかの見積もり（`keepChanceAt`）の**唯一の式**（D-42）。
+   */
+  private tackleChance(holder: Actor | null, challenger: Actor, ts: TeamState,
+                       x: number, y: number): number {
+    const opp = this.teams[1 - ts.idx]!;
+    const c = challenger.player;
+    const stat = (k: "technique" | "physical" | "speed"): number =>
+      holder === null ? 50.0 : holder.eff(holder.player[k]);
+    const press = Math.max(0, Math.min(100, c.press + opp.press_delta));
+    // 奪う側は体の強さ、守る側は技術が効く（要件 GD-05「相性が生まれる」）
+    const tacklePower = 2.0 * (C.TACKLE_PHYSICAL_SHARE * challenger.eff(c.physical)
+                               + (1 - C.TACKLE_PHYSICAL_SHARE) * challenger.eff(c.technique));
+    const shieldPower = 2.0 * (C.TACKLE_SHIELD_SHARE * stat("technique")
+                               + (1 - C.TACKLE_SHIELD_SHARE) * stat("physical"));
+    const p = (C.TACKLE_BASE
+               + C.TACKLE_WEIGHT * (tacklePower - shieldPower)
+               // 🔑 速い選手は体を入れられる前に離せる。physical 一本槍の型に
+               //    勝ち筋を作るための項（要件 GD-05「相性が生まれる」）
+               - C.TACKLE_SPEED_WEIGHT * (stat("speed") - challenger.eff(c.speed))
+               // 🔑 近くに味方がいれば預け先があり、体を張って守れる
+               - C.TACKLE_SUPPORT_RELIEF * Math.min(
+                 C.TACKLE_SUPPORT_MAX, this.countWithin(ts.idx, x, y, C.SUPPORT_RADIUS_M) - 1)
+               + C.TACKLE_PRESS_BONUS * press);
+    return Math.max(0.03, Math.min(0.85, p));
+  }
+
+  /**
+   * (x, y) に着いた次の1秒で、追いついた相手に奪い合いで奪われる確率（D-42）。
+   * 🔴 `contest` は受けてから `TACKLE_COOLDOWN_TICKS` 秒たつと**毎秒**起き、向きを問わない。
+   *    これを見積もりに入れていなかったので、「持てる」と予測した 0.75 が実際は 0.36 だった。
+   */
+  private tackleRiskAt(shooter: Actor | null, ts: TeamState, x: number, y: number,
+                       closing = 0.0): number {
+    const chaser = this.nearestOpponentAt(1 - ts.idx, x, y, C.VALUE_CHASE_RADIUS_M + closing);
+    return chaser === null ? 0.0 : this.tackleChance(shooter, chaser, ts, x, y);
+  }
+
+  /** (x, y) からゴールの真ん中への線の近く（`SHOT_BLOCK_LANE_M`）にいる相手のフィールド選手の数。GKは数えない。 */
+  private shotBlockers(oppIdx: number, x: number, y: number, gx: number, gy: number): number {
+    const vx = gx - x;
+    const vy = gy - y;
+    const ln2 = vx * vx + vy * vy;
+    if (ln2 <= 0) return 0;
+    let n = 0;
+    for (const o of this.actors[oppIdx]!) {
+      if (o.pos === "GK") continue;
+      const t = ((o.x - x) * vx + (o.y - y) * vy) / ln2;
+      if (t <= 0.0 || t >= 1.0) continue;
+      if (hypot(o.x - (x + vx * t), o.y - (y + vy * t)) <= C.SHOT_BLOCK_LANE_M) n += 1;
+    }
+    return n;
+  }
+
+  /** (x, y) から `radius` 以内で最も近い相手。 */
+  private nearestOpponentAt(oppIdx: number, x: number, y: number, radius: number): Actor | null {
+    let best: Actor | null = null;
+    let bestD = radius;
+    for (const o of this.actors[oppIdx]!) {
+      const dd = hypot(o.x - x, o.y - y);
+      if (dd < bestD) {
+        best = o;
+        bestD = dd;
+      }
+    }
+    return best;
   }
 
   /** 撃つ。入るかどうかは `expectedGoal` で決まる（撃つと決めたのは `onBallChoices`）。 */
@@ -1398,18 +1717,33 @@ export class Match {
   }
 
   private expectedGoal(holder: Actor, ts: TeamState, dist: number): number {
+    return this.expectedGoalAt(holder, ts, holder.x, holder.y, dist);
+  }
+
+  /**
+   * (x, y) から撃ったら入る確率。`shooter` が null なら能力50の誰か。
+   * 🔑 実際のシュート（`shoot`）と、価値の見積もり（`pathValue`・価値の表を作る `build_value_table.ts`）の**唯一の式**。
+   */
+  private expectedGoalAt(shooter: Actor | null, ts: TeamState, x: number, y: number,
+                         dist: number, closing = 0.0): number {
     const opp = this.teams[1 - ts.idx]!;
     const gk = this.actors[opp.idx]!.find((a) => a.pos === "GK")!;
-    const kickF = 0.6 + holder.eff(holder.player.kick) / 100.0 * C.SHOOT_KICK_WEIGHT;
+    const kick = shooter === null ? 50.0 : shooter.eff(shooter.player.kick);
+    const tech = shooter === null ? 50.0 : shooter.eff(shooter.player.technique);
+    const kickF = 0.6 + kick / 100.0 * C.SHOOT_KICK_WEIGHT;
     // 🔑 決めるのは蹴る力だけではない。技術は「落ち着いて流し込む」ほうに効く
-    const techF = (1.0 - C.SHOOT_TECHNIQUE_WEIGHT / 2.0
-                   + holder.eff(holder.player.technique) / 100.0 * C.SHOOT_TECHNIQUE_WEIGHT);
+    const techF = (1.0 - C.SHOOT_TECHNIQUE_WEIGHT / 2.0 + tech / 100.0 * C.SHOOT_TECHNIQUE_WEIGHT);
     const gkSkill = (gk.player.technique + gk.player.physical + gk.player.speed) / 3.0;
     const gkF = Math.max(0.3, 1.0 - C.SHOOT_GK_WEIGHT * (gkSkill - 50.0) / 200.0);
-    const near = this.countWithin(opp.idx, holder.x, holder.y, 4.0);
+    const near = this.countWithin(opp.idx, x, y, 4.0 + closing);
     const pressure = Math.max(0.3, 1.0 - C.SHOOT_PRESSURE_PENALTY * near);
+    // 🔴 **撃つ線の上にいるフィールドの相手はシュートを止める**（D-44）。現実ではシュートの約4分の1がブロックされる。
+    //    これが無いと、密集した箱の外からでも寄せられていなければ当たりが良く見え、
+    //    選手が遠目から撃ち続けた（侵入あたりシュート 0.7〜0.9・決定率 6%）
+    const blockers = this.shotBlockers(opp.idx, x, y, ts.targetGoalX(), C.PITCH_Y / 2);
+    const block = (1.0 - C.SHOT_BLOCK_PER_DEFENDER) ** blockers;
     const xg = (C.SHOOT_BASE * exp(-C.SHOOT_DISTANCE_DECAY * dist)
-                * kickF * techF * gkF * pressure);
+                * kickF * techF * gkF * pressure * block);
     return Math.max(0.005, Math.min(0.85, xg));
   }
 
@@ -1509,29 +1843,33 @@ export class Match {
     if (behind) opp.stats.beaten_behind += 1;
   }
 
-  /** 運ぶ・抜いたときに着く場所。ゴールの真ん中へ向けて1回ぶん進む。 */
-  private dribbleTarget(holder: Actor, ts: TeamState): [number, number] {
-    const dx = ts.targetGoalX() - holder.x;
-    const dy = C.PITCH_Y / 2 - holder.y;
-    const dist = hypot(dx, dy) || 1.0;
+  /** 運ぶ・抜いたときに着く場所。決めた向きへ1回ぶん進む。 */
+  private dribbleTarget(holder: Actor, act: DribbleAction): [number, number] {
     const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
-    return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + dx / dist * stepLen)),
-            Math.max(0.0, Math.min(C.PITCH_Y, holder.y + dy / dist * stepLen))];
+    return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + act.dirX * stepLen)),
+            Math.max(0.0, Math.min(C.PITCH_Y, holder.y + act.dirY * stepLen))];
   }
 
   /** 目の前の相手を抜ける確率。🔑 採点（`onBallChoices`）と実行（`dribble`）の唯一の式。 */
   private dribbleChance(holder: Actor, defender: Actor): number {
-    const h = holder.player;
+    return this.dribbleChanceStats(holder, defender);
+  }
+
+  /** `dribbleChance` の本体。`holder` が null なら能力50の誰か（`pathValue` が使う）。 */
+  private dribbleChanceStats(holder: Actor | null, defender: Actor): number {
     const c = defender.player;
-    const p = C.DRIBBLE_BASE + C.DRIBBLE_WEIGHT * (
-      (holder.eff(h.speed) + holder.eff(h.technique)) / 2.0 - defender.eff(c.physical));
+    const mine = holder === null ? 50.0
+      : (holder.eff(holder.player.speed) + holder.eff(holder.player.technique)) / 2.0;
+    const p = C.DRIBBLE_BASE + C.DRIBBLE_WEIGHT * (mine - defender.eff(c.physical));
     return Math.max(0.08, Math.min(0.95, p));
   }
 
   /** 運ぶ。前に相手がいれば抜きにかかり、失敗すれば奪われる。 */
-  private dribble(holder: Actor, ts: TeamState): void {
+  private dribble(holder: Actor, ts: TeamState, act: DribbleAction): void {
     const opp = this.teams[1 - ts.idx]!;
-    const defender = this.nearestOpponent(ts.idx, holder, 8.0);
+    // 🔴 勝負になるのは**運ぶ向きの前にいる**相手だけ（`opponentAhead`・D-42）
+    const defender = this.opponentAhead(opp.idx, holder.x, holder.y,
+                                        holder.x + act.dirX * 100.0, holder.y + act.dirY * 100.0);
     if (defender !== null) {
       ts.stats.duels += 1;
       opp.stats.duels += 1;
@@ -1546,7 +1884,7 @@ export class Match {
       }
       opp.stats.duels_lost += 1;
     }
-    const [nx, ny] = this.dribbleTarget(holder, ts);
+    const [nx, ny] = this.dribbleTarget(holder, act);
     const stepLen = hypot(nx - holder.x, ny - holder.y);
     holder.x = nx;
     holder.y = ny;

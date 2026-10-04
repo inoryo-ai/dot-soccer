@@ -11,8 +11,8 @@
  * 規則を変えれば一致しなくなるのは正しい変化なので、変えた規則を `docs/decisions.md` に
  * 書いたうえで、ここで作り直す（D-18）。
  *
- * 🔑 乱数・数学・プリセット・特訓（random / math / presets / training）は規則と関係ないので
- *    作り直さない。こちらは今も Python 版との照合のまま。
+ * 🔑 乱数・数学（random / math）は規則と関係ないので作り直さない。こちらは今も Python 版との照合のまま。
+ *    プリセット・特訓（presets / training）は D-43 で作り方を変えたので、ここで作り直す。
  * 🔑 試合の組み合わせ・シード・入力は、いまの正解データにあるものをそのまま使い、結果だけを
  *    書き直す（テストと同じ条件で作るため）。
  */
@@ -29,7 +29,10 @@ import { Career } from "../src/sim/career.ts";
 import { play } from "../src/sim/engine.ts";
 import { formatStandings } from "../src/sim/league.ts";
 import { Team } from "../src/sim/model.ts";
-import { buildPreset } from "../src/sim/presets.ts";
+import { ALL_PRESET_PLANS, buildPreset, buildUserTeam } from "../src/sim/presets.ts";
+import type { Plan } from "../src/sim/presets.ts";
+import { Player, judgeType } from "../src/sim/model.ts";
+import { applyTraining, findIssues } from "../src/sim/training.ts";
 import { cmpStr } from "../src/sim/pymath.ts";
 import { ROOT, golden, maskSaveDir } from "../tests/helpers.ts";
 
@@ -145,7 +148,39 @@ function genCli(): void {
   dump("cli", out);
 }
 
+/**
+ * プリセットと自チームの初期編成（`tests/golden.test.ts` の1つ目の検査と同じ手順）。
+ * 🔴 D-43 で土台・伸び方・プリセットの割り振りを変えたので、Python 版との照合はここで終わり。
+ *    試合・入力・シードは今の正解データのものをそのまま使い、結果だけを書き直す。
+ */
+function genPresets(): void {
+  const g = golden<any>("presets");
+  const presets = Object.fromEntries(Object.keys(ALL_PRESET_PLANS)
+    .map((name) => [name, plain(buildPreset(name).toDict())]));
+  const users = g.users.map((u: any) => ({
+    seed: u.seed, formation: u.formation, plan: u.plan,
+    team: plain(buildUserTeam("わがチーム", u.seed, u.formation, u.plan as Plan | null).toDict()),
+  }));
+  dump("presets", { presets, users });
+}
+
+/** 特訓の効き（`tests/golden.test.ts` の2つ目の検査と同じ手順）。タイプ判定と課題は規則が同じなので値も同じ。 */
+function genTraining(): void {
+  const g = golden<any>("training");
+  const runs = g.runs.map((run: any) => {
+    const pl = new Player({ name: "検証くん", position: "MF", kick: 40, speed: 40, stamina: 40,
+                            technique: 40, physical: 40 });
+    const steps = Array.from({ length: 25 }, () => applyTraining(pl, run.cards));
+    return { cards: run.cards, steps: plain(steps), final: plain(pl.toDict()) };
+  });
+  const types = g.types.map((t: any) => ({ hidden: t.hidden, type: judgeType(t.hidden) }));
+  const issues = g.issues.map((i: any) => ({ stats: i.stats, issues: findIssues(i.stats) }));
+  dump("training", { runs, types, issues });
+}
+
 console.log("正解データを書き直します:");
+genPresets();
+genTraining();
 genMatches();
 genBatch();
 genCareer();

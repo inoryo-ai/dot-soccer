@@ -95,7 +95,7 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 | 区分 | 項目 | 範囲 | 初期値 |
 | --- | --- | --- | --- |
 | 位置 | GK / DF / MF / FW | — | — |
-| 見える能力 | kick, speed, stamina, technique, physical | 0〜100 | チームごと |
+| 見える能力 | kick, speed, stamina, technique, physical | 0〜100 | **ポジション別のプロの土台**（どれも合計280・D-43） |
 | 隠し | zone_man（負＝ゾーン、正＝マンツーマン） | -100〜100 | 0 |
 | 隠し | press, support, overlap, run_space, goal_wait | 0〜100 | 10 |
 | 試合中 | 現在スタミナ | 試合中に減る | 最大 |
@@ -167,6 +167,10 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
   （`ATTACK_TIE_BREAK`。この順でないとランニング特訓がダイナモに到達できない）
 
 ## 8. 特訓カードと課題の発見
+
+> 🔑 **D-43（2026-10-04）**: 見える能力の伸びは**伸びるほど伸びにくい**（69以下で表の値・70〜84で1少ない・85以上で2少ない・最低1）。
+> 隠しパラメーターの伸びは表の値のまま（タイプの変わり方 D-03 を守る）。
+> 伸びが一定だと「1枚に全部注ぐ」が必ず最善になり、素人の能力（40）を抱えた一点突破が強すぎた。
 
 試合で見つかった弱点が課題になり、課題に対応する特訓カードをもらえる。特訓は見える能力と隠しパラメーターを同時に動かす。
 
@@ -251,7 +255,8 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 `撃つ = 0.015 + 1.00 × ゴール期待値` としていたため、12mで入る確率が10%なら
 撃とうとするのも10%だった。実測で **6〜12mの判断2回すべてで撃たなかった**。
 → D-13 では撃つ気を距離で直接決めた。**D-41 で効用に置き換えた**: 撃つ・出す・運ぶを
-   同じ物差し（そこでボールを持っている価値 `THREAT_PEAK` / `THREAT_DECAY`）で比べ、最大を選ぶ。
+   同じ物差し（そこでボールを持っている価値）で比べ、最大を選ぶ。物差しは**試合の結果から作った表**
+   （`src/sim/value_table.ts`・D-44。現実の xT と同じ作り方）で、入る確率は現実の距離別の相場に合わせてある。
    比べる相手が「持ち続けた場合の見込み」なので、近ければ入る確率が低くても撃つ（教訓は守られている）。
 
 ### 出す相手がいないなら出さない（同・D-14）
@@ -312,15 +317,17 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 **試合ログ**（JSON）：時刻・種類（パス、奪取、シュート、ゴール、交代、方針の発動）・選手名。
 最後にスタッツ（シュート数、支配率、パス成功率）と課題一覧。
 
-**プリセット6チーム**：同じ初期能力の選手に違う特訓を20回ずつ行って作る。能力合計はそろえる。
+**プリセット6チーム**：同じ土台（ポジション別）の選手に違う特訓を20回ずつ行って作る。
+そろえるのは**土台と特訓の回数**（D-43）。能力合計は割り振りで変わる（一点突破ほど少ない＝それが代償）。
+割り振りは「得意のカード10回＋その型を支えるカード10回」。AIチームにもプレイヤーと同じ個人差を付ける。
 
 | チーム | 特訓 | チーム方針 |
 | --- | --- | --- |
-| 走力型 | ランニング中心 | — |
-| プレス型 | プレス中心 | HIGH_PRESS |
-| パス型 | パス中心 | — |
-| 裏抜け型 | ダッシュ中心 | THROUGH_BALLS |
-| 堅守型 | マンツーマン中心 | LEADING_LATE → LINE_DOWN |
+| 走力型 | ランニング10・プレス4・パス3・ダッシュ3 | — |
+| プレス型 | プレス10・ランニング4・マンツーマン3・ダッシュ3 | HIGH_PRESS |
+| パス型 | パス10・ランニング4・シュート3・ダッシュ3 | — |
+| 裏抜け型 | ダッシュ10・シュート4・ランニング3・パス3 | THROUGH_BALLS |
+| 堅守型 | マンツーマン10・ランニング4・プレス3・パス3 | LEADING_LATE → LINE_DOWN |
 | バランス型 | 全カード均等 | — |
 
 リーグ用に7チーム目「シュート型」を足し、**自チーム＋AI7＝8チーム**で2回戦総当たり14節。
@@ -353,7 +360,13 @@ NFTと賭け要素を組み合わせる。現在は構想段階（MVPのコマ�
 | §8 相反カード（D-02） | `src/sim/training.ts` の `FORBIDDEN_PAIRS` | 同上 |
 | §9 行動に秒数（ループ#1） | `src/sim/constants.ts` | `scripts/check_project.ts` [2] |
 | §10 戦術・方針・監督 | `src/sim/model.ts` `src/sim/engine.ts` | `tests/game.test.ts` |
-| §11 プリセット | `src/sim/presets.ts` | `scripts/check_project.ts` [5]（能力合計が一致） |
+| §11 プリセット（D-43） | `src/sim/presets.ts` | `scripts/check_project.ts` [5]（土台と特訓の回数が一致）／ `tests/sim.test.ts`（一点突破の代償・プロの土台・AIにも個人差） |
+| §9 価値の表（D-44） | `src/sim/value_table.ts` `scripts/build_value_table.ts` | `scripts/check_project.ts` [12]（今の規則で作った表か） |
+| §9 陣形の広がり（D-45） | `src/sim/engine.ts` の `decideAttack`（幅を保つ・味方との間隔）・`dribbleDirections` | `scripts/measure.ts`（攻撃時の幅・縦を出典つきで判定）／ check [11] |
+| §9 出した人は動く（D-46） | `src/sim/engine.ts` の `afterRelease`・`moveOffBall` ／ `PASS_KICK_SECONDS` | `scripts/measure.ts`（出した秒にほぼ動かなかった割合を判定）／ `tests/movement.test.ts` |
+| §9 疲れ方（D-47） | `src/sim/engine.ts` の `Actor.pace`・`step`（着くまでの時間）・`decideDefend`（戻る人数） | `scripts/measure.ts`（後半の走行・最後の15分の高強度を出典つきで判定）／ `tests/movement.test.ts` |
+| §9 撃つ場所（D-47） | `SHOT_MIN_XG` | `scripts/measure.ts`（エリアの外からの割合を出典つきで測る・既知の赤） |
+| §9 入る確率の相場（D-44） | `src/sim/engine.ts` の `expectedGoalAt` | `tests/ball_decisions.test.ts`（距離別の相場・出典つき） |
 | リーグ・シーズン | `src/sim/league.ts` `src/sim/career.ts` | `tests/game.test.ts` / `scripts/check_project.ts` [6] |
 | 対話画面 | `src/cli/ui.ts` | `tests/game.test.ts` `tests/cli.test.ts`（入力を注入して14節＋シーズン締めまで歩く） |
 | §7 生まれ持った性質（D-11） | `src/sim/model.ts` の `cover_range` / `vision_range` | `tests/movement.test.ts` |

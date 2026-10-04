@@ -21,12 +21,14 @@ import { RuntimeError, ValueError } from "../src/sim/errors.ts";
 import { buildSchedule, standings } from "../src/sim/league.ts";
 import type { MatchRecord } from "../src/sim/league.ts";
 import {
+  ALL_PRESET_PLANS,
   LEAGUE_OPPONENTS,
   PRESET_ORDER,
   TRAININGS_PER_PLAYER,
   buildPreset,
   buildUserTeam,
-  expectedAbilityTotal,
+  defaultUserPlan,
+  expectedTotalFor,
 } from "../src/sim/presets.ts";
 import type { Plan } from "../src/sim/presets.ts";
 import { CARDS } from "../src/sim/training.ts";
@@ -96,8 +98,7 @@ describe("リーグ", () => {
 });
 
 describe("プレイヤーとAIが同じ条件で開幕する", () => {
-  test("初期育成の配分を変えても、自チームの能力合計はAIと同じ", async (t) => {
-    const expected = expectedAbilityTotal();
+  test("自チームもAIも同じ作り方（同じ土台・同じ回数の特訓・個人差は合計を変えない・D-43）", async (t) => {
     const plans: (Plan | null)[] = [
       null, { dash: 20 }, { pass: 10, shoot: 10 },
       { running: 4, man_mark: 4, press: 4, pass: 4, dash: 4 },
@@ -105,10 +106,13 @@ describe("プレイヤーとAIが同じ条件で開幕する", () => {
     for (const plan of plans) {
       await t.test(`plan=${JSON.stringify(plan)}`, () => {
         const team = buildUserTeam("自分", 5, "4-4-2", plan);
-        assert.equal(team.abilityTotal(), expected, "初期育成の配分で能力合計が変わってはいけない");
+        assert.equal(team.abilityTotal(), expectedTotalFor(plan ?? defaultUserPlan()),
+                     "同じ配分のAIと能力合計が違う＝作り方が違う");
       });
     }
-    for (const name of LEAGUE_OPPONENTS) assert.equal(buildPreset(name).abilityTotal(), expected);
+    for (const name of LEAGUE_OPPONENTS) {
+      assert.equal(buildPreset(name).abilityTotal(), expectedTotalFor(ALL_PRESET_PLANS[name]![0]));
+    }
   });
 
   test("初期育成はちょうど20回でなければならない", () => {
@@ -117,11 +121,15 @@ describe("プレイヤーとAIが同じ条件で開幕する", () => {
     assert.equal(TRAININGS_PER_PLAYER, 20);
   });
 
-  test("選手ごとに個性はあるが、能力合計は同じ", () => {
+  test("選手ごとに個性はあるが、同じポジションなら能力合計は同じ（個性は配分の入れ替えだけ）", () => {
+    // 🔑 D-43: 伸びは土台の高さで変わるので、ポジション（土台）が違えば合計も違ってよい
     const team = buildUserTeam("自分", 9);
     const field = team.allPlayers.filter((p) => p.position !== "GK");
-    const sums = new Set(field.map((p) => Object.values(p.visible).reduce((a, b) => a + b, 0)));
-    assert.equal(sums.size, 1, "選手ごとに能力合計が違う");
+    for (const pos of ["DF", "MF", "FW"] as const) {
+      const sums = new Set(field.filter((p) => p.position === pos)
+        .map((p) => Object.values(p.visible).reduce((a, b) => a + b, 0)));
+      assert.equal(sums.size, 1, `${pos} の選手ごとに能力合計が違う＝個性で合計が動いている`);
+    }
     const profiles = new Set(field.map((p) => JSON.stringify(Object.entries(p.visible).sort())));
     assert.ok(profiles.size > 1, "全選手が同じ能力＝個性が無い");
   });
@@ -180,8 +188,8 @@ describe("キャリア", () => {
     assert.deepEqual(career.results, []);
     const afterHidden = sumHidden(ai);
     assert.ok(afterHidden > beforeHidden, "AIチームがシーズンをまたいで成長していない");
-    // 見える能力は既に上限100に達しているので増えない（＝これで測ってはいけない）。
-    assert.equal(ai.abilityTotal(), beforeVisible);
+    // 🔑 D-43: 一点突破でなくなったので、見える能力も上限に張り付かずに伸びる
+    assert.ok(ai.abilityTotal() > beforeVisible, "AIチームの見える能力が伸びていない");
     // 2シーズン目も普通に始まる
     career.playRound();
     assert.equal(career.round_index, 1);
@@ -381,7 +389,7 @@ describe("対話画面（入力を注入して歩く）", () => {
                        "zzz", "9", "0"], save);
       assert.ok(out.includes("⚠"));
       const career = loadCareer(save);
-      assert.equal(career.me.abilityTotal(), expectedAbilityTotal());
+      assert.equal(career.me.abilityTotal(), expectedTotalFor({ running: 20 }));
     });
   });
 
@@ -394,12 +402,13 @@ describe("対話画面（入力を注入して歩く）", () => {
     });
   });
 
-  test("自分で決めた初期育成の配分でも能力合計は変わらない", () => {
+  test("自分で決めた初期育成の配分どおりに育つ（同じ配分のAIと同じ能力合計・D-43）", () => {
     withTempDir((d) => {
       const save = join(d, "s.json");
+      // ランニング0・マンツーマン0・プレス0・パス10・ダッシュ5・シュート3・ゾーンに残り2
       run(["配分テスト", "16", "1", "9", "0", "0", "0", "10", "5", "3", "0"], save);
       const career = loadCareer(save);
-      assert.equal(career.me.abilityTotal(), expectedAbilityTotal());
+      assert.equal(career.me.abilityTotal(), expectedTotalFor({ pass: 10, dash: 5, shoot: 3, zone: 2 }));
     });
   });
 

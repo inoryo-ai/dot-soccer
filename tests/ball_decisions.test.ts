@@ -72,6 +72,28 @@ const decide = (m: Match, holder: Actor, ts: TeamState): Choice<OnBall> =>
 const shootScore = (m: Match, holder: Actor, ts: TeamState): number | undefined =>
   choices(m, holder, ts).find((c) => c.action.kind === "SHOOT")?.score.value;
 
+describe("🔴 入る確率は現実の距離別の相場に入っている（D-44・出典つき）", () => {
+  // 出典: Opta / The Analyst「What Is Expected Goals (xG)?」と各社の xG 解説で共通する距離の目安
+  //   6ヤードボックスの中央 0.30〜0.50 ／ PKの位置（11m）の流れの中 0.12〜0.20 ／
+  //   ペナルティエリアの端の中央 0.05〜0.08 ／ エリアの外は 3% 未満
+  //   https://theanalyst.com/articles/what-is-expected-goals-xg
+  //   https://www.sportmonks.com/blogs/xg-explained/
+  // 🔑 物差し（選手が撃つかどうか）はこの確率で決まる。ここが現実より甘いと遠くから撃ちすぎ、
+  //    辛いと撃たずに運び続ける。勘で置いていた頃（距離減衰 0.115）は遠目の当たりが良すぎた
+  test("寄せの無い状態で、プロのFWが撃つと相場の範囲に入る", () => {
+    const { m, ts, holder } = board();
+    for (const o of m.actors[1]!) {
+      o.x = 0.0;
+      o.y = 0.0;
+    }
+    const xg = (d: number): number => (m as any).expectedGoalAt(holder, ts, C.PITCH_X - d, C.PITCH_Y / 2, d);
+    const bands: [number, number, number][] = [[4, 0.30, 0.50], [11, 0.12, 0.20], [17, 0.05, 0.08], [25, 0.0, 0.03]];
+    for (const [d, lo, hi] of bands) {
+      assert.ok(lo <= xg(d) && xg(d) <= hi, `${d}m: ${xg(d).toFixed(3)}（相場 ${lo}〜${hi}）`);
+    }
+  });
+});
+
 describe("🔴 撃つかどうか（入る確率が低くても、近ければ撃つ）", () => {
   test("至近距離で空いていれば撃つ", () => {
     const { m, ts, holder } = board();
@@ -181,15 +203,17 @@ describe("🔴 ゴール前で止まらない（2026-10-02 オーナー指摘・
               `選んだのは ${best.action.kind}: ${explain(best.score)}`);
   });
 
-  test("🔴 前が詰まっていたら、運ぶ採点が下がる（1人だけ見て箱の密集へ運ばない）", () => {
+  test("🔴 目の前を塞がれたら、運ぶ採点が下がる（抜ける確率と、追いつかれて奪われる確率が入る）", () => {
+    // 🔑 D-44: その先の道のりの混み具合は「価値の表」（試合の結果の平均）が持つ。
+    //    その場の判断が見るのは、目の前の勝負と次の1秒の奪い合いだけ
     const { m, ts, holder } = board(6);
     place(m, holder, C.PITCH_X - 20.0, C.PITCH_Y / 2);
     const dribble = (): number =>
       choices(m, holder, ts).find((c) => c.action.kind === "DRIBBLE")!.score.value;
     const open = dribble();
     m.actors[1]!.slice(1, 4).forEach((o, k) => {
-      o.x = C.PITCH_X - 13.0 + k;
-      o.y = C.PITCH_Y / 2;
+      o.x = C.PITCH_X - 17.0 + k;
+      o.y = C.PITCH_Y / 2 + (k - 1) * 1.5;
     });
     assert.ok(dribble() < open, `塞いでも運ぶ採点が下がらない: ${open} → ${dribble()}`);
   });

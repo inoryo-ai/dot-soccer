@@ -18,14 +18,16 @@ import { fileURLToPath } from "node:url";
 import * as C from "../src/sim/constants.ts";
 import { SAVE_VERSION } from "../src/sim/career.ts";
 import { combinations } from "../src/sim/batch.ts";
-import { LEAGUE_OPPONENTS, PRESET_ORDER, buildPreset, checkNoClamping,
-         expectedAbilityTotal } from "../src/sim/presets.ts";
+import { ALL_PRESET_PLANS, LEAGUE_OPPONENTS, PRESET_ORDER, buildPreset, checkFairBuild,
+         expectedTotalFor } from "../src/sim/presets.ts";
 import { fmtPct } from "../src/sim/pymath.ts";
 import { CARD_KEYS, FORBIDDEN_PAIRS, SPECIAL_NAMES, pairKey } from "../src/sim/training.ts";
 import { loadTeam } from "../src/node/files.ts";
 import { runBatch } from "../src/node/batch_pool.ts";
 import { DIST, build, listFiles } from "./build_web.ts";
 import { KNOWN_RED } from "./measure.ts";
+import { inputsFingerprint } from "./build_value_table.ts";
+import { VALUE_TABLE } from "../src/sim/value_table.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF = fileURLToPath(import.meta.url);
@@ -139,10 +141,11 @@ function checkSpecialNames(): void {
 }
 
 function checkPresets(): void {
-  console.log("[5] プリセットの能力合計 — 6チーム");
-  const problems = checkNoClamping();
+  // 🔑 D-43: そろえるのは「土台」と「特訓の回数」。能力合計は割り振りで変わるのが正しい
+  console.log("[5] プリセットの作り方 — 土台と特訓の回数");
+  const problems = checkFairBuild();
   if (problems.length > 0) for (const p of problems) bad(p);
-  else ok("6チームの能力合計が一致（特訓が上限で切られていない）");
+  else ok("ポジション別の土台の合計が一致し、全チームが特訓20回");
 }
 
 /** リーグが組めるか。奇数チームだと必ず1チームが休みになり消化試合数が揃わない。 */
@@ -157,10 +160,11 @@ function checkLeagueSetup(): void {
   } else {
     bad("batch のプリセット構成が変わっている（提出済みの勝率表と前提がずれる）");
   }
-  const expected = expectedAbilityTotal();
-  const off = LEAGUE_OPPONENTS.filter((name) => buildPreset(name).abilityTotal() !== expected);
-  if (off.length > 0) bad(`能力合計が揃っていないAIチーム: ${JSON.stringify(off)}`);
-  else ok(`AI ${LEAGUE_OPPONENTS.length}チームの能力合計が ${expected} で一致`);
+  // 個人差は合計を変えない＝AIチームは配分どおりの合計になっているはず（作り方が同じことの検算）
+  const off = LEAGUE_OPPONENTS.filter(
+    (name) => buildPreset(name).abilityTotal() !== expectedTotalFor(ALL_PRESET_PLANS[name]![0]));
+  if (off.length > 0) bad(`配分どおりの能力合計になっていないAIチーム: ${JSON.stringify(off)}`);
+  else ok(`AI ${LEAGUE_OPPONENTS.length}チームが配分どおりの能力合計（個人差で合計が動いていない）`);
   if (Number.isInteger(SAVE_VERSION) && SAVE_VERSION >= 1) ok(`セーブ形式 v${SAVE_VERSION}`);
   else bad(`セーブ形式の版が異常: ${SAVE_VERSION}`);
 }
@@ -375,6 +379,26 @@ function checkStatRanges(): void {
   }
 }
 
+/**
+ * 価値の表が今の規則で作られたものか（D-44）。
+ * 🔴 表は試合を回して作るので、規則を変えても**黙って古いまま**動く。古い表で選手が判断すると、
+ *    相場の検査 [11] が緑でも「今の規則なら選ばない手」を選び続ける。指紋で突き合わせる。
+ */
+function checkValueTable(): void {
+  console.log("[12] 価値の表 — src/sim/value_table.ts");
+  if (VALUE_TABLE === null) {
+    bad("価値の表が無い: node scripts/build_value_table.ts で作る");
+    return;
+  }
+  const now = inputsFingerprint();
+  if (VALUE_TABLE.inputs !== now) {
+    bad(`価値の表が古い（作ったときの規則 ${VALUE_TABLE.inputs} / 今 ${now}）: `
+        + "node scripts/build_value_table.ts 2 8 で作り直す");
+  } else {
+    ok(`今の規則で作った表（${VALUE_TABLE.matches}試合・くり返し${VALUE_TABLE.iteration}回目）`);
+  }
+}
+
 async function main(): Promise<number> {
   console.log("=== dot-soccer 提出前検査 ===");
   checkDummyValues();
@@ -388,6 +412,7 @@ async function main(): Promise<number> {
   checkTools();
   checkWebBuild();
   checkStatRanges();
+  checkValueTable();
   console.log();
   if (failures.length > 0) {
     console.log(`❌ ${failures.length}件の問題があります`);
