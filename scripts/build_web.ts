@@ -50,7 +50,7 @@ export const STATIC_DIRS = ["bg", "scene"] as const;
 export const EXPECTED_JS = [
   "sim/career.js", "sim/constants.js", "sim/detmath.js", "sim/engine.js", "sim/errors.js",
   "sim/league.js", "sim/model.js", "sim/presets.js", "sim/pymath.js", "sim/pyrandom.js",
-  "sim/sha512.js", "sim/training.js",
+  "sim/sha512.js", "sim/training.js", "sim/utility.js",
   "web/api.js", "web/bg.js", "web/bgcheck.js", "web/board.js", "web/ceremony.js",
   "web/face.js",
   "web/faces.js", "web/fx.js", "web/lab.js", "web/main.js",
