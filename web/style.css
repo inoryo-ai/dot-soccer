@@ -837,49 +837,147 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 
 /* --------------------------------------------------------------- 試合 */
 
-.screen-match {
-  position: relative;
-  padding: calc(var(--px) * 4) calc(var(--px) * 4) calc(var(--px) * 10);
+/* 🔴 試合は**全画面**にする（2026-10-03 オーナー指摘「小さすぎて見えない」）。
+      得点板・実況・操作を縦に積むと、積んだぶんだけ盤が小さくなる。
+      盤を画面いっぱいに置き、ほかは**その上に重ねる**。
+   🔑 盤の倍率は `pitch.ts` の fit() が整数倍で入れる。ここで寸法を決めない。 */
+/* 🔴 デザインの試合画面の構成（D-29）: 上に**スタンド帯**、下に盤。
+      盤を画面の下へ寄せ、空いた上を背後の `<stadium-scene screen="match">` に見せる。
+      中央に置くと上下に帯が出て、スタンドが切れる。 */
+.screen-match.is-on {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  padding: 0;
+  background: none;
 }
 
+/* 🔴 3Dに一本化したので、盤は**画面いっぱい**にする（D-33）。
+      ドット絵のときは「整数倍でないと縞がムラになる」ので倍率を整数に縛っていたが、
+      3Dにはドットの格子が無い。出す場所の実寸そのままで描くのが一番きれいで、
+      拡大のぼけも出ない（実際の画素数は `match3d.ts` の `fit()` が合わせる）。
+   🔑 **CSS で大きさを決め切る。** `width: auto` のままだと canvas の属性値を見るので、
+      `fit()` が属性を書く → 箱が変わる → また `fit()` が走る、の堂々巡りになる。 */
+.screen-match .pitch-wrap {
+  position: absolute;
+  inset: 0;
+  max-width: none;
+  width: auto;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.screen-match #pitch {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  image-rendering: auto;
+}
+
+/* 重ねるものは、盤の上に浮かせる */
+/* 🔴 実況と操作を**画面の真ん中から外す**（2026-10-03 の目視）。
+      中央下に置くと、いちばん見たいゴール前の攻防をそのまま塞いでいた。
+      デザインの配置に合わせ、実況は左下、操作は右上へ。 */
+.screen-match .ticker {
+  position: absolute;
+  left: calc(var(--px) * 7);
+  bottom: calc(var(--px) * 7);
+  z-index: 4;
+  margin: 0;
+  width: min(28rem, calc(100vw - 320px - var(--px) * 20));
+}
+.screen-match .match-controls {
+  position: absolute;
+  right: calc(var(--px) * 7);
+  top: calc(var(--px) * 7);
+  z-index: 4;
+  margin: 0;
+  width: auto;
+  justify-content: flex-end;
+}
+/* 全体図。デザインの右下の箱に合わせる */
+.mini-map {
+  position: absolute;
+  right: calc(var(--px) * 7);
+  bottom: calc(var(--px) * 7);
+  z-index: 4;
+  width: 300px;
+  height: 195px;
+  /* 🔴 半透明にしたら芝に溶けて点が読めなかった（2026-10-03 の目視）。
+        不透明な濃い地に戻す。全体図は**一目で位置が分かる**ことが仕事。 */
+  background: #14407a;
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .85);
+  image-rendering: pixelated;
+}
+
+/* 🔑 得点板は**左上**（デザインどおり）。中央に置くとスタンドの中心と喧嘩する */
+.screen-match .scoreboard {
+  position: absolute;
+  left: calc(var(--px) * 7);
+  top: calc(var(--px) * 7);
+  z-index: 4;
+}
+/* 🔑 操作ボタンの高さ（22）＋上下の余白ぶん上に置く。
+      20 だと実況の下端とボタンが重なった（2026-10-03 の目視）。 */
+
 /* 得点板。試合中いちばん見る場所なので、前に出ている太さ（6px）を使う */
+/* 🔴 デザインの得点板（D-29）。**横一列の区画**にする。
+      チーム色 → スコア（明るい地）→ チーム色 → 時計（濃紺に黄）。
+      前は縦2段で、スタジアムの前に置くと間延びして読みづらかった。 */
 .scoreboard {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  grid-template-areas: "home score away" "clock clock clock";
-  gap: var(--px) calc(var(--px) * 5);
-  align-items: center;
-  padding: calc(var(--px) * 4) calc(var(--px) * 5);
-  background: var(--edge);
-  border: var(--w-pop) solid var(--edge);
-  box-shadow: var(--drop) var(--drop) 0 rgba(59, 42, 27, .5);
-  max-width: 44rem;
-  margin: 0 auto calc(var(--px) * 4);
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  background: none;
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 64, 122, .85);
+  width: max-content;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
 }
 .sb-team {
+  display: grid;
+  place-items: center;
+  padding: 0 calc(var(--px) * 6);
   font-weight: 800;
+  font-size: .92rem;
+  color: var(--ink-on-dark);
   white-space: nowrap;
+  max-width: 11rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .9);
 }
-.sb-team:first-child { grid-area: home; color: var(--home); }
-.sb-team:nth-child(3) { grid-area: away; text-align: right; color: #8ec6f5; }
+.sb-team:first-child { background: var(--ui); }
+.sb-team:nth-child(3) { background: var(--danger); }
 .sb-score {
-  grid-area: score;
-  padding: 0 calc(var(--px) * 4);
-  font-size: 1.6rem;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--px) * 3) calc(var(--px) * 7);
+  font-size: 1.7rem;
   font-weight: 900;
-  letter-spacing: .08em;
-  color: var(--ink-on-dark);
-  background: rgba(0, 0, 0, .28);
-  border: var(--w-hair) solid var(--ink-dim);
+  letter-spacing: .1em;
+  color: var(--ink);
+  background: var(--panel);
 }
+/* 時計は右端の濃紺。試合中いちばん視線が戻る場所 */
 .sb-clock {
-  grid-area: clock;
-  text-align: center;
-  font-size: .8rem;
-  font-weight: 700;
-  color: var(--paper-dark);
+  display: grid;
+  place-items: center;
+  padding: 0 calc(var(--px) * 6);
+  font-size: .95rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: var(--home);
+  background: var(--ui-edge);
 }
 
 .pitch-wrap {
@@ -1113,6 +1211,49 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   }
 }
 
+/* ===================================== 施設の中の絵（2026-10-02 ラフ） */
+
+/* 🔴 街だけ立体にして中が白い板のままだと、**施設に入った感じがしない**。
+      入った先が「別のページ」ではなく「建物の中」に見えて、はじめて街が意味を持つ。
+   🔑 これは**背景**。読むのは手前のパネルなので、
+      いちばん後ろ（z-index 0）に敷き、操作は一切受けない。 */
+/* 🔴 絵の背景（2026-10-03 D-26）。手続きで描いた背景と**同じ場所・同じ役目**。
+      どちらか一方だけが出る（`main.ts` が出し分ける）。
+   🔑 `pixelated` を付けない。写実寄りの絵は、拡大するとき滑らかに補間したほうがよい。
+      ドット絵（盤・街）とは扱いを分ける。 */
+/* 🔴 デザイン由来の動く背景（D-28）。絵・手続きの背景と**同じ場所・同じ役目**。
+      3つのうち出るのは常に1つだけ（`main.ts` が出し分ける）。 */
+.bg-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.bg-photo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.room-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  /* 🔑 16:9 の絵をそのまま引き伸ばす。フルHD（1920×1080）はちょうど3倍 */
+  object-fit: cover;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+/* 🔑 背景より前に出す。敷いただけだとパネルの下に潜って読めなくなる */
+.screen, .hud { position: relative; z-index: 1; }
+
 /* ============================================ 街ハブ（2026-10-02 オーナー指示） */
 
 /* 🔴 街が常のホーム。施設を選んで入り、戻ってくる。
@@ -1141,6 +1282,9 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 #cityCanvas {
   display: block;
   width: 100%;
+  /* 🔴 **比率は CSS で決め切る。** `height: auto` だけだと canvas の属性を見るので、
+        `bg.ts` が属性を書く → 箱が変わる → また描く、の堂々巡りになる（試合の盤と同じ）。 */
+  aspect-ratio: 16 / 9;
   height: auto;
   border: var(--w-hair) solid var(--edge);
   /* 🔑 ドット絵を滲ませない（盤と同じ） */
@@ -1151,7 +1295,10 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
    位置は `city.ts` の SPOTS から JS が入れる（絵と座標の出どころを1つにする） */
 .spot {
   position: absolute;
-  transform: translate(-50%, -50%);
+  /* 🔴 指した点の**上**に乗せる（2026-10-03 オーナー指摘「建物の上に名前を出して」）。
+        中心合わせ（-50%）だと札が建物にかぶさって、スタジアムもビルも隠れていた。
+        下端を合わせれば、下に出る ▼ がちょうど建物の天辺を指す。 */
+  transform: translate(-50%, -100%);
   display: grid;
   gap: 0;
   padding: calc(var(--px) * 2) calc(var(--px) * 4);
@@ -1183,7 +1330,7 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
 }
 .spot-main .spot-name { font-size: 1.05rem; }
 .spot:hover { filter: brightness(1.08); }
-.spot:active { transform: translate(-50%, calc(-50% + var(--drop))); box-shadow: none; }
+.spot:active { transform: translate(-50%, calc(-100% + var(--drop))); box-shadow: none; }
 .spot:focus-visible { outline: var(--w-frame) solid var(--away); outline-offset: var(--px); }
 /* ▼ で「ここへ入る」を示す */
 .spot::after {
@@ -1218,7 +1365,24 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   background: var(--paper);
   border-bottom: var(--w-frame) solid var(--edge);
 }
-.place-title { margin: 0; font-size: 1.1rem; font-weight: 900; letter-spacing: .08em; }
+/* 🔴 背景が絵になった画面では、地の上に字を置くだけだと**読めない**
+      （2026-10-03 の目視。「サッカー場」が木と観客に紛れた）。
+   🔑 札にして地を持たせる。影や縁取りだけで戦うと、絵が変わるたびに
+      読めたり読めなかったりする＝運になる。 */
+.place-title {
+  margin: 0;
+  padding: calc(var(--px) * 2) calc(var(--px) * 6);
+  font-size: 1.1rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  color: var(--ink-on-dark);
+  background: linear-gradient(var(--ui-lt) 0 45%, var(--ui) 45% 100%);
+  border: var(--w-frame) solid var(--ui-edge);
+  border-radius: calc(var(--px) * 2);
+  box-shadow: inset 0 var(--px) 0 rgba(255, 255, 255, .45),
+              0 var(--drop) 0 rgba(20, 64, 122, .5);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 64, 122, .9);
+}
 /* ◀ を付けて、戻る向きを形でも示す */
 .btn-back { min-height: calc(var(--px) * 18); font-size: .82rem; }
 .btn-back::before { content: "◀"; margin-right: calc(var(--px) * 2); }
@@ -1259,9 +1423,13 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
   :root { --px: 3px; }
   html, body { font-size: 17px; }
 
-  .tab-body { max-width: 1180px; }
+  /* 🔴 本文は画面いっぱいに広げない（2026-10-02 ラフ）。
+        広げると、後ろに描いた施設の中の絵が**1ドットも見えなくなる**。
+        ラフの構図は「部屋の上にパネルが浮いている」なので、
+        左右に部屋が見えるぶんの余白を必ず残す。 */
+  .tab-body { max-width: 1120px; }
   .panel-wide { max-width: 880px; }
-  .place { max-width: 1180px; }
+  .place { max-width: 1120px; }
   /* タイトルは画面の真ん中に1枚だけ置く絵なので、広い画面では堂々と大きくする */
   .boot-box { max-width: 40rem; padding: calc(var(--px) * 20) calc(var(--px) * 16); }
   .logo { font-size: 4.6rem; }
@@ -1282,16 +1450,273 @@ tr.is-me td { color: var(--ink); font-weight: 800; }
    🔑 高さも条件に入れる。960×720 の盤に得点板・実況・操作を足すと約 940px 必要で、
       縦が足りない窓で2倍にすると操作ボタンが画面の外へ出る。
       足りないときは今までどおり幅に合わせて伸ばす（滲まないので実害は小さい）。 */
-@media (min-width: 1200px) and (min-height: 940px) {
-  .pitch-wrap { max-width: max-content; }
-  #pitch { width: 960px; }
-}
+/* 🗑 2026-10-03: 盤を整数倍で止める指定をやめた（D-33）。
+      ドット絵をやめたので、縞のムラを避けるために倍率を縛る理由が無くなった。 */
 
 /* 街も同じ考え方。窓が 1920px 以上あるときだけ **3倍（1920×1080）** まで上げる。
    ここがフルHDちょうど */
 @media (min-width: 1960px) {
   .city-wrap { width: 1920px; }
 }
+
+/* ============================================================ チーム作成
+   🔑 **左で決めて、右で並べる**（2026-10-03 オーナー指示）。
+      左は入力が3つだけなので幅を取らない。右の盤に場所を回す。
+   🔴 狭い窓では**縦に積む**。横に並べたまま縮めると、盤が小さくなりすぎて
+      駒がつまめなくなる（駒は指で触れる大きさが要る）。 */
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: calc(var(--px) * 7);
+  align-items: start;
+  max-width: 68rem;
+  margin: calc(var(--px) * 10) auto;
+}
+@media (max-width: 900px) {
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.setup-left, .setup-right { margin-bottom: 0; }
+/* 盤はこの画面では枠いっぱいまで使う（事務所より広く取れる） */
+.setup-right .board { max-width: none; }
+
+/* ============================================================ 節目の演出
+   キックオフ・ハーフタイム・試合終了。`src/web/ceremony.ts` が中身を作る。
+
+   🔑 **盤を隠しきらない。** 幕を真っ黒にすると、選手が並んでいる本物のキックオフの
+      絵が見えなくなる。うっすら敷いて、文字だけを前に出す。 */
+.ceremony {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 26, 48, .62);
+  cursor: pointer;
+}
+.cm-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--px) * 4);
+  padding: calc(var(--px) * 8) calc(var(--px) * 14);
+  background: var(--panel);
+  border: var(--w-pop) solid var(--ui-edge);
+  box-shadow: calc(var(--px) * 4) calc(var(--px) * 4) 0 rgba(10, 26, 48, .6);
+  text-align: center;
+  animation: cm-in .22s steps(4) both;
+}
+@keyframes cm-in {
+  from { transform: translateY(calc(var(--px) * -8)) scale(.9); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.cm-half {
+  font-size: 1.9rem;
+  font-weight: 900;
+  color: var(--ink-on-dark);
+  background: var(--ui);
+  border: var(--w-frame) solid var(--ui-edge);
+  padding: 0 calc(var(--px) * 8);
+}
+.cm-vs, .cm-score {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--px) * 6);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.cm-side { font-size: 1.15rem; font-weight: 800; color: var(--ink); }
+.cm-side.is-mine { color: var(--home-dark); }
+.cm-vs-mark { font-size: 1.5rem; font-weight: 900; color: var(--ink-dim); }
+.cm-score-num {
+  font-size: 2.6rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  padding: 0 calc(var(--px) * 6);
+  color: var(--ink);
+  background: var(--panel-sunk);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.cm-note { font-size: .86rem; font-weight: 700; color: var(--ink-dim); }
+.cm-ball {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  background: var(--accent-dark);
+  border: var(--w-frame) solid var(--ui-edge);
+  padding: 0 calc(var(--px) * 6);
+}
+
+.cm-scorers { display: flex; flex-direction: column; gap: var(--px); }
+.cm-scorer { display: flex; gap: calc(var(--px) * 4); align-items: baseline; }
+.cm-scorer-time { font-weight: 900; color: var(--ui-dk); font-variant-numeric: tabular-nums; }
+.cm-scorer-name { font-weight: 700; }
+
+.cm-whistle {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--px) * 3);
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--warn);
+  animation: cm-blow .5s steps(3) both;
+}
+/* 笛の印。中心の粒から音が広がる形を**枠だけ**で描く。
+   🔴 絵文字は使わない。笛の絵文字は無く、近いものを置くと鐘に見える */
+.cm-whistle-mark {
+  position: relative;
+  width: calc(var(--px) * 7);
+  height: calc(var(--px) * 7);
+  background: var(--warn);
+  border: var(--px) solid var(--edge);
+  flex: none;
+  /* 🔑 広がる音の線は `::before`/`::after` で**外側へ**出すので、
+        そのぶんの場所をここで空ける。空けないと文字に重なる（2026-10-03 の目視） */
+  margin-right: calc(var(--px) * 12);
+}
+.cm-whistle-mark::before,
+.cm-whistle-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: calc(var(--px) * 4);
+  height: calc(var(--px) * 4);
+  margin-top: calc(var(--px) * -2);
+  margin-left: calc(var(--px) * 2);
+  border-top: var(--px) solid var(--warn);
+  border-right: var(--px) solid var(--warn);
+  transform: rotate(45deg);
+}
+.cm-whistle-mark::after { margin-left: calc(var(--px) * 6); opacity: .55; }
+@keyframes cm-blow {
+  from { transform: scale(.6); opacity: 0; }
+  60%  { transform: scale(1.18); opacity: 1; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.cm-result { font-size: 1.6rem; font-weight: 900; }
+.is-win  .cm-result { color: var(--accent-dark); }
+.is-lose .cm-result { color: var(--danger-dark); }
+.is-draw .cm-result { color: var(--ink-dim); }
+
+/* 笛が鳴った瞬間に幕が引く。始まる気配を出す */
+.cm-box.is-go { animation: cm-go .28s steps(3) both; }
+@keyframes cm-go {
+  from { transform: none; }
+  to   { transform: scale(1.06); opacity: .15; }
+}
+
+/* ============================================================ 配置盤
+   事務所 → 戦術 で、選手をつまんで立ち位置を動かす盤。
+
+   🔑 盤は**ピッチと同じ横長**にする（105:68）。縦にすると、
+      攻める向きが上なのか右なのか分からなくなる。
+   🔑 駒は `left` と `bottom` で置く。`bottom` にしておくと
+      「y が大きい＝上」という規則の層の向きと画面の向きが揃う。 */
+.board {
+  position: relative;
+  width: 100%;
+  /* 🔴 **大きくしすぎない**（2026-10-03 の目視）。画面幅いっぱいにすると縦が 686px になり、
+        一番外の列（y=0.14 と 0.86）が固定ヘッダーと下のコマンド帯の裏に入って、
+        つまめない駒ができる。 */
+  max-width: calc(var(--px) * 210);
+  aspect-ratio: 105 / 68;
+  border: var(--w-frame) solid var(--ui-edge);
+  background: var(--turf);
+  /* 🔴 **駒は盤からはみ出してよい**（2026-10-03 の目視）。ここを `hidden` にしていたので、
+        ゴールライン上に立つ GK の駒が左端で**半分切れていた**。
+        芝と白線だけを `.board-grass` 側で切り、駒は外へ出す。 */
+  touch-action: none;             /* 🔴 これが無いと、指でつまむと画面ごとスクロールする */
+  user-select: none;
+}
+
+.board-grass {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* 芝の縞。盤でも縞を敷くと、駒がどのくらい動いたか目で測れる */
+  background: repeating-linear-gradient(90deg,
+              var(--turf) 0 calc(var(--px) * 16),
+              var(--turf-dark) calc(var(--px) * 16) calc(var(--px) * 32));
+}
+.board-mid, .board-circle, .board-pa, .board-goal { position: absolute; }
+.board-mid { left: 50%; top: 0; bottom: 0; width: var(--w-hair); background: var(--line); }
+.board-circle {
+  left: 50%; top: 50%;
+  width: 17%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: var(--w-hair) solid var(--line);
+  border-radius: 50%;
+}
+.board-pa {
+  top: 21%; height: 58%; width: 16%;
+  border: var(--w-hair) solid var(--line);
+}
+.board-pa-l { left: 0; border-left: 0; }
+.board-pa-r { right: 0; border-right: 0; }
+.board-goal {
+  top: 44.5%; height: 11%; width: calc(var(--px) * 3);
+  background: var(--line);
+}
+.board-goal-l { left: 0; }
+.board-goal-r { right: 0; }
+
+.board-dir {
+  position: absolute;
+  left: 0; right: 0; top: calc(var(--px) * 2);
+  text-align: center;
+  font-size: .72rem;
+  font-weight: 800;
+  color: var(--ink-on-dark);
+  text-shadow: var(--px) var(--px) 0 rgba(20, 40, 25, .8);
+  pointer-events: none;
+}
+
+.board-chip {
+  position: absolute;
+  transform: translate(-50%, 50%);     /* `left`/`bottom` の点が駒の中心 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: calc(var(--px) * 1) calc(var(--px) * 2);
+  min-width: calc(var(--px) * 26);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+  box-shadow: var(--drop) var(--drop) 0 rgba(20, 40, 25, .45);
+  font: inherit;
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+}
+.board-chip:focus-visible { outline: var(--w-frame) solid var(--warn); outline-offset: var(--px); }
+.board-chip.is-held {
+  cursor: grabbing;
+  z-index: 5;
+  box-shadow: calc(var(--drop) * 2) calc(var(--drop) * 2) 0 rgba(20, 40, 25, .5);
+}
+.board-face {
+  display: block;
+  image-rendering: pixelated;
+  /* 🔑 顔は盤の上で**形で探す**ための目印。読む前に見つかるのが狙い */
+  margin-bottom: var(--px);
+}
+.board-tag { display: flex; align-items: center; gap: var(--px); }
+.board-pos {
+  font-size: .62rem; font-weight: 900; line-height: 1.2;
+  padding: 0 calc(var(--px) * 2);
+  color: var(--ink-on-dark);
+  background: var(--ui);
+}
+.board-name {
+  font-size: .68rem; font-weight: 800; line-height: 1.3;
+  white-space: nowrap;
+}
+.bd-gk .board-pos { background: var(--gk); }
+.bd-df .board-pos { background: var(--ui-dk); }
+.bd-mf .board-pos { background: var(--accent-dark); }
+.bd-fw .board-pos { background: var(--home-dark); }
 
 /* 🔴 動きを減らす設定の人には、刻んだ動きも出さない（点滅と跳ねは特につらい） */
 @media (prefers-reduced-motion: reduce) {

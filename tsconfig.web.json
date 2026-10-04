@@ -21,5 +21,13 @@
     "declaration": false
   },
   "include": [],
-  "files": ["src/web/main.ts"]
+  // 🔑 入口は4つ。`main.ts` がゲーム本体で、残りは**パーツの確認台**。
+  //    確認台はゲーム本体からたどれない＝本体の動きに影響しない。
+  //      lab.ts     … 選手（ブロック3D）
+  //      pitch3d.ts … ピッチ・スタジアム・ボール
+  //      faces.ts   … 顔（髪20×顔10×色5）
+  //    🔴 ここに足し忘れると `web/face.js が足りない` で組み立てが止まる。
+  //       入口から辿れないファイルは出ないため。
+  "files": ["src/web/main.ts", "src/web/lab.ts", "src/web/pitch3d.ts",
+            "src/web/faces.ts", "src/web/bgcheck.ts"]
 }

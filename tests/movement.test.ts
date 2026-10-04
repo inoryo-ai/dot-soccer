@@ -33,7 +33,7 @@ import { describe, test } from "node:test";
 import * as C from "../src/sim/constants.ts";
 import { cos, PI, sin, TAU } from "../src/sim/detmath.ts";
 import { Match, play } from "../src/sim/engine.ts";
-import type { Replay, RosterEntry } from "../src/sim/engine.ts";
+import type { Actor, Replay, RosterEntry } from "../src/sim/engine.ts";
 import { buildPreset } from "../src/sim/presets.ts";
 import { fmtF, hypot, mean, pyMod } from "../src/sim/pymath.ts";
 
@@ -227,21 +227,52 @@ describe("考える仕組みそのものが生きている", () => {
     for (const intent of used) assert.ok(intent in C.EFFORT, `${intent} の本気度が決まっていない`);
   });
 
-  test("攻撃時の意思が何種類も出る（1種類しか出ないなら、選んでいるとは言えない）", () => {
-    // 🔑 このテストだけ試合の状態を書き換えるので、使い回しの試合とは別に作る
+  /**
+   * 試合の途中の盤面を作り、ホームが持っている状態にする。
+   * 🔑 `ballX` でボールの位置（＝局面）だけを変える。選手の位置はそのまま。
+   */
+  const attackingBoard = (ballX: number): Match => {
     const m = new Match(buildPreset("バランス型"), buildPreset("パス型"), 3, false);
     m.run();
-    const seen = new Set<string>();
-    m.tick = 0;
-    const ts = m.teams[0];
+    const holder = m.actors[0]!.find((a) => a.pos === "MF")!;
+    holder.x = ballX;
+    holder.y = C.PITCH_Y / 2;
+    m.owner = holder;
+    m.ball_x = ballX;
+    m.ball_y = C.PITCH_Y / 2;
+    m.teams[0].direction = 1;
+    m.teams[1].direction = -1;
+    return m;
+  };
+  const intentsAt = (ballX: number): Map<Actor, string> => {
+    const m = attackingBoard(ballX);
+    const oppDeep: number = (m as any).lastDefenderX(m.teams[1]);
+    const out = new Map<Actor, string>();
     for (const a of m.actors[0]!) {
-      if (a.pos === "GK") continue;
-      for (let i = 0; i < 60; i++) {
-        (m as any).decideAttack(ts, a, 40.0);
-        seen.add(a.intent);
-      }
+      if (a.pos === "GK" || a === m.owner) continue;
+      (m as any).decideAttack(m.teams[0], a, oppDeep);
+      out.set(a, a.intent);
     }
+    return out;
+  };
+
+  test("攻撃時の意思が何種類も出る（1種類しか出ないなら、選んでいるとは言えない）", () => {
+    const seen = new Set<string>();
+    for (const x of [30.0, 55.0, 80.0, 92.0]) for (const intent of intentsAt(x).values()) seen.add(intent);
     assert.ok(seen.size >= 3, `攻撃時の意思が ${JSON.stringify([...seen])} しか出ない`);
+  });
+
+  test("🔴 同じ選手でも、局面（ボールの位置）で選ぶ意思が変わる（D-41: くじではなく局面で選ぶ）", () => {
+    // 🔑 くじの頃は、自陣で持っていても敵陣で持っていても同じ割合で裏へ走っていた
+    const own = [...intentsAt(30.0).values()];
+    const opp = [...intentsAt(85.0).values()];
+    const changed = own.filter((intent, i) => intent !== opp[i]).length;
+    assert.ok(changed >= 2, `ボールを敵陣へ運んでも意思が変わった選手が ${changed}人だけ: ${own} → ${opp}`);
+  });
+
+  test("🔴 同じ局面なら同じ意思を選ぶ（くじを引かない・ガンビットが「指示」になる土台）", () => {
+    const first = [...intentsAt(70.0).values()];
+    for (let i = 0; i < 5; i++) assert.deepEqual([...intentsAt(70.0).values()], first);
   });
 });
 

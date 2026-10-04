@@ -12,11 +12,13 @@
 import { ValueError } from "./errors.ts";
 import * as C from "./constants.ts";
 import { atan2, cos, exp, PI, sin, TAU } from "./detmath.ts";
-import { ATTITUDES, FORMATIONS } from "./model.ts";
+import { ATTITUDES, effectiveSlots } from "./model.ts";
 import type { Player, Position, Slot, Team } from "./model.ts";
 import { PyRandom } from "./pyrandom.ts";
 import { cmpStr, fmtF, hypot, pyMod, pyRound, pyRoundN } from "./pymath.ts";
 import { findIssues } from "./training.ts";
+import { Score, chooseBest } from "./utility.ts";
+import type { Choice } from "./utility.ts";
 
 export class Actor {
   player: Player;
@@ -82,6 +84,15 @@ export class Actor {
                     + (1.0 - C.STAMINA_SKILL_FLOOR) * this.staminaRatio);
   }
 }
+
+/** ボールを持った人の行動（D-41）。何をするかと、実行に要る値だけを持つ。 */
+export interface PassAction {
+  kind: "PASS";
+  mate: Actor;
+  p: number;          // 通る確率（採点に使ったものをそのまま実行に使う）
+  offside: boolean;   // 受け手がオフサイドの位置にいる
+}
+export type OnBall = { kind: "SHOOT" } | PassAction | { kind: "DRIBBLE" };
 
 export interface MatchStats {
   goals: number;
@@ -208,6 +219,21 @@ function minBy<T>(items: Iterable<T>, value: (t: T) => number, name: (t: T) => s
   return best;
 }
 
+/**
+ * その半分を蹴り始めるチーム（0=ホーム / 1=アウェー）。
+ *
+ * 🔴 **競技規則どおり、前半と後半は違うチームが蹴る。** 後半はエンドも入れ替わる。
+ *    本物ではコイントスの勝者が「どちらのゴールを攻めるか」か「キックオフするか」を選ぶが、
+ *    このゲームでは**ホーム／アウェーで決める**（2026-10-03 オーナー判断）。
+ *    運で決まる要素を増やさないほうが、同じシードで同じ試合になる筋が通る（D-16）。
+ *
+ * 🔑 ここが唯一の定義。試合も試合画面の演出もこれを読む。
+ *    画面側で「前半はホーム」と書き足すと、片方を直したときにもう片方が嘘になる。
+ */
+export function kickoffTeamOfHalf(half: 1 | 2): 0 | 1 {
+  return half === 1 ? 0 : 1;
+}
+
 export class Match {
   readonly rng: PyRandom;
   readonly seed: number;
@@ -237,6 +263,12 @@ export class Match {
    *    またそろって動くので、気づくまでの遅れ（lag）を一人ずつ変える。
    */
   epoch = 0;
+  /**
+   * ボールを持った人が何を選んだかの回数（SHOOT / PASS / DRIBBLE）。
+   * 🔑 結果（`MatchResult`）には載せない。検査と測定が覗くためだけにある。
+   *    数えるだけで乱数は引かないので、試合の結果は変わらない。
+   */
+  readonly onBallCounts = new Map<string, number>();
 
   /**
    * `record=true` のとき、画面で再生するための選手の位置を残す。
@@ -256,7 +288,9 @@ export class Match {
       new TeamState(teamB, 1, -1, baseAttitude(teamB)),
     ];
     for (const ts of this.teams) {
-      const formation = FORMATIONS[ts.team.tactics.formation]!;
+      /* 🔑 立ち位置の上書き（事務所でドラッグして動かしたもの）はここで効く。
+            `effectiveSlots` が唯一の計算。画面も同じものを呼ぶ */
+      const formation = effectiveSlots(ts.team.tactics);
       const slots = Match.assignSlots(ts.team.players, formation);
       this.actors.push(slots.map(([p, base]) => new Actor(p, ts.idx, base)));
     }
@@ -423,12 +457,13 @@ export class Match {
 
   // ------------------------------------------------------------- 実行
   run(): MatchResult {
-    this.resetPositions(0);
+    this.resetPositions(kickoffTeamOfHalf(1));
     this.evaluatePolicies();
     for (this.tick = 0; this.tick < C.TICKS_PER_MATCH; this.tick++) {
       if (this.tick === C.TICKS_PER_HALF) {
+        /* 🔑 競技規則どおり、後半は**エンドを入れ替えて、前半と違うチームが**蹴る */
         for (const ts of this.teams) ts.direction *= -1;
-        this.resetPositions(1);
+        this.resetPositions(kickoffTeamOfHalf(2));
       }
       if (this.tick % C.POLICY_CHECK_INTERVAL === 0) {
         this.evaluatePolicies();
@@ -736,141 +771,213 @@ export class Match {
   }
 
   /**
-   * 重みつきで1つ選ぶ。
-   *
-   * 🔑 **ここが「考えている」の正体。** 同じ選手でも毎回同じ選択にはならず、
-   *    隠しパラメーターは「その選択をしやすさ」として効く。
-   *    重みを混ぜて1本の式にすると、また11人そろった平均の動きに戻る。
-   *
-   * 🔴 乱数は `this.rng`（D-08）。引く回数と順番が変わると、
-   *    同じシードでも違う試合になる。
+   * その場所がどれだけ空いているか（1＝誰もいない。相手が増えるほど下がる）。
+   * 🔑 走り込む先・顔を出す先の採点に使う。混んでいる場所へ走っても受けられない。
    */
-  private pick(choices: [string, number][]): string {
-    let total = 0;
-    for (const [, w] of choices) total += w;   // Python 3.11 の sum() と同じ順で足す
-    if (total <= 0) return choices[0]![0];
-    let roll = this.rng.random() * total;
-    for (const [name, w] of choices) {
-      roll -= w;
-      if (roll <= 0) return name;
-    }
-    return choices[choices.length - 1]![0];
+  private space(oppIdx: number, x: number, y: number): number {
+    const crowd = this.countWithin(oppIdx, x, y, C.SUPPORT_OPEN_RADIUS_M);
+    return 1.0 / (1.0 + C.OFFBALL_CROWD_PENALTY * crowd);
   }
 
-  /** 味方がボールを持っているときに何をするか。 */
+  /**
+   * 隠しパラメーターを「その意思の選びやすさ」の倍率にする（0〜100 → 床〜床+1）。
+   *
+   * 🔑 床が無いと、特訓していない選手（10）は何をしても持ち場から動かない。
+   *    くじの頃は 10 対 35 で2割は動いていた（D-12「一人一人考えて動く」）。
+   */
+  private static tendency(hidden: number): number {
+    return C.OFFBALL_TENDENCY_FLOOR + Math.max(0, hidden) / 100.0;
+  }
+
+  /**
+   * 疲れているほど、走る意思を選びにくくする（体力の配分・D-41）。
+   *
+   * 🔴 これが無いと、体力の少ない選手も前半から全力で走り続けて15分で空になり、
+   *    残りの75分を「止まった選手」で過ごす。実測で、体力100の走力型の相手は
+   *    0〜15分にしか点を取れず、走力型の勝率が 87% になった（2026-10-04）。
+   *    実際の選手は体力を配分する。D-35 の文法の5軸目「体力」の土台でもある。
+   */
+  private static fatigue(a: Actor): number {
+    return C.FATIGUE_INTENT_FLOOR + (1.0 - C.FATIGUE_INTENT_FLOOR) * a.staminaRatio;
+  }
+
+  /**
+   * 味方がボールを持っているときに何をするか（効用・D-41）。
+   *
+   * 🔑 候補ごとに「そこへ行ったら、どれだけ点に近い場所で受けられるか」を採点し、
+   *    選手の隠しパラメーター（選びやすさ）をかけて、最大を選ぶ。
+   *    同じ選手でも、味方が敵陣深くまで運べば走り込み、自陣なら持ち場を保つ
+   *    ＝**局面で選ぶものが変わる**。くじの頃は局面に関係なく同じ割合だった。
+   *
+   * 🔴 並びの先頭は KEEP_SHAPE。同点なら持ち場を保つ（素のAIは堅実止まり・D-35）。
+   * 🔴 乱数は「横のばらけ」と「見回し始める向き」の2回だけ、**毎回必ず**引く。
+   *    選んだ意思で引く回数が変わると、同じシードでも違う試合になる（D-08）。
+   */
   private decideAttack(ts: TeamState, a: Actor, oppDeep: number): void {
     const p = a.player;
     const d = ts.direction;
     const fw = a.fwd_weight;
+    const oppIdx = 1 - ts.idx;
+    const gx = ts.targetGoalX();
     const [seatX, seatY] = this.seat(ts, a, true);
-
-    // 重み＝隠しパラメーター × その位置の前へ出やすさ。
-    // KEEP_SHAPE の下駄が無いと、DFまで全員が上がって守備が消える
     // 🔑 ボールが見えていない選手は、受けにも上がりにも行けない。
     //    見えていないのに反応すると「全員が同じものに反応する」に逆戻りする
     const seesBall = this.sees(a, this.ball_x, this.ball_y);
-    const react = seesBall ? 1.0 : 0.25;
-    a.intent = this.pick([
-      ["RUN_BEHIND", p.run_space * fw * react],
-      ["OVERLAP", p.overlap * fw],
-      ["HOLD_BOX", p.goal_wait * fw],
-      ["SUPPORT", p.support * a.sup_weight * react],
-      // 見えていないときは持ち場を保つ側へ倒れる
-      ["KEEP_SHAPE", seesBall ? 35.0 : 90.0],
-    ]);
+    const react = seesBall ? 1.0 : C.OFFBALL_BLIND_REACT;
     const lane = this.rng.uniform(-C.RUN_LANE_JITTER_M, C.RUN_LANE_JITTER_M);
-    a.mark = null;
+    const start = this.rng.uniform(0.0, TAU);
 
-    if (a.intent === "RUN_BEHIND") {
-      // オフサイドにならない位置まで。ここを「ラインの向こう側」にすると
-      // 裏抜け型が毎試合6点取る壊れた強さになる
-      a.aim_x = oppDeep - d * C.ONSIDE_MARGIN_M;
-      a.aim_y = seatY + lane;
-    } else if (a.intent === "OVERLAP") {
-      a.aim_x = seatX + d * (p.overlap / 100.0) * C.OVERLAP_PUSH_M * fw;
-      a.aim_y = seatY + lane * 0.5;
-    } else if (a.intent === "HOLD_BOX") {
-      a.aim_x = ts.targetGoalX() - d * 9.0;
-      a.aim_y = C.PITCH_Y / 2 + lane;
-    } else if (a.intent === "SUPPORT") {
-      // 🔑 保持者の足元ではなく**少し離れて受ける**。重なると味方同士で潰し合う。
-      //
-      // 🔴 **でたらめな方向へ出ない。** 以前は角度を乱数で1つ選ぶだけだったので、
-      //    相手の中へ顔を出したり、後ろへ下がったりしていた。
-      //    保持型（support を伸ばした型）が保持しても点に結びつかない原因
-      //    （2026-10-01 実測: 得点が6チーム最少・全体勝率 27%）。
-      //    いくつか候補を見て、**空いていて前寄り**のところへ動く。
-      let bestX = a.aim_x;
-      let bestY = a.aim_y;
-      let bestOpen = -1e9;
-      const start = this.rng.uniform(0.0, TAU);
-      for (let stepI = 0; stepI < C.SUPPORT_LOOK_AROUND; stepI++) {
-        const ang = start + stepI * TAU / C.SUPPORT_LOOK_AROUND;
-        const cx = this.ball_x + cos(ang) * C.SUPPORT_ANGLE_OFFSET_M;
-        const cy = this.ball_y + sin(ang) * C.SUPPORT_ANGLE_OFFSET_M;
-        if (!(cx > 0.5 && cx < C.PITCH_X - 0.5 && cy > 0.5 && cy < C.PITCH_Y - 0.5)) continue;
-        const crowd = this.countWithin(1 - ts.idx, cx, cy, C.SUPPORT_OPEN_RADIUS_M);
-        const forward = (cx - this.ball_x) * d;
-        const openScore = -crowd * C.SUPPORT_CROWD_PENALTY + forward * C.SUPPORT_FORWARD_BIAS;
-        if (openScore > bestOpen) {
-          bestX = cx;
-          bestY = cy;
-          bestOpen = openScore;
-        }
-      }
-      a.aim_x = bestX;
-      a.aim_y = bestY;
-    } else {
-      // KEEP_SHAPE。持ち場に立ち尽くすのではなく、play に合わせて動き直す
-      const pull = a.player.holdTrack * (seesBall ? 1.0 : 0.3);
-      a.aim_x = seatX + (this.ball_x - seatX) * pull;
-      a.aim_y = seatY + (this.ball_y - seatY) * pull;
-    }
-    [a.aim_x, a.aim_y] = this.withinRoam(ts, a, a.aim_x, a.aim_y);
+    // ---- 候補ごとの行き先（選んだ後で行き先を探し直さない）
+    // KEEP_SHAPE は持ち場に立ち尽くすのではなく、play に合わせて動き直す
+    const keepPull = p.holdTrack * (seesBall ? 1.0 : 0.3);
+    const keep: [number, number] = [seatX + (this.ball_x - seatX) * keepPull,
+                                    seatY + (this.ball_y - seatY) * keepPull];
+    // オフサイドにならない位置まで。ここを「ラインの向こう側」にすると
+    // 裏抜け型が毎試合6点取る壊れた強さになる
+    const behind: [number, number] = [oppDeep - d * C.ONSIDE_MARGIN_M, seatY + lane];
+    // 🔑 裏へ走る価値は**立つ場所ではなく、その先で受ける場所**で測る。
+    //    立つ場所（オンサイドぎりぎり）で測ると、相手のラインが高いほど価値が下がり、
+    //    裏へ走る理由が一番ある局面で走らなくなる（実測 RUN_BEHIND 0.3%）
+    const behindRecv: [number, number] = [oppDeep + d * C.RUN_BEHIND_LEAD_M, seatY + lane];
+    const overlap: [number, number] = [seatX + d * (p.overlap / 100.0) * C.OVERLAP_PUSH_M * fw,
+                                       seatY + lane * 0.5];
+    const box: [number, number] = [gx - d * 9.0, C.PITCH_Y / 2 + lane];
+    const support = this.supportSpot(ts, a, start);
+
+    /**
+     * 行き先の価値＝そこで受けたときの見込み × 空き × ボールが届くか。
+     * 🔴 「届くか」が無いと、ゴール前が常に一番高いので**全員が箱へ集まる**
+     *    （実測: 攻撃時の意思の 44.5% が HOLD_BOX、0〜6m から1試合25本）。
+     */
+    const worth = (label: string, [x, y]: [number, number]): Score =>
+      new Score(label, this.threat(gx, x, y))
+        .times("空き", this.space(oppIdx, x, y))
+        .times("届くか", exp(-C.OFFBALL_REACH_DECAY * hypot(x - this.ball_x, y - this.ball_y)));
+
+    const choices: Choice<[string, [number, number]]>[] = [
+      { action: ["KEEP_SHAPE", keep],
+        // 🔑 持ち場を保つ価値は場所によらない一定値。見えていないときは保つ側へ倒れる
+        score: new Score("隊形を保つ", C.KEEP_SHAPE_VALUE)
+          .times("ボールが見えていない", seesBall ? 1.0 : C.KEEP_SHAPE_BLIND_BONUS) },
+      { action: ["SUPPORT", support],
+        score: worth("顔を出す先", support)
+          .plus("保持者が囲まれている", C.SUPPORT_RESCUE_VALUE * this.holderPressure(ts))
+          .times("support", Match.tendency(p.support) * a.sup_weight * react)
+          .times("体力", Match.fatigue(a)) },
+      { action: ["RUN_BEHIND", behind],
+        score: worth("裏で受ける価値", behindRecv)
+          .times("run_space", Match.tendency(p.run_space) * fw * react)
+          .times("体力", Match.fatigue(a)) },
+      { action: ["OVERLAP", overlap],
+        score: worth("上がった先", overlap).times("overlap", Match.tendency(p.overlap) * fw)
+          .times("体力", Match.fatigue(a)) },
+      { action: ["HOLD_BOX", box],
+        score: worth("ゴール前", box).times("goal_wait", Match.tendency(p.goal_wait) * fw) },
+    ];
+    const [intent, [tx, ty]] = chooseBest(choices).action;
+    a.intent = intent;
+    a.mark = null;
+    [a.aim_x, a.aim_y] = this.withinRoam(ts, a, tx, ty);
   }
 
-  /** 相手がボールを持っているときに何をするか。 */
+  /** 保持者の周り（`PRESSURE_RADIUS_M`）に寄せている相手の数。味方が持っていなければ 0。 */
+  private holderPressure(ts: TeamState): number {
+    const owner = this.owner;
+    if (owner === null || owner.team_idx !== ts.idx) return 0;
+    return this.countWithin(1 - ts.idx, owner.x, owner.y, C.PRESSURE_RADIUS_M);
+  }
+
+  /**
+   * 受けに顔を出す場所。
+   *
+   * 🔑 保持者の足元ではなく**少し離れて受ける**。重なると味方同士で潰し合う。
+   * 🔴 **でたらめな方向へ出ない。** いくつか候補を見て、**空いていて前寄り**のところへ。
+   *    角度を乱数で1つ選ぶだけだった頃は、相手の中へ顔を出したり後ろへ下がったりして、
+   *    保持型が保持しても点に結びつかなかった（2026-10-01 実測: 全体勝率 27%）。
+   */
+  private supportSpot(ts: TeamState, a: Actor, start: number): [number, number] {
+    let bestX = a.aim_x;
+    let bestY = a.aim_y;
+    let bestOpen = -1e9;
+    for (let stepI = 0; stepI < C.SUPPORT_LOOK_AROUND; stepI++) {
+      const ang = start + stepI * TAU / C.SUPPORT_LOOK_AROUND;
+      const cx = this.ball_x + cos(ang) * C.SUPPORT_ANGLE_OFFSET_M;
+      const cy = this.ball_y + sin(ang) * C.SUPPORT_ANGLE_OFFSET_M;
+      if (!(cx > 0.5 && cx < C.PITCH_X - 0.5 && cy > 0.5 && cy < C.PITCH_Y - 0.5)) continue;
+      const crowd = this.countWithin(1 - ts.idx, cx, cy, C.SUPPORT_OPEN_RADIUS_M);
+      const forward = (cx - this.ball_x) * ts.direction;
+      const openScore = -crowd * C.SUPPORT_CROWD_PENALTY + forward * C.SUPPORT_FORWARD_BIAS;
+      if (openScore > bestOpen) {
+        bestX = cx;
+        bestY = cy;
+        bestOpen = openScore;
+      }
+    }
+    return [bestX, bestY];
+  }
+
+  /**
+   * 相手がボールを持っているときに何をするか（効用・D-41）。
+   *
+   * 🔑 守る側の物差しは「**そこを放っておいたら、相手がどれだけ点に近づくか**」
+   *    （相手から見た `threat`）。ボールが自ゴールに近いほどカバーに出る価値が上がり、
+   *    危ない場所にいる相手ほど捕まえる価値が上がる。
+   * 🔴 並びの先頭は HOLD_ZONE。同点なら持ち場を守る（素のAIは堅実止まり・D-35）。
+   * 🔴 ここでは乱数を引かない。
+   */
   private decideDefend(ts: TeamState, a: Actor): void {
     const p = a.player;
     const press = Math.max(0, Math.min(100, p.press + ts.press_delta));
     const [seatX, seatY] = this.seat(ts, a, false);
+    const ownGx = ts.ownGoalX();
     const distToBall = hypot(this.ball_x - a.x, this.ball_y - a.y);
     const reach = 4.0 + (press / 100.0) * C.PRESS_RANGE_M;
-
     const seesBall = this.sees(a, this.ball_x, this.ball_y);
 
-    a.intent = this.pick([
+    const choices: Choice<string>[] = [
+      // zone_man が負＝持ち場を守る側に倒れる
+      { action: "HOLD_ZONE",
+        score: new Score("持ち場を守る", C.HOLD_ZONE_VALUE)
+          .times("zone（zone_man が負）", 1.0 + Math.max(0, -p.zone_man) / 100.0) },
+    ];
+    if (seesBall) {
       // 近いほど、press が高いほどカバーに出る。見えていなければ出ない
-      ["COVER", press * (distToBall <= reach ? 1.0 : 0.25) * (seesBall ? 1.0 : 0.0)],
-      // zone_man が正＝人を捕まえる。負＝持ち場を守る
-      ["MARK", Math.max(0, p.zone_man)],
-      ["HOLD_ZONE", 40.0 + Math.max(0, -p.zone_man)],
-    ]);
-
-    if (a.intent === "MARK") {
-      // 🔴 **捕まえる相手を1人決めて持ち続ける。** 毎ティック最も近い相手を
-      //    選び直すと、相手が動くたびに全員のマークが一斉に乗り換わる。
-      //
-      // 🔴 **届く範囲は zone_man ではなくカバー範囲で決める**（2026-09-30 修正）。
-      //    前は `MARK_RANGE_M * zone_man / 100` だったので、マンツーマン特訓を
-      //    3回積んだ zone_man=12 の選手は **3.1m 以内にしかマークできず**、
-      //    実測でマンツーマンが1秒も発生していなかった（MARK 0.0%）。
-      //    「人を見るか」は zone_man、「どこまで付いていくか」はカバー範囲。
-      //    混ぜていたのが原因。
-      a.mark = this.nearestOpponent(ts.idx, a, Math.min(a.player.roamM, C.MARK_MAX_M));
-      if (a.mark === null || !this.sees(a, a.mark.x, a.mark.y)) {
-        a.intent = "HOLD_ZONE";
-        a.mark = null;
-      }
-    } else {
-      a.mark = null;
+      choices.push({
+        action: "COVER",
+        score: new Score("ボールの危なさ", this.threat(ownGx, this.ball_x, this.ball_y))
+          .times("届く距離", distToBall <= reach ? 1.0 : C.COVER_FAR_RATIO)
+          .times("press", Match.tendency(press))
+          .times("体力", Match.fatigue(a)),
+      });
     }
+    // 🔴 **捕まえる相手を1人決めて持ち続ける。** 毎ティック最も近い相手を
+    //    選び直すと、相手が動くたびに全員のマークが一斉に乗り換わる。
+    // 🔴 **届く範囲は zone_man ではなくカバー範囲で決める**（2026-09-30 修正）。
+    //    zone_man で決めていた頃は、マンツーマン特訓を3回積んでも 3.1m 以内にしか
+    //    マークできず、実測でマンツーマンが1秒も発生していなかった（MARK 0.0%）。
+    //    「人を見るか」は zone_man、「どこまで付いていくか」はカバー範囲。
+    // 🔴 **不採用**: 「ゾーンの選手（zone_man が0以下）もゴール前では人を掴む」を試したが、
+    //    マークは1.6%しか発生せず得点は 2.01 → 2.03 で下がらず、相手が走って先に疲れるぶん
+    //    走力型の勝率だけが 57% → 72% に上がった（2026-10-04・各組6試合）。人を見るのは zone_man が正の選手だけ
+    const target = p.zone_man > 0
+      ? this.nearestOpponent(ts.idx, a, Math.min(p.roamM, C.MARK_MAX_M))
+      : null;
+    if (target !== null && this.sees(a, target.x, target.y)) {
+      choices.push({
+        action: "MARK",
+        score: new Score("その相手の危なさ", this.threat(ownGx, target.x, target.y))
+          .times("zone_man", Match.tendency(p.zone_man))
+          .times("体力", Match.fatigue(a)),
+      });
+    }
+
+    a.intent = chooseBest(choices).action;
+    a.mark = a.intent === "MARK" ? target : null;
 
     if (a.intent === "COVER") {
       // ボールと自ゴールを結ぶ線の上に立つ（抜かれても後ろに残る）。
       // 🔑 同じ一点へ何人も向かうとそこで塊になるので、
       //    自分の持ち場の側へずらして網を横に広げる
-      const ownGx = ts.ownGoalX();
       const vx = ownGx - this.ball_x;
       const vy = C.PITCH_Y / 2 - this.ball_y;
       const vlen = hypot(vx, vy) || 1.0;
@@ -1036,11 +1143,111 @@ export class Match {
       return;
     }
 
-    if (this.tryShoot(holder, ts)) return;
-    const nPress = this.countWithin(1 - ts.idx, holder.x, holder.y, C.PRESSURE_RADIUS_M);
-    const urge = C.PASS_URGE_BASE + C.PASS_URGE_PER_PRESSER * nPress;
-    if (this.rng.random() < urge && this.tryPass(holder, ts)) return;
-    this.dribble(holder, ts);
+    const choice = chooseBest(this.onBallChoices(holder, ts));
+    const kind = choice.action.kind;
+    this.onBallCounts.set(kind, (this.onBallCounts.get(kind) ?? 0) + 1);
+    if (choice.action.kind === "SHOOT") this.shoot(holder, ts);
+    else if (choice.action.kind === "PASS") this.pass(holder, ts, choice.action);
+    else this.dribble(holder, ts);
+  }
+
+  // ------------------------------------------------- ボールを持った人の判断（D-41）
+
+  /**
+   * そこでボールを持っていることの価値＝**そこから点になる見込み**（得点の単位）。
+   *
+   * 🔑 これが「同じ物差し」。撃つ・出す・運ぶを、どれも
+   *    「やった後にどれだけ点に近づくか」で比べる。撃つなら入る確率そのもの、
+   *    出すなら受け手の位置の価値、運ぶなら運んだ先の価値。
+   *    失ったときは**相手側から見た同じ値**を引く（自陣で失うほど高くつく）。
+   */
+  private threat(goalX: number, x: number, y: number): number {
+    return C.THREAT_PEAK * exp(-C.THREAT_DECAY * hypot(goalX - x, C.PITCH_Y / 2 - y));
+  }
+
+  /**
+   * ボールを持った人の候補を並べる。並びは「撃つ → 味方の順に出す → 運ぶ」。
+   *
+   * 🔴 同点なら**先に並んだもの**が勝つ（`chooseBest`）。撃てるなら撃つ側に倒す。
+   * 🔴 ここでは乱数を引かない。候補の採点は盤面だけで決まる（引く回数が判断で
+   *    変わると、同じシードでも違う試合になる・D-08）。
+   */
+  private onBallChoices(holder: Actor, ts: TeamState): Choice<OnBall>[] {
+    const opp = this.teams[1 - ts.idx]!;
+    const gx = ts.targetGoalX();
+    const oppGx = opp.targetGoalX();
+    const choices: Choice<OnBall>[] = [];
+
+    // ---- 撃つ
+    const shotDist = hypot(gx - holder.x, C.PITCH_Y / 2 - holder.y);
+    if (shotDist <= C.SHOOT_RANGE_M) {
+      const xg = this.expectedGoal(holder, ts, shotDist);
+      choices.push({
+        action: { kind: "SHOOT" },
+        score: new Score("入る確率", xg)
+          // 🔑 ストライカーは同じ見込みでも撃ちたがる（隠しパラメーターは「選びやすさ」）
+          .times("撃ちたがり（goal_wait）",
+                 1.0 + C.SHOOT_GOAL_WAIT_BIAS * holder.player.goal_wait / 100.0),
+      });
+    }
+
+    // ---- 味方へ出す
+    const oppLast = this.lastDefenderX(opp);
+    for (const mate of this.actors[ts.idx]!) {
+      if (mate === holder) continue;
+      const dist = hypot(mate.x - holder.x, mate.y - holder.y);
+      if (dist < 3.0 || dist > C.PASS_MAX_M) continue;
+      const crowd = this.laneCrowd(holder, mate, opp.idx);
+      let p = (C.PASS_BASE
+               + C.PASS_TECHNIQUE_WEIGHT * (holder.eff(holder.player.technique) - 50) / 100.0
+               - C.PASS_DISTANCE_PENALTY * dist
+               - C.PASS_CROWD_PENALTY * crowd);
+      p = Math.max(0.05, Math.min(0.98, p));
+      // 🔴 **囲まれている味方の価値をしっかり下げる。** 受けた瞬間に奪われるので、
+      //    下げないと「わざと渡している」ように見える（D-14）
+      const near = this.countWithin(opp.idx, mate.x, mate.y, 6.0);
+      // 🔑 技術が高い受け手は、寄せられていても収められる
+      const relief = 1.0 - C.PASS_MARK_TECHNIQUE_RELIEF * (mate.eff(mate.player.technique) / 100.0);
+      const openness = 1.0 / (1.0 + C.PASS_MARK_PENALTY * near * relief);
+      const offside = Match.isOffside(mate, ts.direction, oppLast);
+      const score = new Score("受け手の位置の価値", this.threat(gx, mate.x, mate.y))
+        .times("受け手の空き", openness)
+        .times("通る確率", p)
+        .plus("奪われたら相手の好機",
+              -(1.0 - p) * this.threat(oppGx, (holder.x + mate.x) / 2, (holder.y + mate.y) / 2));
+      if (offside) {
+        // 🔑 1秒刻みなので、裏の選手は「並んでいた」かもしれない。出すと一定の割合で笛が鳴る。
+        // 🔴 出し手には線が見えているので、**笛の割合より強く**避ける（OFFSIDE_PASS_APPEAL）。
+        //    笛の割合（0.5）だけで割り引いたら「半分は通る裏へのパス」が魅力的すぎて、
+        //    オフサイドが1チーム1試合 11.3 → 18.6 回に増えた（現実は2回前後・2026-10-04）
+        score.times("オフサイドの位置", C.OFFSIDE_PASS_APPEAL);
+      }
+      const forward = (mate.x - holder.x) * ts.direction;
+      if (ts.through_balls && forward > 8.0 && score.value > 0) {
+        score.times("チーム方針: 裏へのパス", 1.0 + C.THROUGH_BALL_BONUS);
+      }
+      choices.push({ action: { kind: "PASS", mate, p, offside }, score });
+    }
+
+    // ---- 運ぶ（前に相手がいれば抜きにかかる）
+    const [nx, ny] = this.dribbleTarget(holder, ts);
+    const defender = this.nearestOpponent(ts.idx, holder, 8.0);
+    const pBeat = defender === null ? 1.0 : this.dribbleChance(holder, defender);
+    // 🔴 **目の前の1人だけでなく、その先の道のりも見る。** 1人しか見ないと、
+    //    箱の中の密集へ運ぶのが「抜ける確率 0.8 で得点の目の前」に見えて、
+    //    速い型が毎試合5点・勝率87%になった（2026-10-04 実測・D-41）。
+    //    実際の選手は「前が詰まっていたら運ばない」。
+    const dirLen = hypot(nx - holder.x, ny - holder.y) || 1.0;
+    const lx = holder.x + (nx - holder.x) / dirLen * C.DRIBBLE_LOOKAHEAD_M;
+    const ly = holder.y + (ny - holder.y) / dirLen * C.DRIBBLE_LOOKAHEAD_M;
+    const blockers = this.laneCrowdAt(holder.x, holder.y, lx, ly, opp.idx);
+    const dribble = new Score(defender === null ? "運んだ先の価値" : "抜いた先の価値",
+                              this.threat(gx, nx, ny))
+      .times("抜ける確率", pBeat)
+      .times("前が詰まっている", 1.0 / (1.0 + C.DRIBBLE_PATH_PENALTY * blockers))
+      .plus("奪われたら相手の好機", -(1.0 - pBeat) * this.threat(oppGx, holder.x, holder.y));
+    choices.push({ action: { kind: "DRIBBLE" }, score: dribble });
+    return choices;
   }
 
   /**
@@ -1165,14 +1372,13 @@ export class Match {
     return false;
   }
 
-  private tryShoot(holder: Actor, ts: TeamState): boolean {
+  /** 撃つ。入るかどうかは `expectedGoal` で決まる（撃つと決めたのは `onBallChoices`）。 */
+  private shoot(holder: Actor, ts: TeamState): void {
     const gx = ts.targetGoalX();
     const gy = C.PITCH_Y / 2;
     const dist = hypot(gx - holder.x, gy - holder.y);
-    if (dist > C.SHOOT_RANGE_M) return false;
     const opp = this.teams[1 - ts.idx]!;
     const xg = this.expectedGoal(holder, ts, dist);
-    if (this.rng.random() >= this.shootWill(holder, ts, dist)) return false;
     ts.stats.shots += 1;
     opp.stats.shots_against += 1;
     if (this.rng.random() < xg) {
@@ -1189,23 +1395,6 @@ export class Match {
       }
       this.goalKick(opp);
     }
-    return true;
-  }
-
-  /**
-   * 撃とうとする確率。**入る確率（`expectedGoal`）とは別物。**
-   *
-   * 🔴 ここを期待値に比例させると、期待値の低い遠距離でもそれなりに撃ち、
-   *    シュートだけ増えて決定率が落ちる（実測 2026-10-01）。
-   *    実際の選手は「近い／空いている」で撃ち、入るかどうかは結果。
-   */
-  private shootWill(holder: Actor, ts: TeamState, dist: number): number {
-    const near = this.countWithin(1 - ts.idx, holder.x, holder.y, 4.0);
-    const will = (C.SHOOT_WILL_NEAR
-                  - C.SHOOT_WILL_PER_M * dist
-                  - C.SHOOT_WILL_PRESSURE * near
-                  + C.SHOOT_DECISION_GOAL_WAIT * holder.player.goal_wait);
-    return Math.max(0.0, Math.min(0.97, will));
   }
 
   private expectedGoal(holder: Actor, ts: TeamState, dist: number): number {
@@ -1224,96 +1413,40 @@ export class Match {
     return Math.max(0.005, Math.min(0.85, xg));
   }
 
-  private tryPass(holder: Actor, ts: TeamState): boolean {
-    const d = ts.direction;
+  /** 出す。通るかどうかは候補を採点したときの `p`（`onBallChoices`）。 */
+  private pass(holder: Actor, ts: TeamState, act: PassAction): void {
     const oppIdx = 1 - ts.idx;
-    const oppLast = this.lastDefenderX(this.teams[oppIdx]!);
-    let best: Actor | null = null;
-    let bestScore = 0.0;
-    let bestP = 0.0;
-    let offsideCandidate: Actor | null = null;
-    for (const mate of this.actors[ts.idx]!) {
-      if (mate === holder) continue;
-      const dist = hypot(mate.x - holder.x, mate.y - holder.y);
-      if (dist < 3.0 || dist > C.PASS_MAX_M) continue;
-      if (Match.isOffside(mate, d, oppLast)) {
-        // 出せば反則。走り出しが早すぎた選手は候補から外す
-        if (offsideCandidate === null) offsideCandidate = mate;
-        continue;
-      }
-      const crowd = this.laneCrowd(holder, mate, oppIdx);
-      let p = (C.PASS_BASE
-               + C.PASS_TECHNIQUE_WEIGHT * (holder.eff(holder.player.technique) - 50) / 100.0
-               - C.PASS_DISTANCE_PENALTY * dist
-               - C.PASS_CROWD_PENALTY * crowd);
-      p = Math.max(0.05, Math.min(0.98, p));
-
-      const forward = (mate.x - holder.x) * d;
-      // 🔴 **囲まれている味方の魅力をしっかり下げる。**
-      //    以前は `0.5 + 1/(1+人数)` で、マークされていても free の3分の2あった。
-      //    実測で通ったパスの19.9%が「相手が6m以内にいる味方」向けで、
-      //    受けた瞬間に奪われるので「わざと渡している」ように見えていた
-      const near = this.countWithin(oppIdx, mate.x, mate.y, 6.0);
-      // 🔑 技術が高い受け手は、寄せられていても収められる
-      const relief = 1.0 - C.PASS_MARK_TECHNIQUE_RELIEF * (mate.eff(mate.player.technique) / 100.0);
-      const openness = 1.0 / (1.0 + C.PASS_MARK_PENALTY * near * relief);
-      // 🔑 後ろ向きは「逃げ」として残すが、前向きより明確に魅力を下げる
-      const directionF = forward >= 0
-        ? 1.0 + forward / C.PASS_FORWARD_BONUS_M
-        : C.PASS_BACKWARD_PENALTY;
-      let score = p * directionF * openness;
-      if (ts.through_balls && forward > 8.0) score *= 1.0 + C.THROUGH_BALL_BONUS;
-      if (score > bestScore) {
-        best = mate;
-        bestScore = score;
-        bestP = p;
-      }
-    }
-
-    // 🔴 **出せる相手がいないなら出さない。** 以前はここが無かったので、
-    //    候補が1人でもいれば囲まれた味方へ必ず出していた。
-    // 🔑 ただし追い込まれているときは基準を下げる。下げないと、
-    //    全員をマークしてくる相手に対して必ず運ぶことになり、潰される
-    const pressed = this.countWithin(oppIdx, holder.x, holder.y, C.PRESSURE_RADIUS_M);
-    const threshold = C.PASS_MIN_SCORE * Math.max(0.3, 1.0 - C.PASS_URGENCY_RELIEF * pressed);
-    if (best !== null && bestScore < threshold) best = null;
-
-    if (best === null) {
-      if (offsideCandidate !== null && this.rng.random() < C.OFFSIDE_MISTIME_RATE) {
-        ts.stats.offsides += 1;
-        if (this.log_enabled) {
-          this.log("オフサイド", offsideCandidate.name, ts.idx, `${holder.name} から`);
-        }
-        this.goalKick(this.teams[oppIdx]!);
-        return true;
-      }
-      return false;
+    const opp = this.teams[oppIdx]!;
+    const target = act.mate;
+    if (act.offside && this.rng.random() < C.OFFSIDE_MISTIME_RATE) {
+      ts.stats.offsides += 1;
+      if (this.log_enabled) this.log("オフサイド", target.name, ts.idx, `${holder.name} から`);
+      this.goalKick(opp);
+      return;
     }
     ts.stats.passes += 1;
-    const opp = this.teams[oppIdx]!;
-    if (this.rng.random() < bestP) {
+    if (this.rng.random() < act.p) {
       ts.stats.passes_completed += 1;
-      this.checkBeatenBehind(best, opp);
-      this.takePossession(best);
-      if (this.log_enabled) this.log("パス", holder.name, ts.idx, `→ ${best.name}`);
-    } else {
-      // 経路の相手が触ればそのまま奪取、いなければこぼれ球
-      const thief = this.laneThief(holder, best, oppIdx);
-      if (thief !== null) {
-        opp.stats.tackles_won += 1;
-        this.takePossession(thief);
-        if (this.log_enabled) {
-          this.log("奪取", thief.name, opp.idx, `${holder.name} のパスをカット`);
-        }
-      } else {
-        this.owner = null;
-        this.bumpEpoch();          // こぼれ球も局面の変化
-        this.loose_ticks = 0;
-        this.ball_x = (holder.x + best.x) / 2;
-        this.ball_y = (holder.y + best.y) / 2;
-      }
+      this.checkBeatenBehind(target, opp);
+      this.takePossession(target);
+      if (this.log_enabled) this.log("パス", holder.name, ts.idx, `→ ${target.name}`);
+      return;
     }
-    return true;
+    // 経路の相手が触ればそのまま奪取、いなければこぼれ球
+    const thief = this.laneThief(holder, target, oppIdx);
+    if (thief !== null) {
+      opp.stats.tackles_won += 1;
+      this.takePossession(thief);
+      if (this.log_enabled) {
+        this.log("奪取", thief.name, opp.idx, `${holder.name} のパスをカット`);
+      }
+    } else {
+      this.owner = null;
+      this.bumpEpoch();          // こぼれ球も局面の変化
+      this.loose_ticks = 0;
+      this.ball_x = (holder.x + target.x) / 2;
+      this.ball_y = (holder.y + target.y) / 2;
+    }
   }
 
   /** 相手最終ラインより前で、かつ相手陣内にいるならオフサイド。 */
@@ -1324,10 +1457,13 @@ export class Match {
 
   /** a→b の経路の帯にいる相手の数。 */
   private laneCrowd(a: Actor, b: Actor, oppIdx: number): number {
-    const ax = a.x;
-    const ay = a.y;
-    const vx = b.x - ax;
-    const vy = b.y - ay;
+    return this.laneCrowdAt(a.x, a.y, b.x, b.y, oppIdx);
+  }
+
+  /** (ax,ay)→(bx,by) の経路の帯にいる相手の数。 */
+  private laneCrowdAt(ax: number, ay: number, bx: number, by: number, oppIdx: number): number {
+    const vx = bx - ax;
+    const vy = by - ay;
     const ln2 = vx * vx + vy * vy;
     if (ln2 <= 0) return 0;
     let n = 0;
@@ -1373,52 +1509,54 @@ export class Match {
     if (behind) opp.stats.beaten_behind += 1;
   }
 
+  /** 運ぶ・抜いたときに着く場所。ゴールの真ん中へ向けて1回ぶん進む。 */
+  private dribbleTarget(holder: Actor, ts: TeamState): [number, number] {
+    const dx = ts.targetGoalX() - holder.x;
+    const dy = C.PITCH_Y / 2 - holder.y;
+    const dist = hypot(dx, dy) || 1.0;
+    const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
+    return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + dx / dist * stepLen)),
+            Math.max(0.0, Math.min(C.PITCH_Y, holder.y + dy / dist * stepLen))];
+  }
+
+  /** 目の前の相手を抜ける確率。🔑 採点（`onBallChoices`）と実行（`dribble`）の唯一の式。 */
+  private dribbleChance(holder: Actor, defender: Actor): number {
+    const h = holder.player;
+    const c = defender.player;
+    const p = C.DRIBBLE_BASE + C.DRIBBLE_WEIGHT * (
+      (holder.eff(h.speed) + holder.eff(h.technique)) / 2.0 - defender.eff(c.physical));
+    return Math.max(0.08, Math.min(0.95, p));
+  }
+
+  /** 運ぶ。前に相手がいれば抜きにかかり、失敗すれば奪われる。 */
   private dribble(holder: Actor, ts: TeamState): void {
     const opp = this.teams[1 - ts.idx]!;
     const defender = this.nearestOpponent(ts.idx, holder, 8.0);
-    const gx = ts.targetGoalX();
-    const gy = C.PITCH_Y / 2;
-    const dx = gx - holder.x;
-    const dy = gy - holder.y;
-    const dist = hypot(dx, dy) || 1.0;
-    if (defender === null) {
-      const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
-      holder.x += dx / dist * stepLen;
-      holder.y += dy / dist * stepLen;
-      holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
-      ts.stats.distance_m += stepLen;
-      Match.keepInside(holder);   // 運ぶ・ドリブルで外へ出さない
-      this.ball_x = holder.x;
-      this.ball_y = holder.y;
-      return;
-    }
-    const h = holder.player;
-    const c = defender.player;
-    let p = C.DRIBBLE_BASE + C.DRIBBLE_WEIGHT * (
-      (holder.eff(h.speed) + holder.eff(h.technique)) / 2.0 - defender.eff(c.physical));
-    p = Math.max(0.08, Math.min(0.95, p));
-    ts.stats.duels += 1;
-    opp.stats.duels += 1;
-    if (this.rng.random() < p) {
-      const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
-      holder.x += dx / dist * stepLen;
-      holder.y += dy / dist * stepLen;
-      holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
-      ts.stats.distance_m += stepLen;
-      Match.keepInside(holder);   // 運ぶ・ドリブルで外へ出さない
-      this.ball_x = holder.x;
-      this.ball_y = holder.y;
+    if (defender !== null) {
+      ts.stats.duels += 1;
+      opp.stats.duels += 1;
+      if (this.rng.random() >= this.dribbleChance(holder, defender)) {
+        ts.stats.duels_lost += 1;
+        opp.stats.tackles_won += 1;
+        this.takePossession(defender);
+        if (this.log_enabled) {
+          this.log("奪取", defender.name, opp.idx, `${holder.name} のドリブルを止めた`);
+        }
+        return;
+      }
       opp.stats.duels_lost += 1;
-      if (hypot(defender.x - holder.x, defender.y - holder.y) <= C.BEATEN_BEHIND_RADIUS_M) {
-        opp.stats.beaten_behind += 1;
-      }
-    } else {
-      ts.stats.duels_lost += 1;
-      opp.stats.tackles_won += 1;
-      this.takePossession(defender);
-      if (this.log_enabled) {
-        this.log("奪取", defender.name, opp.idx, `${holder.name} のドリブルを止めた`);
-      }
+    }
+    const [nx, ny] = this.dribbleTarget(holder, ts);
+    const stepLen = hypot(nx - holder.x, ny - holder.y);
+    holder.x = nx;
+    holder.y = ny;
+    holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
+    ts.stats.distance_m += stepLen;
+    this.ball_x = holder.x;
+    this.ball_y = holder.y;
+    if (defender !== null
+        && hypot(defender.x - holder.x, defender.y - holder.y) <= C.BEATEN_BEHIND_RADIUS_M) {
+      opp.stats.beaten_behind += 1;
     }
   }
 

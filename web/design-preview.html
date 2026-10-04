@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>デザイン確認 — Soccer Game Screens（claude.ai/design の中身をそのまま描く）</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+/* 🔑 確認専用。ゲーム本体には出ない。
+      claude.ai のデザインプロジェクト `Soccer Game Screens.dc.html` の中身を、
+      素のHTMLに起こしたもの。背景は実物の `scene/stadium.js` をそのまま動かす。
+
+   🔴 違うのは**フォントだけ**。デザインは Google Fonts（DotGothic16 / Press Start 2P）を
+      外から読んでいるが、要件 §6 で外部通信をしないので、ゲームと同じ字で描いている。
+      字の形以外（寸法・色・配置）は1pxも変えていない。 */
+.dp { max-width: 1400px; margin: 0 auto; padding: calc(var(--px) * 8); }
+.dp-note { color: var(--ink-dim); font-size: .85rem; line-height: 1.8; }
+.dp-row { display: flex; flex-direction: column; gap: calc(var(--px) * 3); margin-top: calc(var(--px) * 10); }
+.dp-h { display: flex; gap: calc(var(--px) * 4); align-items: baseline; flex-wrap: wrap; }
+.dp-n { font-weight: 900; font-size: 1.05rem; }
+.dp-tag {
+  font-size: .72rem; font-weight: 800; padding: 0 calc(var(--px) * 3);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.dp-ok { background: #d8f0d2; color: #1d4a1b; }
+.dp-ng { background: #f8d7d2; color: #7a1a12; }
+.dp-pair { display: flex; gap: calc(var(--px) * 5); flex-wrap: wrap; }
+/* 1920×1080 を縮めて並べる。中身は原寸のまま描いて、箱ごと縮小する */
+.dp-box {
+  position: relative; width: 672px; height: 378px; overflow: hidden;
+  border: var(--w-frame) solid var(--ui-edge); background: #000; flex: none;
+}
+.dp-box > .dp-stage {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+  transform: scale(0.35); transform-origin: 0 0;
+}
+.dp-cap { font-size: .78rem; color: var(--ink-dim); font-weight: 700; }
+/* デザイン側のフォント指定の置き換え先 */
+.dp-stage { --jp: "Hiragino Maru Gothic ProN", "Yu Gothic UI", "YuGothic UI", Meiryo, system-ui, sans-serif;
+            --px2: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+            font-family: var(--jp); color: #e8e9ee; }
+</style>
+</head>
+<body>
+
+<div class="dp">
+  <h1 style="margin:0 0 calc(var(--px)*3);font-size:1.3rem;">デザイン確認 — Soccer Game Screens</h1>
+  <p class="dp-note">
+    claude.ai のデザインプロジェクトに入っている<strong>全10枚</strong>（5画面 × 昼／夜）を、そのまま描いています。
+    背景は実物の <code>scene/stadium.js</code> が動いています（観客の揺れ・旗・照明のちらつき・LEDボード）。<br>
+    🔴 デザインと違うのは<strong>フォントだけ</strong>です。あちらは Google Fonts を外から読んでいますが、
+    要件 §6 で外部通信をしないので、ゲームと同じ字で描いています。寸法・色・配置は変えていません。<br>
+    緑の札＝実物にそのまま使えるもの／赤の札＝実物と食い違っていて直してもらう必要があるもの。
+  </p>
+
+  <!-- ============================================ 01 タイトル -->
+  <div class="dp-row">
+    <div class="dp-h">
+      <span class="dp-n">01 タイトル</span>
+      <span class="dp-tag dp-ng">要修正: ゲーム名が DOT ELEVEN（実物は .soccer）</span>
+    </div>
+    <div class="dp-pair">
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="day" screen="title" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:0;right:0;top:88px;display:flex;flex-direction:column;align-items:center;gap:40px;">
+            <div style="font-family:var(--px2);font-size:128px;line-height:1.1;color:#ffd23a;text-shadow:-8px 0 0 #16204a,8px 0 0 #16204a,0 -8px 0 #16204a,0 8px 0 #16204a,-8px -8px 0 #16204a,8px -8px 0 #16204a,-8px 8px 0 #16204a,8px 8px 0 #16204a,16px 16px 0 #16204a,24px 24px 0 rgba(22,32,74,0.45);">DOT ELEVEN</div>
+            <div style="font-size:48px;color:#16204a;background:#fff8e6;padding:8px 40px;border:4px solid #16204a;box-shadow:8px 8px 0 #16204a;">ドットイレブン</div>
+          </div>
+          <div style="position:absolute;left:0;right:0;top:992px;text-align:center;font-family:var(--px2);font-size:32px;color:#ffffff;text-shadow:4px 4px 0 #16204a;">PRESS START</div>
+          <div style="position:absolute;right:48px;bottom:24px;font-family:var(--px2);font-size:16px;color:#ffffff;text-shadow:2px 2px 0 #16204a;">© 2026 N-V-L</div>
+        </div></div>
+        <div class="dp-cap">昼</div>
+      </div>
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="night" screen="title" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:0;right:0;top:88px;display:flex;flex-direction:column;align-items:center;gap:40px;">
+            <div style="font-family:var(--px2);font-size:128px;line-height:1.1;color:#ffffff;text-shadow:-8px 0 0 #070a1c,8px 0 0 #070a1c,0 -8px 0 #070a1c,0 8px 0 #070a1c,-8px -8px 0 #070a1c,8px -8px 0 #070a1c,-8px 8px 0 #070a1c,8px 8px 0 #070a1c,16px 16px 0 #ff4fa3,24px 24px 0 #070a1c;">DOT ELEVEN</div>
+            <div style="font-size:48px;color:#5fe1ff;background:rgba(7,10,28,0.88);padding:8px 40px;border:4px solid #5fe1ff;box-shadow:8px 8px 0 #ff4fa3;">ドットイレブン</div>
+          </div>
+          <div style="position:absolute;left:0;right:0;top:992px;text-align:center;font-family:var(--px2);font-size:32px;color:#ffe14a;text-shadow:4px 4px 0 #070a1c;">PRESS START</div>
+          <div style="position:absolute;right:48px;bottom:24px;font-family:var(--px2);font-size:16px;color:#c9d4ff;text-shadow:2px 2px 0 #070a1c;">© 2026 N-V-L</div>
+        </div></div>
+        <div class="dp-cap">夜</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================ 02 チーム選択 -->
+  <div class="dp-row">
+    <div class="dp-h">
+      <span class="dp-n">02 チーム選択</span>
+      <span class="dp-tag dp-ng">要修正: この画面は実物に存在しない（チームはプレイヤーが作る）</span>
+    </div>
+    <div class="dp-pair">
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="day" screen="menu" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:96px;right:96px;top:56px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:64px;color:#16204a;background:#ffd23a;border:4px solid #16204a;box-shadow:8px 8px 0 #16204a;padding:4px 40px;">チームをえらぶ</div>
+            <div style="display:flex;gap:16px;font-family:var(--px2);font-size:24px;">
+              <div style="background:#2f6fd6;color:#fff;padding:16px 24px;border:4px solid #16204a;">1P</div>
+              <div style="background:#d8343a;color:#fff;padding:16px 24px;border:4px solid #16204a;">COM</div>
+            </div>
+          </div>
+          <div style="position:absolute;left:144px;top:216px;width:640px;background:#fff8e6;border:4px solid #16204a;box-shadow:12px 12px 0 #16204a;display:flex;flex-direction:column;">
+            <div style="background:#2f6fd6;color:#fff;padding:24px 32px;display:flex;flex-direction:column;gap:12px;border-bottom:4px solid #16204a;">
+              <div style="font-family:var(--px2);font-size:20px;">HOME</div>
+              <div style="font-size:56px;line-height:1.1;">港町ユナイテッド</div>
+              <div style="font-family:var(--px2);font-size:24px;">MINATO UTD</div>
+            </div>
+            <div style="padding:32px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:flex;gap:32px;align-items:center;">
+                <div style="width:128px;height:128px;background:#2f6fd6;border:8px solid #16204a;box-shadow:inset 0 0 0 8px #ffffff;display:grid;place-items:center;font-family:var(--px2);font-size:56px;color:#fff;">M</div>
+                <div style="display:flex;flex-direction:column;gap:8px;font-size:32px;color:#16204a;"><div>フォーメーション 4-3-3</div><div>みなとスタジアム</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">こうげき</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:256px;background:repeating-linear-gradient(90deg,#2f6fd6 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">8</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">しゅび</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:192px;background:repeating-linear-gradient(90deg,#2f6fd6 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">6</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">スピード</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:288px;background:repeating-linear-gradient(90deg,#2f6fd6 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">9</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">テクニック</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:224px;background:repeating-linear-gradient(90deg,#2f6fd6 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">7</div></div>
+            </div>
+          </div>
+          <div style="position:absolute;left:64px;top:500px;font-family:var(--px2);font-size:48px;color:#ffd23a;text-shadow:4px 4px 0 #16204a;">◀</div>
+          <div style="position:absolute;left:820px;top:500px;font-family:var(--px2);font-size:48px;color:#ffd23a;text-shadow:4px 4px 0 #16204a;">▶</div>
+          <div style="position:absolute;left:0;right:0;top:500px;text-align:center;font-family:var(--px2);font-size:72px;color:#ffffff;text-shadow:-6px 0 0 #16204a,6px 0 0 #16204a,0 -6px 0 #16204a,0 6px 0 #16204a,10px 10px 0 #16204a;">VS</div>
+          <div style="position:absolute;right:144px;top:216px;width:640px;background:#fff8e6;border:4px solid #16204a;box-shadow:12px 12px 0 #16204a;display:flex;flex-direction:column;">
+            <div style="background:#d8343a;color:#fff;padding:24px 32px;display:flex;flex-direction:column;gap:12px;border-bottom:4px solid #16204a;">
+              <div style="font-family:var(--px2);font-size:20px;">AWAY</div>
+              <div style="font-size:56px;line-height:1.1;">紅陵FC</div>
+              <div style="font-family:var(--px2);font-size:24px;">KOURYO FC</div>
+            </div>
+            <div style="padding:32px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:flex;gap:32px;align-items:center;">
+                <div style="width:128px;height:128px;background:#1b1b1f;border:8px solid #16204a;box-shadow:inset 0 0 0 8px #d8343a;display:grid;place-items:center;font-family:var(--px2);font-size:56px;color:#fff;">K</div>
+                <div style="display:flex;flex-direction:column;gap:8px;font-size:32px;color:#16204a;"><div>フォーメーション 5-3-2</div><div>べにおか競技場</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">こうげき</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:224px;background:repeating-linear-gradient(90deg,#d8343a 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">7</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">しゅび</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:288px;background:repeating-linear-gradient(90deg,#d8343a 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">9</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">スピード</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:192px;background:repeating-linear-gradient(90deg,#d8343a 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">6</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#16204a;">テクニック</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#d9d2bf 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:256px;background:repeating-linear-gradient(90deg,#d8343a 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#16204a;">8</div></div>
+            </div>
+          </div>
+          <div style="position:absolute;left:0;right:0;bottom:48px;display:flex;justify-content:center;gap:56px;font-size:32px;color:#ffffff;text-shadow:3px 3px 0 #16204a;">
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#16204a;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#ffd23a;text-shadow:none;">A</div>けってい</div>
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#16204a;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#ffd23a;text-shadow:none;">B</div>もどる</div>
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#16204a;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#ffd23a;text-shadow:none;">X</div>せんしゅいちらん</div>
+          </div>
+        </div></div>
+        <div class="dp-cap">昼</div>
+      </div>
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="night" screen="menu" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:96px;right:96px;top:56px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:64px;color:#070a1c;background:#5fe1ff;border:4px solid #070a1c;box-shadow:8px 8px 0 #ff4fa3;padding:4px 40px;">チームをえらぶ</div>
+            <div style="display:flex;gap:16px;font-family:var(--px2);font-size:24px;">
+              <div style="background:#3d86ff;color:#fff;padding:16px 24px;border:4px solid #070a1c;">1P</div>
+              <div style="background:#ff4a57;color:#fff;padding:16px 24px;border:4px solid #070a1c;">COM</div>
+            </div>
+          </div>
+          <div style="position:absolute;left:144px;top:216px;width:640px;background:rgba(7,10,28,0.9);border:4px solid #5fe1ff;box-shadow:12px 12px 0 #3d86ff;display:flex;flex-direction:column;">
+            <div style="background:#3d86ff;color:#fff;padding:24px 32px;display:flex;flex-direction:column;gap:12px;border-bottom:4px solid #5fe1ff;">
+              <div style="font-family:var(--px2);font-size:20px;">HOME</div>
+              <div style="font-size:56px;line-height:1.1;">港町ユナイテッド</div>
+              <div style="font-family:var(--px2);font-size:24px;">MINATO UTD</div>
+            </div>
+            <div style="padding:32px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:flex;gap:32px;align-items:center;">
+                <div style="width:128px;height:128px;background:#3d86ff;border:8px solid #070a1c;box-shadow:inset 0 0 0 8px #ffffff;display:grid;place-items:center;font-family:var(--px2);font-size:56px;color:#fff;">M</div>
+                <div style="display:flex;flex-direction:column;gap:8px;font-size:32px;color:#eaf6ff;"><div>フォーメーション 4-3-3</div><div>みなとスタジアム</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">こうげき</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:256px;background:repeating-linear-gradient(90deg,#5fe1ff 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">8</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">しゅび</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:192px;background:repeating-linear-gradient(90deg,#5fe1ff 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">6</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">スピード</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:288px;background:repeating-linear-gradient(90deg,#5fe1ff 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">9</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">テクニック</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:224px;background:repeating-linear-gradient(90deg,#5fe1ff 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">7</div></div>
+            </div>
+          </div>
+          <div style="position:absolute;left:64px;top:500px;font-family:var(--px2);font-size:48px;color:#ffe14a;text-shadow:4px 4px 0 #070a1c;">◀</div>
+          <div style="position:absolute;left:820px;top:500px;font-family:var(--px2);font-size:48px;color:#ffe14a;text-shadow:4px 4px 0 #070a1c;">▶</div>
+          <div style="position:absolute;left:0;right:0;top:500px;text-align:center;font-family:var(--px2);font-size:72px;color:#ffffff;text-shadow:-6px 0 0 #070a1c,6px 0 0 #070a1c,0 -6px 0 #070a1c,0 6px 0 #070a1c,10px 10px 0 #ff4fa3;">VS</div>
+          <div style="position:absolute;right:144px;top:216px;width:640px;background:rgba(7,10,28,0.9);border:4px solid #5fe1ff;box-shadow:12px 12px 0 #ff4a57;display:flex;flex-direction:column;">
+            <div style="background:#ff4a57;color:#fff;padding:24px 32px;display:flex;flex-direction:column;gap:12px;border-bottom:4px solid #5fe1ff;">
+              <div style="font-family:var(--px2);font-size:20px;">AWAY</div>
+              <div style="font-size:56px;line-height:1.1;">紅陵FC</div>
+              <div style="font-family:var(--px2);font-size:24px;">KOURYO FC</div>
+            </div>
+            <div style="padding:32px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:flex;gap:32px;align-items:center;">
+                <div style="width:128px;height:128px;background:#1b1b1f;border:8px solid #070a1c;box-shadow:inset 0 0 0 8px #ff4a57;display:grid;place-items:center;font-family:var(--px2);font-size:56px;color:#fff;">K</div>
+                <div style="display:flex;flex-direction:column;gap:8px;font-size:32px;color:#eaf6ff;"><div>フォーメーション 5-3-2</div><div>べにおか競技場</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">こうげき</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:224px;background:repeating-linear-gradient(90deg,#ff4fa3 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">7</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">しゅび</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:288px;background:repeating-linear-gradient(90deg,#ff4fa3 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">9</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">スピード</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:192px;background:repeating-linear-gradient(90deg,#ff4fa3 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">6</div></div>
+              <div style="display:flex;align-items:center;gap:24px;"><div style="width:176px;font-size:32px;color:#eaf6ff;">テクニック</div><div style="position:relative;width:316px;height:28px;background:repeating-linear-gradient(90deg,#1f2850 0 28px,transparent 28px 32px);"><div style="position:absolute;left:0;top:0;bottom:0;width:256px;background:repeating-linear-gradient(90deg,#ff4fa3 0 28px,transparent 28px 32px);"></div></div><div style="font-family:var(--px2);font-size:24px;color:#eaf6ff;">8</div></div>
+            </div>
+          </div>
+          <div style="position:absolute;left:0;right:0;bottom:48px;display:flex;justify-content:center;gap:56px;font-size:32px;color:#eaf6ff;text-shadow:3px 3px 0 #070a1c;">
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#5fe1ff;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#070a1c;text-shadow:none;">A</div>けってい</div>
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#5fe1ff;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#070a1c;text-shadow:none;">B</div>もどる</div>
+            <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#5fe1ff;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#070a1c;text-shadow:none;">X</div>せんしゅいちらん</div>
+          </div>
+        </div></div>
+        <div class="dp-cap">夜</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================ 03 試合中 -->
+  <div class="dp-row">
+    <div class="dp-h">
+      <span class="dp-n">03 試合中</span>
+      <span class="dp-tag dp-ok">構成を採用済み（左上スコア・左下選手カード・右下マップ）</span>
+    </div>
+    <div class="dp-pair">
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="day" screen="match" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:40px;top:32px;display:flex;border:4px solid #16204a;box-shadow:8px 8px 0 rgba(22,32,74,0.85);font-family:var(--px2);">
+            <div style="background:#2f6fd6;color:#fff;font-size:24px;padding:20px 20px;">MIN</div>
+            <div style="background:#fff8e6;color:#16204a;font-size:40px;padding:12px 24px;">0-0</div>
+            <div style="background:#d8343a;color:#fff;font-size:24px;padding:20px 20px;">KOU</div>
+            <div style="background:#16204a;color:#ffd23a;font-size:24px;padding:20px 20px;">22:41</div>
+          </div>
+          <div style="position:absolute;left:40px;bottom:40px;display:flex;align-items:center;gap:24px;background:#fff8e6;border:4px solid #16204a;box-shadow:8px 8px 0 #16204a;padding:16px 28px 16px 16px;">
+            <div style="width:72px;height:72px;background:#2f6fd6;display:grid;place-items:center;font-family:var(--px2);font-size:32px;color:#fff;border:4px solid #16204a;">9</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;gap:16px;align-items:baseline;color:#16204a;"><div style="font-size:40px;">アオイ</div><div style="font-family:var(--px2);font-size:16px;">FW</div></div>
+              <div style="width:240px;height:16px;background:#d9d2bf;"><div style="width:72%;height:100%;background:repeating-linear-gradient(90deg,#3fbf5a 0 20px,#2c9a45 20px 24px);"></div></div>
+            </div>
+          </div>
+          <div style="position:absolute;right:40px;bottom:40px;width:360px;height:234px;background:#3f9a3a;border:4px solid #16204a;box-shadow:8px 8px 0 #16204a;">
+            <div style="position:absolute;inset:8px;border:2px solid rgba(255,255,255,0.8);"></div>
+            <div style="position:absolute;left:179px;top:8px;bottom:8px;width:2px;background:rgba(255,255,255,0.8);"></div>
+            <div style="position:absolute;right:8px;top:62px;width:48px;height:110px;border:2px solid rgba(255,255,255,0.8);border-right:none;"></div>
+            <div style="position:absolute;left:8px;top:62px;width:48px;height:110px;border:2px solid rgba(255,255,255,0.8);border-left:none;"></div>
+            <div style="position:absolute;left:290px;top:124px;width:12px;height:12px;background:#ffe14a;border:2px solid #16204a;"></div>
+            <div style="position:absolute;left:252px;top:62px;width:10px;height:10px;background:#2f6fd6;"></div>
+            <div style="position:absolute;left:266px;top:186px;width:10px;height:10px;background:#2f6fd6;"></div>
+            <div style="position:absolute;left:224px;top:112px;width:10px;height:10px;background:#2f6fd6;"></div>
+            <div style="position:absolute;left:318px;top:44px;width:10px;height:10px;background:#2f6fd6;"></div>
+            <div style="position:absolute;left:342px;top:112px;width:10px;height:10px;background:#3fbf5a;"></div>
+            <div style="position:absolute;left:322px;top:104px;width:10px;height:10px;background:#d8343a;"></div>
+            <div style="position:absolute;left:326px;top:150px;width:10px;height:10px;background:#d8343a;"></div>
+            <div style="position:absolute;left:306px;top:72px;width:10px;height:10px;background:#d8343a;"></div>
+            <div style="position:absolute;left:298px;top:172px;width:10px;height:10px;background:#d8343a;"></div>
+            <div style="position:absolute;left:276px;top:100px;width:10px;height:10px;background:#d8343a;"></div>
+          </div>
+        </div></div>
+        <div class="dp-cap">昼</div>
+      </div>
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="night" screen="match" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:40px;top:32px;display:flex;border:4px solid #5fe1ff;box-shadow:8px 8px 0 #ff4fa3;font-family:var(--px2);">
+            <div style="background:#3d86ff;color:#fff;font-size:24px;padding:20px 20px;">MIN</div>
+            <div style="background:#070a1c;color:#ffffff;font-size:40px;padding:12px 24px;">0-0</div>
+            <div style="background:#ff4a57;color:#fff;font-size:24px;padding:20px 20px;">KOU</div>
+            <div style="background:#141a3e;color:#ffe14a;font-size:24px;padding:20px 20px;">22:41</div>
+          </div>
+          <div style="position:absolute;left:40px;bottom:40px;display:flex;align-items:center;gap:24px;background:rgba(7,10,28,0.9);border:4px solid #5fe1ff;box-shadow:8px 8px 0 #ff4fa3;padding:16px 28px 16px 16px;">
+            <div style="width:72px;height:72px;background:#3d86ff;display:grid;place-items:center;font-family:var(--px2);font-size:32px;color:#fff;border:4px solid #070a1c;">9</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;gap:16px;align-items:baseline;color:#eaf6ff;"><div style="font-size:40px;">アオイ</div><div style="font-family:var(--px2);font-size:16px;color:#5fe1ff;">FW</div></div>
+              <div style="width:240px;height:16px;background:#1f2850;"><div style="width:72%;height:100%;background:repeating-linear-gradient(90deg,#7dffb0 0 20px,#3fbf7a 20px 24px);"></div></div>
+            </div>
+          </div>
+          <div style="position:absolute;right:40px;bottom:40px;width:360px;height:234px;background:rgba(7,10,28,0.85);border:4px solid #5fe1ff;box-shadow:8px 8px 0 #ff4fa3;">
+            <div style="position:absolute;inset:8px;border:2px solid rgba(95,225,255,0.6);"></div>
+            <div style="position:absolute;left:179px;top:8px;bottom:8px;width:2px;background:rgba(95,225,255,0.6);"></div>
+            <div style="position:absolute;right:8px;top:62px;width:48px;height:110px;border:2px solid rgba(95,225,255,0.6);border-right:none;"></div>
+            <div style="position:absolute;left:8px;top:62px;width:48px;height:110px;border:2px solid rgba(95,225,255,0.6);border-left:none;"></div>
+            <div style="position:absolute;left:290px;top:124px;width:12px;height:12px;background:#ffe14a;"></div>
+            <div style="position:absolute;left:252px;top:62px;width:10px;height:10px;background:#3d86ff;"></div>
+            <div style="position:absolute;left:266px;top:186px;width:10px;height:10px;background:#3d86ff;"></div>
+            <div style="position:absolute;left:224px;top:112px;width:10px;height:10px;background:#3d86ff;"></div>
+            <div style="position:absolute;left:318px;top:44px;width:10px;height:10px;background:#3d86ff;"></div>
+            <div style="position:absolute;left:342px;top:112px;width:10px;height:10px;background:#7dffb0;"></div>
+            <div style="position:absolute;left:322px;top:104px;width:10px;height:10px;background:#ff4a57;"></div>
+            <div style="position:absolute;left:326px;top:150px;width:10px;height:10px;background:#ff4a57;"></div>
+            <div style="position:absolute;left:306px;top:72px;width:10px;height:10px;background:#ff4a57;"></div>
+            <div style="position:absolute;left:298px;top:172px;width:10px;height:10px;background:#ff4a57;"></div>
+            <div style="position:absolute;left:276px;top:100px;width:10px;height:10px;background:#ff4a57;"></div>
+          </div>
+        </div></div>
+        <div class="dp-cap">夜</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================ 04 ハーフタイム -->
+  <div class="dp-row">
+    <div class="dp-h">
+      <span class="dp-n">04 ハーフタイム／リザルト</span>
+      <span class="dp-tag dp-ok">構成は使える（実装は未着手）</span>
+    </div>
+    <div class="dp-pair">
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="day" screen="result" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;inset:0;background:rgba(22,32,74,0.42);"></div>
+          <div style="position:absolute;left:360px;top:112px;width:1200px;background:#fff8e6;border:4px solid #16204a;box-shadow:16px 16px 0 #16204a;display:flex;flex-direction:column;color:#16204a;">
+            <div style="background:#ffd23a;border-bottom:4px solid #16204a;padding:20px 48px;display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-size:56px;">ハーフタイム</div>
+              <div style="font-family:var(--px2);font-size:28px;">HALF TIME</div>
+            </div>
+            <div style="padding:40px 56px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:40px;">
+                <div style="display:flex;justify-content:flex-end;align-items:center;gap:20px;"><div style="font-size:40px;">港町ユナイテッド</div><div style="width:64px;height:64px;background:#2f6fd6;border:4px solid #16204a;"></div></div>
+                <div style="font-family:var(--px2);font-size:88px;">1-0</div>
+                <div style="display:flex;align-items:center;gap:20px;"><div style="width:64px;height:64px;background:#d8343a;border:4px solid #16204a;"></div><div style="font-size:40px;">紅陵FC</div></div>
+              </div>
+              <div style="text-align:center;font-size:32px;">⚽ 23' 9 アオイ</div>
+              <div style="height:4px;background:repeating-linear-gradient(90deg,#16204a 0 12px,transparent 12px 20px);"></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">58%</div><div style="height:24px;background:#d9d2bf;display:flex;justify-content:flex-end;"><div style="width:58%;background:#2f6fd6;"></div></div><div style="font-size:32px;text-align:center;">ボールしはいりつ</div><div style="height:24px;background:#d9d2bf;display:flex;"><div style="width:42%;background:#d8343a;"></div></div><div style="font-family:var(--px2);font-size:28px;">42%</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">7</div><div style="height:24px;background:#d9d2bf;display:flex;justify-content:flex-end;"><div style="width:70%;background:#2f6fd6;"></div></div><div style="font-size:32px;text-align:center;">シュート</div><div style="height:24px;background:#d9d2bf;display:flex;"><div style="width:30%;background:#d8343a;"></div></div><div style="font-family:var(--px2);font-size:28px;">3</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">3</div><div style="height:24px;background:#d9d2bf;display:flex;justify-content:flex-end;"><div style="width:75%;background:#2f6fd6;"></div></div><div style="font-size:32px;text-align:center;">わくないシュート</div><div style="height:24px;background:#d9d2bf;display:flex;"><div style="width:25%;background:#d8343a;"></div></div><div style="font-family:var(--px2);font-size:28px;">1</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">84%</div><div style="height:24px;background:#d9d2bf;display:flex;justify-content:flex-end;"><div style="width:84%;background:#2f6fd6;"></div></div><div style="font-size:32px;text-align:center;">パスせいこうりつ</div><div style="height:24px;background:#d9d2bf;display:flex;"><div style="width:71%;background:#d8343a;"></div></div><div style="font-family:var(--px2);font-size:28px;">71%</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">4</div><div style="height:24px;background:#d9d2bf;display:flex;justify-content:flex-end;"><div style="width:40%;background:#2f6fd6;"></div></div><div style="font-size:32px;text-align:center;">ファウル</div><div style="height:24px;background:#d9d2bf;display:flex;"><div style="width:60%;background:#d8343a;"></div></div><div style="font-family:var(--px2);font-size:28px;">6</div></div>
+            </div>
+            <div style="border-top:4px solid #16204a;padding:20px 48px;display:flex;justify-content:flex-end;gap:48px;font-size:32px;">
+              <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#16204a;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#ffd23a;">Y</div>さくせん</div>
+              <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#16204a;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#ffd23a;">A</div>こうはんへ</div>
+            </div>
+          </div>
+        </div></div>
+        <div class="dp-cap">昼</div>
+      </div>
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="night" screen="result" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;inset:0;background:rgba(4,6,20,0.45);"></div>
+          <div style="position:absolute;left:360px;top:112px;width:1200px;background:rgba(7,10,28,0.92);border:4px solid #5fe1ff;box-shadow:16px 16px 0 #ff4fa3;display:flex;flex-direction:column;color:#eaf6ff;">
+            <div style="background:#5fe1ff;color:#070a1c;border-bottom:4px solid #070a1c;padding:20px 48px;display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-size:56px;">ハーフタイム</div>
+              <div style="font-family:var(--px2);font-size:28px;">HALF TIME</div>
+            </div>
+            <div style="padding:40px 56px;display:flex;flex-direction:column;gap:28px;">
+              <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:40px;">
+                <div style="display:flex;justify-content:flex-end;align-items:center;gap:20px;"><div style="font-size:40px;">港町ユナイテッド</div><div style="width:64px;height:64px;background:#3d86ff;border:4px solid #eaf6ff;"></div></div>
+                <div style="font-family:var(--px2);font-size:88px;color:#ffe14a;">1-0</div>
+                <div style="display:flex;align-items:center;gap:20px;"><div style="width:64px;height:64px;background:#ff4a57;border:4px solid #eaf6ff;"></div><div style="font-size:40px;">紅陵FC</div></div>
+              </div>
+              <div style="text-align:center;font-size:32px;color:#5fe1ff;">⚽ 23' 9 アオイ</div>
+              <div style="height:4px;background:repeating-linear-gradient(90deg,#5fe1ff 0 12px,transparent 12px 20px);"></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">58%</div><div style="height:24px;background:#1f2850;display:flex;justify-content:flex-end;"><div style="width:58%;background:#3d86ff;"></div></div><div style="font-size:32px;text-align:center;">ボールしはいりつ</div><div style="height:24px;background:#1f2850;display:flex;"><div style="width:42%;background:#ff4a57;"></div></div><div style="font-family:var(--px2);font-size:28px;">42%</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">7</div><div style="height:24px;background:#1f2850;display:flex;justify-content:flex-end;"><div style="width:70%;background:#3d86ff;"></div></div><div style="font-size:32px;text-align:center;">シュート</div><div style="height:24px;background:#1f2850;display:flex;"><div style="width:30%;background:#ff4a57;"></div></div><div style="font-family:var(--px2);font-size:28px;">3</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">3</div><div style="height:24px;background:#1f2850;display:flex;justify-content:flex-end;"><div style="width:75%;background:#3d86ff;"></div></div><div style="font-size:32px;text-align:center;">わくないシュート</div><div style="height:24px;background:#1f2850;display:flex;"><div style="width:25%;background:#ff4a57;"></div></div><div style="font-family:var(--px2);font-size:28px;">1</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">84%</div><div style="height:24px;background:#1f2850;display:flex;justify-content:flex-end;"><div style="width:84%;background:#3d86ff;"></div></div><div style="font-size:32px;text-align:center;">パスせいこうりつ</div><div style="height:24px;background:#1f2850;display:flex;"><div style="width:71%;background:#ff4a57;"></div></div><div style="font-family:var(--px2);font-size:28px;">71%</div></div>
+              <div style="display:grid;grid-template-columns:120px 1fr 320px 1fr 120px;align-items:center;gap:16px;"><div style="font-family:var(--px2);font-size:28px;text-align:right;">4</div><div style="height:24px;background:#1f2850;display:flex;justify-content:flex-end;"><div style="width:40%;background:#3d86ff;"></div></div><div style="font-size:32px;text-align:center;">ファウル</div><div style="height:24px;background:#1f2850;display:flex;"><div style="width:60%;background:#ff4a57;"></div></div><div style="font-family:var(--px2);font-size:28px;">6</div></div>
+            </div>
+            <div style="border-top:4px solid #5fe1ff;padding:20px 48px;display:flex;justify-content:flex-end;gap:48px;font-size:32px;">
+              <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#5fe1ff;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#070a1c;">Y</div>さくせん</div>
+              <div style="display:flex;gap:16px;align-items:center;"><div style="width:44px;height:44px;border-radius:50%;background:#5fe1ff;display:grid;place-items:center;font-family:var(--px2);font-size:18px;color:#070a1c;">A</div>こうはんへ</div>
+            </div>
+          </div>
+        </div></div>
+        <div class="dp-cap">夜</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================ 05 ゴール演出 -->
+  <div class="dp-row">
+    <div class="dp-h">
+      <span class="dp-n">05 ゴール演出</span>
+      <span class="dp-tag dp-ok">採用済み</span>
+    </div>
+    <div class="dp-pair">
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="day" screen="goal" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:0;right:0;top:80px;text-align:center;font-family:var(--px2);font-size:200px;line-height:1.1;color:#ffd23a;text-shadow:-10px 0 0 #16204a,10px 0 0 #16204a,0 -10px 0 #16204a,0 10px 0 #16204a,-10px -10px 0 #16204a,10px -10px 0 #16204a,-10px 10px 0 #16204a,10px 10px 0 #16204a,20px 20px 0 #d8343a,30px 30px 0 #16204a;">GOAL!!</div>
+          <div style="position:absolute;left:0;right:0;top:400px;background:#2f6fd6;border-top:8px solid #16204a;border-bottom:8px solid #16204a;padding:20px 96px;display:flex;justify-content:space-between;align-items:center;color:#ffffff;">
+            <div style="display:flex;gap:40px;align-items:center;">
+              <div style="font-family:var(--px2);font-size:40px;color:#ffd23a;">23'</div>
+              <div style="font-size:64px;">9 アオイ</div>
+              <div style="font-size:32px;">港町ユナイテッド</div>
+            </div>
+            <div style="display:flex;border:4px solid #16204a;font-family:var(--px2);">
+              <div style="background:#1c3a8a;font-size:24px;padding:16px 18px;">MIN</div>
+              <div style="background:#fff8e6;color:#16204a;font-size:36px;padding:10px 20px;">1-0</div>
+              <div style="background:#d8343a;font-size:24px;padding:16px 18px;">KOU</div>
+            </div>
+          </div>
+        </div></div>
+        <div class="dp-cap">昼</div>
+      </div>
+      <div>
+        <div class="dp-box"><div class="dp-stage">
+          <stadium-scene variant="night" screen="goal" style="position:absolute;left:0;top:0;width:1920px;height:1080px;"></stadium-scene>
+          <div style="position:absolute;left:0;right:0;top:80px;text-align:center;font-family:var(--px2);font-size:200px;line-height:1.1;color:#ffffff;text-shadow:-10px 0 0 #070a1c,10px 0 0 #070a1c,0 -10px 0 #070a1c,0 10px 0 #070a1c,-10px -10px 0 #070a1c,10px -10px 0 #070a1c,-10px 10px 0 #070a1c,10px 10px 0 #070a1c,20px 20px 0 #ff4fa3,30px 30px 0 #5fe1ff;">GOAL!!</div>
+          <div style="position:absolute;left:0;right:0;top:400px;background:rgba(7,10,28,0.9);border-top:8px solid #5fe1ff;border-bottom:8px solid #ff4fa3;padding:20px 96px;display:flex;justify-content:space-between;align-items:center;color:#ffffff;">
+            <div style="display:flex;gap:40px;align-items:center;">
+              <div style="font-family:var(--px2);font-size:40px;color:#ffe14a;">23'</div>
+              <div style="font-size:64px;">9 アオイ</div>
+              <div style="font-size:32px;color:#5fe1ff;">港町ユナイテッド</div>
+            </div>
+            <div style="display:flex;border:4px solid #5fe1ff;font-family:var(--px2);">
+              <div style="background:#3d86ff;font-size:24px;padding:16px 18px;">MIN</div>
+              <div style="background:#070a1c;color:#ffe14a;font-size:36px;padding:10px 20px;">1-0</div>
+              <div style="background:#ff4a57;font-size:24px;padding:16px 18px;">KOU</div>
+            </div>
+          </div>
+        </div></div>
+        <div class="dp-cap">夜</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="dp-note" style="margin-top:calc(var(--px)*10);">
+    🔴 <strong>まだ出ていないもの</strong>（<code>SPEC-screens.md</code> で依頼済み・応答0件）:
+    背景部品 <code>city.js</code>／<code>shop.js</code>／<code>office.js</code> と、
+    モック4枚（チームを作る／街ハブ／商店街／事務所）。
+  </p>
+</div>
+
+<script src="scene/stadium.js"></script>
+</body>
+</html>

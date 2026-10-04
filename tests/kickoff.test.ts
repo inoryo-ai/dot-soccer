@@ -95,6 +95,19 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
     return { label: `${a} vs ${b}`, res: m.run(), waits };
   }));
 
+
+  /**
+   * 前半の終わり際に入ったゴールは、戻りの検査から外す。
+   *
+   * 🔴 ハーフタイムでは**エンドが入れ替わって全員が反対側へ置き直される**（＝85m跳ぶ）し、
+   *    後半のキックオフですぐ誰かがボールを持つ。これは戻りの不具合ではなく、
+   *    競技規則どおりの切り替え（`Match.run` が `TICKS_PER_HALF` でやっている）。
+   * 🔑 2026-10-03 にフォーメーションを前へ出したとき、ゴールの1つがこの窓に入って
+   *    初めて表に出た。試合の中身が変わると露出する、という類の見落とし。
+   */
+  const crossesHalfTime = (tick: number): boolean =>
+    tick < C.TICKS_PER_HALF && tick + C.RESTART_MAX_TICKS >= C.TICKS_PER_HALF;
+
   test("ゴールが十分な数入っている（入っていないと下の検査が空振りする）", () => {
     const goals = games.reduce((n, g) => n + g.res.score[0] + g.res.score[1], 0);
     assert.ok(goals >= 30, `ゴールが ${goals} 本しかない`);
@@ -106,6 +119,7 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
       const fr = res.replay!.frames;
       const k = res.replay!.coord_scale;
       for (const g of res.events.filter((e) => e.type === "ゴール")) {
+        if (crossesHalfTime(g.tick)) continue;
         let t = g.tick;
         do {
           for (let i = 0; i < 22; i++) {
@@ -123,7 +137,8 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
     for (const { label, res } of games) {
       const fr = res.replay!.frames;
       for (const g of res.events.filter((e) => e.type === "ゴール")) {
-        if (g.tick + C.RESTART_MIN_TICKS >= fr.length) continue;   // 終了間際のゴール
+        if (g.tick + C.RESTART_MIN_TICKS >= fr.length) continue;   // 試合終了間際のゴール
+        if (crossesHalfTime(g.tick)) continue;                     // 前半終了間際のゴール
         for (let t = g.tick; t < g.tick + C.RESTART_MIN_TICKS; t++) {
           assert.equal(fr[t]![2], -1, `${label} ${g.time} のゴールの ${t - g.tick}秒後に誰かが持っている`);
         }

@@ -22,10 +22,11 @@
 import { fileURLToPath } from "node:url";
 
 import { combinations } from "../src/sim/batch.ts";
+import * as C from "../src/sim/constants.ts";
 import { play } from "../src/sim/engine.ts";
-import type { MatchStatsOut } from "../src/sim/engine.ts";
+import type { MatchResult, MatchStatsOut } from "../src/sim/engine.ts";
 import { PRESET_ORDER, buildPreset } from "../src/sim/presets.ts";
-import { fmtF, ljust, mean, pyFloatStr, rjust } from "../src/sim/pymath.ts";
+import { fmtF, hypot, ljust, mean, pyFloatStr, rjust } from "../src/sim/pymath.ts";
 
 /** 1指標の期待レンジ。**出典が無いものはここに置かない。** */
 export interface Expected {
@@ -87,7 +88,7 @@ export const KNOWN_RED: ReadonlySet<string> = new Set();
 //    （出典を見つけたら EXPECTED へ移す。推測でレンジを置かないこと）
 export const WATCH_ONLY = [
   "passes", "pass_success_pct", "tackles_won", "duels_lost_pct", "beaten_behind",
-  "shots_against", "stamina_low_players",
+  "shots_against", "stamina_low_players", "win_pct",
 ] as const;
 
 const RAW_KEYS = [
@@ -101,24 +102,72 @@ export const LABELS: Readonly<Record<string, string>> = {
   shots_against: "被シュート", passes: "パス", pass_success_pct: "パス成功%",
   tackles_won: "奪取", duels_lost_pct: "競り負け%", beaten_behind: "裏を取られ",
   distance_km: "走行km", possession_pct: "支配%", stamina_low_players: "息切れ人数",
+  win_pct: "勝率%",
 };
 
 export type Rows = Record<string, Record<string, number>>;
 
-/** プリセット総当たりを走らせ、チームごとの平均値を返す。 */
-export function measure(reps: number): [Rows, number] {
+// ------------------------------------------------------------ 攻撃の到達点
+//
+// 🔴 「ゴール前で攻撃が止まる」（2026-10-02 オーナー指摘・decisions.md）を毎回測る。
+//    前回は使い捨ての計測で 71.3% が 16.5〜24m に溜まっていると分かったが、
+//    道具が残っていなかったので、直したかどうかを同じ物差しで確かめられなかった。
+//
+// 🔑 ゴールから 24m 以内（`SHOOT_RANGE_M`）で攻めている側が持っている時間を、
+//    距離の帯ごとに割合で出す。再生用の記録（`record=true`）から数えるので、
+//    試合の結果には一切触れない（記録は乱数を引かない・replay.test.ts）。
+//    相場の出典が無いので**監視のみ**。判定には使わない。
+export const REACH_BANDS: readonly [number, number, string][] = [
+  [0.0, 6.0, "0〜6m"],
+  [6.0, 11.0, "6〜11m"],
+  [11.0, 16.5, "11〜16.5m"],
+  [16.5, 24.0, "16.5〜24m"],
+];
+
+/** 1試合の記録から、攻めている側の保持をゴールからの距離の帯ごとに数える。 */
+export function reachCounts(result: MatchResult): number[] {
+  const counts = REACH_BANDS.map(() => 0);
+  const rp = result.replay;
+  if (rp === undefined) throw new Error("record=true で回した試合を渡すこと");
+  const k = rp.coord_scale;
+  const homePlayers = rp.roster.filter((r) => r.team === 0).length;
+  rp.frames.forEach((f, i) => {
+    const owner = f[2]!;
+    if (owner < 0) return;
+    const tick = i * rp.sample_ticks;
+    const team = owner < homePlayers ? 0 : 1;
+    // 🔑 前半はホームが +x へ攻め、後半はエンドを入れ替える（engine.ts `run`）
+    const homeDir = tick < C.TICKS_PER_HALF ? 1 : -1;
+    const dir = team === 0 ? homeDir : -homeDir;
+    const goalX = dir > 0 ? rp.pitch[0] : 0.0;
+    const d = hypot(goalX - f[0]! / k, rp.pitch[1] / 2 - f[1]! / k);
+    const band = REACH_BANDS.findIndex(([lo, hi]) => lo <= d && d < hi);
+    if (band >= 0) counts[band]! += 1;
+  });
+  return counts;
+}
+
+/** プリセット総当たりを走らせ、チームごとの平均値を返す（3つ目は攻撃の到達点の帯ごとの数）。 */
+export function measure(reps: number): [Rows, number, number[]] {
   const names = [...PRESET_ORDER];
   const teams = new Map(names.map((n) => [n, buildPreset(n)]));
   const agg: Record<string, Record<string, number[]>> = {};
   for (const n of names) agg[n] = Object.fromEntries(RAW_KEYS.map((k) => [k, [] as number[]]));
   let nMatches = 0;
+  const reach = REACH_BANDS.map(() => 0);
+  // 勝ち点の割合（勝ち1・引き分け0.5）。相性 [7] と同じ数え方の粗い版（監視のみ）
+  const wins: Record<string, number[]> = Object.fromEntries(names.map((n) => [n, [] as number[]]));
 
   for (const [home, away] of combinations(names)) {
     for (let off = 0; off < reps; off++) {
-      const result = play(teams.get(home)!.clone(), teams.get(away)!.clone(), 1000 + off, false);
+      const result = play(teams.get(home)!.clone(), teams.get(away)!.clone(), 1000 + off, false,
+                          true);
       nMatches += 1;
+      reachCounts(result).forEach((c, i) => { reach[i]! += c; });
       [home, away].forEach((n, i) => {
         for (const k of RAW_KEYS) agg[n]![k]!.push(result.stats[i]![k]);
+        const [mine, theirs] = [result.score[i]!, result.score[1 - i]!];
+        wins[n]!.push(mine > theirs ? 1.0 : mine === theirs ? 0.5 : 0.0);
       });
     }
   }
@@ -131,9 +180,10 @@ export function measure(reps: number): [Rows, number] {
     // 🔑 率は「平均の平均」ではなく合計から出す（試合ごとの本数が違うため）
     row.conversion_pct = 100.0 * sum(s.goals!) / Math.max(1.0, sum(s.shots!));
     row.duels_lost_pct = 100.0 * sum(s.duels_lost!) / Math.max(1.0, sum(s.duels!));
+    row.win_pct = 100.0 * mean(wins[n]!);
     out[n] = row;
   }
-  return [out, nMatches];
+  return [out, nMatches, reach];
 }
 
 export const teamValues = (rows: Rows, key: string): number[] =>
@@ -191,12 +241,12 @@ export function judge(rows: Rows): [string[], string[]] {
 }
 
 export function main(reps = 3, out: (line?: string) => void = (l = "") => console.log(l)): number {
-  const [rows, nMatches] = measure(reps);
+  const [rows, nMatches, reach] = measure(reps);
   out(`読んだ試合数: ${nMatches}（プリセット${Object.keys(rows).length}チーム総当たり × ${reps}シード）\n`);
 
   const shown = ["goals", "shots", "conversion_pct", "shots_against", "passes",
                  "pass_success_pct", "tackles_won", "duels_lost_pct", "beaten_behind",
-                 "distance_km", "possession_pct", "stamina_low_players"];
+                 "distance_km", "possession_pct", "stamina_low_players", "win_pct"];
   out(ljust("チーム", 10) + shown.map((k) => rjust(LABELS[k]!, 12)).join(""));
   for (const [name, row] of Object.entries(rows)) {
     out(ljust(name, 10) + shown.map((k) => rjust(fmtF(row[k]!, 2), 12)).join(""));
@@ -215,6 +265,13 @@ export function main(reps = 3, out: (line?: string) => void = (l = "") => consol
 
   out("\n--- 監視のみ（相場の出典が取れていないので判定に使わない） ---\n"
       + `  ${WATCH_ONLY.map((k) => LABELS[k]).join(", ")}`);
+
+  const reachTotal = reach.reduce((a, b) => a + b, 0);
+  out(`\n--- 攻撃の到達点（ゴールから24m以内で攻めている側が持っていた記録 ${reachTotal}コマ・監視のみ） ---`);
+  REACH_BANDS.forEach(([, , label], i) => {
+    out(`  ${ljust(label, 10)} ${rjust(String(reach[i]), 6)}コマ  `
+        + `${rjust(fmtF(100.0 * reach[i]! / Math.max(1, reachTotal), 1), 5)}%`);
+  });
 
   const [blocking, stillRed] = judge(rows);
   if (stillRed.length > 0) {

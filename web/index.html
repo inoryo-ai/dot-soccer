@@ -14,6 +14,31 @@
 </head>
 <body>
 
+<!-- 施設の中の絵。`src/web/room.ts` が画面ごとに描き替える。
+     🔑 画面ごとに canvas を置かず**1枚を使い回す**（id は1つしか持てないのと、
+        絵は一度に1つしか見えないため）。読むのは手前のパネルなので、ここは背景に徹する。 -->
+<!-- 🔴 デザイン由来の**動く背景**（2026-10-03 D-28）。
+     `web/scene/stadium.js` が `<stadium-scene>` を定義する。canvas 4枚で
+     空・観客席・屋根・芝（静止）／観客の揺れ・旗（12fps）／照明のちらつき・
+     フレア・LEDボード（30fps）／ドット絵の層 960×540 を描き分ける。
+     🔑 `variant`(day/night) と `screen`(title/menu/match/result/goal) で切り替わる。
+        画面外では自分で描画を止める。 -->
+<!-- 🔴 入れものを1枚かませる。`stadium.js` は connectedCallback で
+     `position:relative;width:100%;height:100%` を**インラインで**入れるので、
+     CSS の `position:fixed` が負ける（インラインのほうが強い）。
+     外側を固定して、中はその中で 100% にさせる。 -->
+<div id="bgScene" class="bg-scene" aria-hidden="true" hidden>
+  <stadium-scene id="bgSceneEl" variant="day" screen="title"></stadium-scene>
+</div>
+
+<!-- 背景の絵（2026-10-03 D-26）。画面ごとに `web/bg/` の1枚を敷く。
+     🔑 canvas ではなく div ＋ background-image にしてある。写実寄りの絵は
+        拡大するときに**滑らかに補間したい**ので、ドット絵用の pixelated とは別扱い。 -->
+<div id="bgPhoto" class="bg-photo" aria-hidden="true" hidden></div>
+
+<!-- 絵が用意されていない画面は、従来どおり手続きで描く -->
+<canvas id="roomCanvas" class="room-bg" width="960" height="540" aria-hidden="true" hidden></canvas>
+
 <!-- ===========================================================================
      上の表示板。🔴 **画面の中ではなく、画面の外に1つだけ置く**（2026-10-02）。
      街にも事務所にもサッカー場にも同じものが要るが、id は1つしか持てない。
@@ -46,43 +71,49 @@
 </section>
 
 <!-- ======================================================= チームを作る -->
+<!-- 🔑 2段組。**左で決めて、右で並べる。**（2026-10-03 オーナー指示）
+     左は「チーム名とフォーメーションだけ」。右は開幕前から選手を置ける盤。
+     🔴 右の盤は**まだチームが無い状態**で描く。`api.previewLineup()` が
+        使い捨てのチームを組んで並びだけ返す（`career` は作らない）。 -->
 <section id="setup" class="screen">
-  <div class="panel panel-wide">
-    <h2 class="panel-title">チームを作る</h2>
+  <div class="setup-grid">
 
-    <div class="field">
-      <label for="teamName">チーム名</label>
-      <input id="teamName" type="text" maxlength="12" value="ドットFC" autocomplete="off">
-    </div>
+    <div class="panel setup-left">
+      <h2 class="panel-title">チームを作る</h2>
 
-    <div class="field-row">
+      <div class="field">
+        <label for="teamName">チーム名</label>
+        <input id="teamName" type="text" maxlength="12" value="ドットFC" autocomplete="off">
+      </div>
+
       <div class="field">
         <label for="formation">フォーメーション</label>
         <select id="formation"></select>
       </div>
+
       <div class="field">
         <label for="seed">運の種（同じ数字なら同じチーム）</label>
         <input id="seed" type="number" min="0" max="999999" value="1">
       </div>
+
+      <div class="actions">
+        <button id="startBtn" class="btn btn-primary btn-big">開幕する</button>
+      </div>
     </div>
 
-    <h3 class="sub-title">初期育成 — 全選手に特訓<span id="planTotalTarget">20</span>回</h3>
-    <p class="note">
-      AIチームも同じ回数だけ育った状態で開幕します。<strong>配分だけがチームの個性</strong>になります。
-    </p>
-    <div id="planRows" class="plan-rows"></div>
-    <p class="plan-status">
-      割り振り <strong><span id="planUsed">0</span></strong> / <span id="planTotal">20</span>
-      <span id="planWarn" class="warn"></span>
-    </p>
-    <div class="plan-presets">
-      <span>お手本:</span>
-      <div id="planPresets" class="chip-row"></div>
+    <div class="panel setup-right">
+      <h2 class="panel-title">選手の位置</h2>
+      <p class="note">
+        選手をつまんで動かすと、その位置から試合が始まります。
+        <strong>矢印キーでも動かせます</strong>（Shiftで大きく）。GKは自陣までしか出せません。
+      </p>
+      <div id="setupBoard"></div>
+      <div class="actions">
+        <button id="setupBoardReset" class="btn">フォーメーションの形に戻す</button>
+        <span id="setupBoardMsg" class="note"></span>
+      </div>
     </div>
 
-    <div class="actions">
-      <button id="startBtn" class="btn btn-primary btn-big">開幕する</button>
-    </div>
   </div>
 </section>
 
@@ -90,7 +121,7 @@
 <!-- 🔴 ここが常のホーム（2026-10-02 オーナー指示）。施設を選んで入り、戻ってくる。
      🔑 押せる場所は **canvas の当たり判定ではなく、重ねた HTML のボタン**にする。
         canvas の中で当たりを取ると、キーボードでも読み上げでも辿れなくなる。
-     🔑 建物の絵（`src/web/city.ts`）と重ねる位置（`SPOTS`）は必ず揃える。 -->
+     🔑 建物の絵（`web/bg/town.js`）と重ねる位置（`bg.ts` の `TOWN_SPOTS`）は必ず揃える。 -->
 <section id="city" class="screen">
   <div class="city-wrap">
     <canvas id="cityCanvas" width="640" height="360" aria-hidden="true"></canvas>
@@ -103,7 +134,7 @@
       <span class="spot-note">試合をする</span>
     </button>
     <button class="spot" data-go="office" id="goOffice">
-      <span class="spot-name">事務所</span>
+      <span class="spot-name">サッカークラブ</span>
       <span class="spot-note">選手・戦術・順位表</span>
     </button>
   </div>
@@ -146,7 +177,7 @@
 <section id="office" class="screen">
   <div class="place-head place-head-sticky">
     <button class="btn btn-back" data-back="1">街へ戻る</button>
-    <h2 class="place-title">事務所</h2>
+    <h2 class="place-title">サッカークラブ</h2>
   </div>
 
   <div class="tab-body">
@@ -201,6 +232,20 @@
         </div>
       </div>
       <div class="panel">
+        <h2 class="panel-title">配置</h2>
+        <p class="note">
+          選手をつまんで動かすと、その位置から試合が始まります。
+          <strong>矢印キーでも動かせます</strong>（Shiftで大きく）。
+          GKは自陣までしか出せません。
+        </p>
+        <div id="lineupBoard"></div>
+        <div class="actions">
+          <button id="lineupReset" class="btn">フォーメーションの形に戻す</button>
+          <span id="lineupMsg" class="note"></span>
+        </div>
+      </div>
+
+      <div class="panel">
         <h2 class="panel-title">監督の性格</h2>
         <div id="managerRows"></div>
       </div>
@@ -250,7 +295,7 @@
 
   <!-- 🔑 コマンド帯は**事務所の中だけ**に出す（2026-10-02 オーナー判断）。
        街が主なので、同じ場所へ行ける道を2本にしない。 -->
-  <nav class="tabs" id="tabs" aria-label="事務所のコマンド">
+  <nav class="tabs" id="tabs" aria-label="サッカークラブのコマンド">
     <button class="tab is-on" data-tab="squad">選手</button>
     <button class="tab" data-tab="tactics">戦術</button>
     <button class="tab" data-tab="table">順位表</button>
@@ -268,8 +313,18 @@
   </div>
 
   <div class="pitch-wrap">
-    <canvas id="pitch" width="480" height="360"></canvas>
+    <!-- 🔑 640×228。**3倍で 1920×684**。上に載るスタンド帯（1080 のうち 396）を
+         差し引いた残りにちょうど収まる。倍率は `pitch.ts` の fit() が整数倍で入れる。 -->
+    <canvas id="pitch" width="640" height="228"></canvas>
   </div>
+
+  <!-- 全体図。🔴 ピッチの canvas の中ではなく**独立した枠**（デザインの右下の箱）。
+       盤の縦が短くなったので、中に置くと視界を食う。 -->
+  <canvas id="miniMap" class="mini-map" width="300" height="195" aria-hidden="true"></canvas>
+
+  <!-- 試合の節目の演出（キックオフ／ハーフタイム／試合終了）。
+       🔑 中身は `src/web/ceremony.ts` が作る。押せば飛ばせる。 -->
+  <div id="ceremony" class="ceremony" hidden></div>
 
   <div id="goalFlash" class="goal-flash" hidden>
     <span class="goal-word">ゴール！</span>
@@ -282,6 +337,9 @@
     <button id="mcPlay" class="btn">一時停止</button>
     <button id="mcSpeed" class="btn">速さ ×1（実時間）</button>
     <button id="mcSkip" class="btn">結果まで飛ばす</button>
+    <!-- 🔑 盤の倍率は整数だけ。窓にブラウザの枠がある状態では高さが足りず2倍で止まる。
+         全画面にすると 1920×1080 がそのまま使えて**3倍**になる。 -->
+    <button id="mcFull" class="btn">全画面にする</button>
   </div>
 
   <div id="matchResult" class="panel" hidden>
@@ -308,6 +366,15 @@
      🔑 ここに入るものは**見た目だけ**で、試合の規則は1行も持たない（§6）。 -->
 <div id="fxLayer" aria-hidden="true"></div>
 
+<!-- 🔑 module ではなく普通の script。カスタム要素をすぐ登録したいので、
+     main.js（module＝遅延実行）より先に読む -->
+<!-- 🔑 デザイン由来の背景（街・商店街・事務所）。普通の script でグローバルに関数を置く。
+     `src/web/bg.ts` がそれを読んで画面へ敷く。読み込み順はここが先。 -->
+<script src="bg/lib.js"></script>
+<script src="bg/town.js"></script>
+<script src="bg/arcade.js"></script>
+<script src="bg/office.js"></script>
+<script src="scene/stadium.js"></script>
 <script type="module" src="js/web/main.js"></script>
 </body>
 </html>

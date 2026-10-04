@@ -8,9 +8,13 @@
 import * as api from "./api.ts";
 import type { Bootstrap, PlayNextResult, PlayerView, View } from "./api.ts";
 import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
-import * as City from "./city.ts";
+import * as Bg from "./bg.ts";
+import * as Board from "./board.ts";
+import * as Ceremony from "./ceremony.ts";
 import * as Fx from "./fx.ts";
-import * as Pitch from "./pitch.ts";
+/* 🔑 試合の描画は3Dに一本化した（D-33）。外から見える形は前のままなので、
+      ここは読み込み先が変わるだけ。別名は `Pitch` のまま置く。 */
+import * as Pitch from "./match3d.ts";
 
 const SAVE_KEY = "dot-soccer-save-v1";
 
@@ -30,7 +34,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string | null,
 
 let boot: Bootstrap | null = null;        // 変わらない情報（カード一覧・選択肢）
 let view: View | null = null;             // いまの状態
-let plan: Record<string, number> = {};    // 初期育成の配分
+/* チーム作成の画面で触っている配置の下書き。まだチームが無いので、ここに持つ。
+   🔑 `null` は「既定のまま触っていない」。触っていなければ開幕時に何も渡さない。 */
+let setupSlots: [number, number][] | null = null;
 let selectedPlayer: number | null = null;
 let selectedCards: string[] = [];
 let matchData: PlayNextResult | null = null;
@@ -55,12 +61,78 @@ const V = (): View => {
  * 🔑 上の表示板（`#hudBar`）は画面の外にある1本なので、ここでまとめて出し入れする
  *    （2026-10-02 の街ハブ化）。タイトルとチーム作成では、まだチームが無いので出さない。
  */
-const NO_HUD = new Set(["boot", "setup"]);
+/* 🔑 試合は全画面なので、上の表示板も出さない（2026-10-03）。
+      試合中に見たいのは得点板であって、順位や節ではない。 */
+const NO_HUD = new Set(["boot", "setup", "match"]);
+
+/**
+ * 画面ごとの背景の絵（`web/bg/` に置いたもの）。
+ *
+ * 🔴 いまは空。絵のファイルを持ち込む画面ができたらここへ1行足す。
+ *    街・商店街・事務所は**コードで描く**ほうを採った（下の `BG_CODE`）。
+ * 🔑 選手とピッチは**絵にしない**。商店街で買う見た目で色を差し替える仕様なので、
+ *    焼き込むと着せ替えが機能しなくなる。
+ */
+const BG_PHOTO: Record<string, string> = {};
+
+/**
+ * デザイン由来の**コードで描く背景**を使う画面（2026-10-03 取り込み）。
+ *
+ * 🔑 街は画面の中の `cityCanvas` に敷く（押せる場所を重ねるため）。
+ *    商店街と事務所は画面の外の1枚（`roomCanvas`）に敷く。
+ * 🗑 これが入ったことで `city.ts`（街の絵）と `room.ts`（施設の中の絵）は役目を終えた。
+ */
+const BG_CODE: Record<string, Bg.Kind> = {
+  shop: "arcade",
+  office: "office",
+};
+
+/**
+ * デザイン由来の**動く背景**を使う画面（D-28）。値は `<stadium-scene>` の `screen` 属性。
+ *
+ * 🔑 `title` / `menu` / `result` は同じ「引きの構え」。`menu` だけ少しぼかして暗くなるので、
+ *    手前にパネルを置く画面（チーム作成・サッカー場）に向く。
+ * 🗑 2026-10-03: 街・商店街・事務所はデザインから届いたので `BG_CODE` へ移した。
+ * 🔴 `match` はまだ入れていない。デザインの `match` は**自前のピッチの絵も描く**ので、
+ *    本物の試合描画と重なる。組み合わせ方を決めてから入れる。
+ */
+const BG_SCENE: Record<string, string> = {
+  boot: "title",
+  setup: "menu",
+  stadium: "result",
+  /* 🗑 2026-10-03: `match` を外した（D-33）。
+        試合の描画を3Dにして**観客席も屋根も自前で描くようになった**ので、
+        後ろにデザインの2Dスタンド帯を敷くと**スタジアムが二重に見える**。
+        上は2Dの客席、下は3Dの客席、という割れ方をしていた。 */
+};
 
 function showScreen(id: string): void {
   for (const s of document.querySelectorAll(".screen")) s.classList.remove("is-on");
   $(id).classList.add("is-on");
   $("hudBar").hidden = NO_HUD.has(id);
+  /* 施設の背景。
+     🔴 **絵があればそれを敷き、無ければ手続きで描く**（2026-10-03 D-26）。
+        絵と手続きが同時に出ることは無い。差し替え口をここ1か所にしておくと、
+        絵が増えるたびに `BG_PHOTO` へ1行足すだけで済む。 */
+  const scene = $("bgScene");
+  const photo = $("bgPhoto");
+  const room = $<HTMLCanvasElement>("roomCanvas");
+  const scr = BG_SCENE[id];
+  const src = BG_PHOTO[id];
+  const code = BG_CODE[id];
+  scene.hidden = scr === undefined;
+  photo.hidden = src === undefined;
+  room.hidden = code === undefined;
+  if (scr !== undefined) {
+    $("bgSceneEl").setAttribute("screen", scr);
+  } else if (src !== undefined) {
+    photo.style.backgroundImage = `url("${src}")`;
+  } else if (code !== undefined) {
+    /* 🔑 `hidden` を外してから描く。隠れている要素は大きさが 0 なので、
+          先に描くと1倍で描いてしまう */
+    room.hidden = false;
+    Bg.draw(room, code);
+  }
   window.scrollTo(0, 0);
 }
 
@@ -115,64 +187,35 @@ function hasSave(): boolean {
   }
 }
 
-/* -------------------------------------------------- チーム作成の初期育成 */
+/* ------------------------------------------------ チーム作成（配置の下書き） */
 
-function renderPlanRows(): void {
-  const rows = $("planRows");
-  rows.textContent = "";
-  for (const [key, card] of Object.entries(B().cards)) {
-    const row = el("div", "plan-row");
-    row.append(el("span", null, card.label));
-    const range = el("input");
-    range.type = "range";
-    range.min = "0";
-    range.max = String(B().trainings_per_player);
-    range.value = String(plan[key] || 0);
-    range.addEventListener("input", () => {
-      plan[key] = Number(range.value);
-      updatePlanTotal();
-    });
-    const out = el("output", null, String(plan[key] || 0));
-    out.dataset.key = key;
-    row.append(range, out);
-    rows.append(row);
-  }
-  updatePlanTotal();
+/**
+ * チーム作成の画面の配置盤。**まだチームが無い状態**で描く。
+ *
+ * 🔴 ここで `api.newGame` を呼ばない。呼ぶと「開幕していないのにゲームが始まっている」
+ *    状態ができて、途中でやめたときに中途半端なセーブが残る。
+ *    `api.previewLineup()` が使い捨てのチームを組んで、並びだけ返す。
+ * 🔑 名前も本物（同じ運の種なら開幕後と同じ11人）。仮名で並べると
+ *    「開幕したら知らない名前になっていた」になる。
+ */
+function renderSetupBoard(): void {
+  const list = call(() => api.previewLineup($<HTMLInputElement>("teamName").value,
+                                            Number($<HTMLInputElement>("seed").value),
+                                            $<HTMLSelectElement>("formation").value));
+  if (!list) return;
+  /* 触った配置があれば、その座標を重ねて見せる（名前と位置の名はいまの顔ぶれから） */
+  const draft = setupSlots;
+  const shown = draft === null ? list
+    : list.map((sp, i) => ({ ...sp, x: draft[i]?.[0] ?? sp.x, y: draft[i]?.[1] ?? sp.y }));
+  Board.render($("setupBoard"), shown, {
+    commit(spots) {
+      setupSlots = spots;
+      $("setupBoardMsg").textContent = "この位置で開幕します。";
+    },
+    say(text) { $("setupBoardMsg").textContent = text; },
+  });
 }
 
-function updatePlanTotal(): void {
-  const total = Object.values(plan).reduce((a, b) => a + b, 0);
-  const target = B().trainings_per_player;
-  $("planUsed").textContent = String(total);
-  $("planTotal").textContent = String(target);
-  $("planTotalTarget").textContent = String(target);
-  for (const out of $("planRows").querySelectorAll("output")) {
-    out.textContent = String(plan[out.dataset.key ?? ""] || 0);
-  }
-  for (const r of $("planRows").querySelectorAll<HTMLInputElement>('input[type="range"]')) {
-    const key = r.parentElement?.querySelector("output")?.dataset.key ?? "";
-    r.value = String(plan[key] || 0);
-  }
-  /* 🔴 「ちょうど20回」でなければ開幕させない。足りないとAIだけ育った状態で始まる */
-  const ok = total === target;
-  $<HTMLButtonElement>("startBtn").disabled = !ok;
-  $("planWarn").textContent = ok ? ""
-    : (total < target ? `（あと ${target - total} 回）` : `（${total - target} 回 多い）`);
-}
-
-function renderPlanPresets(): void {
-  const box = $("planPresets");
-  box.textContent = "";
-  for (const [name, preset] of Object.entries(B().preset_plans)) {
-    const chip = el("button", "chip", name);
-    chip.type = "button";
-    chip.addEventListener("click", () => {
-      plan = { ...preset };
-      updatePlanTotal();
-    });
-    box.append(chip);
-  }
-}
 
 /* ---------------------------------------------------------------- ホーム */
 
@@ -476,6 +519,27 @@ function renderTacticsForm(): void {
 
   renderPolicyRows();
   $("policyMax").textContent = String(B().policy_max_rules);
+  renderBoard();
+}
+
+/**
+ * 配置盤。**動かした瞬間に `src/sim/` へ入れて、返ってきた値で描き直す。**
+ *
+ * 🔑 盤の中に「いまの配置」を貯めない。貯めると、規則に弾かれた動きが
+ *    盤の上だけ残って「画面では動いているのに試合では元の位置」になる。
+ */
+function renderBoard(): void {
+  Board.render($("lineupBoard"), V().lineup, {
+    commit(spots) {
+      const out = call(() => api.setLineup(spots));
+      /* 弾かれたら盤を描き直して**元の位置に戻す**（嘘の表示を残さない） */
+      if (!out) { renderBoard(); return; }
+      view = out;
+      $("lineupMsg").textContent = "配置を変えました。";
+      saveGame(true);
+    },
+    say(text) { $("lineupMsg").textContent = text; },
+  });
 }
 
 function fillSelect(node: HTMLSelectElement, options: readonly string[], current: string): void {
@@ -647,12 +711,28 @@ function startMatch(): void {
   showScreen("match");
 
   lastScore = null;
+  skipAll = false;
+  const sides: Ceremony.Sides = {
+    home: out.teams[0], away: out.teams[1], myIndex: out.my_index,
+  };
   Pitch.load(out.replay, out.events, out.teams[0], {
+    /* 🔴 前半の終わりで一度止めて、ハーフタイム → 後半のキックオフ → 再生、の順に進める。
+          止めずに通すと、45分の区切りが**数字が変わるだけ**になって気づけない。 */
+    onHalfTime: () => {
+      const s = Pitch.state();
+      void Ceremony.halfTime(sides, s.home, s.away, scorersUpTo(out.events, s.tick))
+        .then(() => Ceremony.kickoff(2, sides))
+        .then(() => Pitch.resume());
+    },
     onUpdate: (s) => {
-      /* 🔴 スコアが動いた瞬間に知らせる。数字が増えるだけだと見逃す */
+      /* 🔴 スコアが動いた瞬間に知らせる。数字が増えるだけだと見逃す。
+         🔴 **先に `lastScore` を進めてから**知らせる。知らせる処理が投げると、
+            ここに到達せず**毎コマ同じ得点を検出して投げ続ける**ことになり、
+            得点板も時計も止まったまま例外だけが流れる画面になる。 */
       const now = `${s.home}-${s.away}`;
-      if (lastScore !== null && lastScore !== now) showGoal(s.event);
+      const scored = lastScore !== null && lastScore !== now;
       lastScore = now;
+      if (scored) announceGoal(sides, s);
       $("sbScore").textContent = `${s.home} - ${s.away}`;
       $("sbClock").textContent = minuteText(s.tick);
       const t = $("ticker");
@@ -666,8 +746,54 @@ function startMatch(): void {
         t.append(el("span", null, "キックオフ"));
       }
     },
-    onFinish: showMatchResult,
+    onFinish: () => {
+      /* 🔑 「結果まで飛ばす」を押した人には演出も出さない。
+            飛ばしたのに幕が出るのは、押した意味を無視している */
+      if (skipAll) { showMatchResult(); return; }
+      const s = Pitch.state();
+      void Ceremony.fullTime(sides, s.home, s.away).then(showMatchResult);
+    },
   });
+
+  /* 🔑 キックオフの演出のあいだは止めておく。
+        笛の前に試合が動き出すと「もう始まっていた」ことになる */
+  Pitch.pause();
+  void Ceremony.kickoff(1, sides).then(() => Pitch.resume());
+}
+
+/** `tick` までに入ったゴールを、ハーフタイムの一覧に出す形で拾う */
+function scorersUpTo(events: MatchEvent[], tick: number): Ceremony.Scorer[] {
+  const out: Ceremony.Scorer[] = [];
+  for (const e of events) {
+    if (e.tick > tick) break;
+    if (e.type !== "ゴール") continue;
+    out.push({ time: e.time, team: e.team, player: e.player ?? "—" });
+  }
+  return out;
+}
+
+/** 「結果まで飛ばす」を押したか。押したら節目の演出も出さない */
+let skipAll = false;
+
+/**
+ * 得点が入ったことを知らせる。**ここが「いつ沸くか」を知っている唯一の場所。**
+ *
+ * 🔑 描画（観客）も演出も、判定は持たずに言われたとおり動く。
+ *    判定を両方に置くと、片方を直したときに静かにずれる。
+ */
+function announceGoal(sides: Ceremony.Sides, s: { event: MatchEvent | null;
+                                                  home: number; away: number }): void {
+  const ev = s.event;
+  showGoal(ev);
+  /* 観客を沸かせる。時間とともに冷める（`match3d.ts` の EXCITE_FADE） */
+  Pitch.cheer();
+
+  /* 🔑 演出は**得点者が分かるときだけ**出す。分からないまま出すと
+        「誰が入れたのか分からない幕」が1.5秒出るだけで、情報が増えない。
+     🔴 飛ばしているときは出さない。 */
+  if (skipAll || ev === null || ev.type !== "ゴール" || !ev.player) return;
+  void call(() => Ceremony.goal(sides, { time: ev.time, team: ev.team, player: ev.player ?? "—" },
+                                s.home, s.away));
 }
 
 let goalTimer = 0;
@@ -743,6 +869,7 @@ function showMatchResult(): void {
 
 function main(): void {
   Pitch.attach($<HTMLCanvasElement>("pitch"));
+  Pitch.attachMini($<HTMLCanvasElement>("miniMap"));
 
   /* 🔑 以前は Pyodide（ブラウザで Python を動かす仕組み、約10MB）を読み込んでいた。
         TypeScript になったので待つものは無い。表示だけ一瞬で満たす */
@@ -751,16 +878,13 @@ function main(): void {
 
   boot = call(() => api.bootstrap());
   if (!boot) return;
-  plan = { ...boot.default_plan };
 
   fillSelect($<HTMLSelectElement>("formation"), boot.formations, boot.formations[0] ?? "4-4-2");
-  renderPlanRows();
-  renderPlanPresets();
   $<HTMLButtonElement>("loadBtn").disabled = !hasSave();
   /* 🔑 建物の絵と、押せる場所の位置を**同じ1か所（`city.ts` の SPOTS）から出す**。
         CSS に座標を書き写すと、絵を動かしたときに押せる場所だけ取り残される */
-  City.draw($<HTMLCanvasElement>("cityCanvas"));
-  for (const [key, at] of Object.entries(City.SPOTS)) {
+  Bg.draw($<HTMLCanvasElement>("cityCanvas"), "town");
+  for (const [key, at] of Object.entries(Bg.TOWN_SPOTS)) {
     const spot = $(`go${key[0]!.toUpperCase()}${key.slice(1)}`);
     spot.style.left = `${at.left}%`;
     spot.style.top = `${at.top}%`;
@@ -769,7 +893,29 @@ function main(): void {
   showScreen("boot");
 
   /* ---- タイトル → チーム作成 ---- */
-  $("titleNew").addEventListener("click", () => { showScreen("setup"); });
+  $("titleNew").addEventListener("click", () => {
+    showScreen("setup");
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "";
+    renderSetupBoard();
+  });
+
+  /* 🔴 フォーメーションを変えたら配置の下書きは捨てる。枠の数は4つとも11で同じなので
+        検査は通ってしまうが、4-4-2 のために置いた座標を 3-4-3 に当てても意味が無い。
+     🔑 運の種と名前は**顔ぶれが変わるだけ**なので、置いた位置は保つ。 */
+  $("formation").addEventListener("change", () => {
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "";
+    renderSetupBoard();
+  });
+  for (const id of ["seed", "teamName"]) {
+    $(id).addEventListener("input", () => { renderSetupBoard(); });
+  }
+  $("setupBoardReset").addEventListener("click", () => {
+    setupSlots = null;
+    $("setupBoardMsg").textContent = "フォーメーションの形に戻しました。";
+    renderSetupBoard();
+  });
 
   /* ---- 街から施設へ、施設から街へ ----
      🔑 行き先は押されたボタンの `data-go`、戻りは `data-back` が持つ。
@@ -784,10 +930,20 @@ function main(): void {
 
   /* ---- チーム作成 ---- */
   $("startBtn").addEventListener("click", () => {
-    const out = call(() => api.newGame($<HTMLInputElement>("teamName").value,
-                                       Number($<HTMLInputElement>("seed").value),
-                                       $<HTMLSelectElement>("formation").value, plan));
+    /* 🔑 初期育成の配分は渡さない（2026-10-03 オーナー指示で画面から外した）。
+          省くと `src/sim/presets.ts` の既定の配分で全員が育つ。 */
+    let out = call(() => api.newGame($<HTMLInputElement>("teamName").value,
+                                     Number($<HTMLInputElement>("seed").value),
+                                     $<HTMLSelectElement>("formation").value));
     if (!out) return;
+    /* 🔴 配置は**チームができてから**入れる。作る前の盤は使い捨てのチームで
+          描いているので、ここで本物のチームへ入れ直す必要がある。 */
+    const slots = setupSlots;
+    if (slots !== null) {
+      const moved = call(() => api.setLineup(slots));
+      if (!moved) return;
+      out = moved;
+    }
     view = out;
     policyDraft = view.policy.map((r) => ({ ...r }));
     renderHome();
@@ -886,6 +1042,26 @@ function main(): void {
     renderPolicyRows();
   });
   $("tacticsSave").addEventListener("click", saveTactics);
+  $("lineupReset").addEventListener("click", () => {
+    const out = call(() => api.resetLineup());
+    if (!out) return;
+    view = out;
+    $("lineupMsg").textContent = "フォーメーションの形に戻しました。";
+    renderBoard();
+    saveGame(true);
+  });
+  /* 🔑 フォーメーションを選び直したら盤も入れ替わる。
+        「決める」を押すまで古い形のままだと、何を触っているのか分からない */
+  $("tFormation").addEventListener("change", () => {
+    const out = call(() => api.setTactics(Number($<HTMLInputElement>("tLine").value),
+                                          Number($<HTMLInputElement>("tWidth").value),
+                                          $<HTMLSelectElement>("tAttitude").value,
+                                          $<HTMLSelectElement>("tFormation").value));
+    if (!out) return;
+    view = out;
+    $("lineupMsg").textContent = "";
+    renderBoard();
+  });
 
   /* ---- 試合の操作 ---- */
   $("mcPlay").addEventListener("click", () => {
@@ -902,7 +1078,29 @@ function main(): void {
     Pitch.setSpeed(SPEEDS[speedAt]!);
     $("mcSpeed").textContent = speedLabel(SPEEDS[speedAt]!);
   });
-  $("mcSkip").addEventListener("click", () => Pitch.skipToEnd());
+  $("mcSkip").addEventListener("click", () => {
+    /* 🔑 出ている演出を先に畳む。畳まずに飛ばすと、
+          結果の上にハーフタイムの幕が残って操作できなくなる */
+    skipAll = true;
+    Ceremony.cancel();
+    Pitch.skipToEnd();
+  });
+
+  /* 全画面。🔑 盤の倍率は整数なので、窓にブラウザの枠があると高さが足りず2倍で止まる。
+     全画面にすると 1920×1080 がそのまま使えて3倍になる（`pitch.ts` の fit()）。 */
+  $("mcFull").addEventListener("click", () => {
+    const btn = $<HTMLButtonElement>("mcFull");
+    if (document.fullscreenElement === null) {
+      /* 🔑 失敗を黙らせない。ブラウザや設定によっては断られる */
+      document.documentElement.requestFullscreen().catch((e: unknown) => {
+        showError(`全画面にできませんでした（${e instanceof Error ? e.message : String(e)}）。`
+                  + "  ブラウザの全画面（F11）でも同じ大きさになります。");
+      });
+    } else {
+      void document.exitFullscreen();
+    }
+    btn.textContent = document.fullscreenElement === null ? "全画面をやめる" : "全画面にする";
+  });
   $("matchDone").addEventListener("click", () => {
     Pitch.stop();
     renderHome();

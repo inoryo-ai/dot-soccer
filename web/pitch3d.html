@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>3Dのサッカー場 — 本物の試合データを再生（.soccer）</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+/* 🔑 検証用。ゲーム本体には出ない。見ることだけに絞った最小限の見た目。 */
+.p3 { max-width: 1500px; margin: 0 auto; padding: calc(var(--px) * 8); }
+.p3-head { display: flex; gap: calc(var(--px) * 6); align-items: baseline; flex-wrap: wrap; }
+.p3-note { color: var(--ink-dim); font-size: .82rem; }
+.p3-stage {
+  position: relative;
+  margin-top: calc(var(--px) * 6);
+  background: #8fd0ef;
+  border: var(--w-frame) solid var(--ui-edge);
+  overflow: hidden;
+}
+.p3-stage canvas { display: block; width: 100%; height: auto; }
+.p3-clock {
+  position: absolute;
+  left: 0; top: 0;
+  z-index: 2;
+  padding: calc(var(--px) * 2) calc(var(--px) * 6);
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--home);
+  background: var(--ui-edge);
+}
+.p3-ctrl {
+  display: flex;
+  gap: calc(var(--px) * 5);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: calc(var(--px) * 6);
+  padding: calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.p3-ctrl label { font-size: .82rem; font-weight: 700; color: var(--ink-dim); }
+.p3-slider { display: flex; align-items: center; gap: calc(var(--px) * 3); }
+.p3-slider input[type="range"] { width: 11rem; height: calc(var(--px) * 14); }
+.p3-val { font-weight: 800; min-width: 3.5rem; }
+</style>
+</head>
+<body>
+
+<div class="p3">
+  <div class="p3-head">
+    <h1 style="margin:0;font-size:1.3rem;">3Dのサッカー場 — 本物の試合データを再生</h1>
+    <span class="p3-note">
+      バランス型 vs プレス型／シード1000。
+      <strong>いまの試合画面とまったく同じリプレイ</strong>を、描き方だけ変えて出しています。
+    </span>
+  </div>
+
+  <pre id="err" hidden style="white-space:pre-wrap;margin:calc(var(--px) * 4) 0;padding:calc(var(--px) * 4);background:#fff0ee;border:var(--w-frame) solid var(--danger-dark);color:#7a1a12;font-size:.78rem;"></pre>
+
+  <div class="p3-stage">
+    <span id="clock" class="p3-clock">0:00</span>
+    <canvas id="view3d" width="1280" height="720"></canvas>
+  </div>
+
+  <div class="p3-ctrl">
+    <button id="playBtn" class="btn">一時停止</button>
+    <button id="rewindBtn" class="btn">最初から</button>
+    <button id="followBtn" class="btn">ボールを追う: オン</button>
+    <button id="namesBtn" class="btn">名前: 出す</button>
+
+    <div class="p3-slider">
+      <label for="speed">速さ</label>
+      <input id="speed" type="range" min="25" max="600" value="100">
+      <span id="speedVal" class="p3-val">1.0x</span>
+    </div>
+  </div>
+
+  <div class="p3-ctrl">
+    <label style="font-weight:800;color:var(--ink);">カメラ</label>
+
+    <div class="p3-slider">
+      <label for="camYaw">向き</label>
+      <input id="camYaw" type="range" min="0" max="360" value="90">
+      <span id="camYawVal" class="p3-val">90°</span>
+    </div>
+
+    <div class="p3-slider">
+      <label for="camPitch">見下ろし</label>
+      <input id="camPitch" type="range" min="5" max="85" value="40">
+      <span id="camPitchVal" class="p3-val">40°</span>
+    </div>
+
+    <div class="p3-slider">
+      <label for="camDist">引き</label>
+      <input id="camDist" type="range" min="8" max="90" value="20">
+      <span id="camDistVal" class="p3-val">20m</span>
+    </div>
+  </div>
+
+  <p class="p3-note" style="margin-top:calc(var(--px) * 5);">
+    🔑 ピッチの寸法は競技規則の数字（105×68m・ペナルティ16.5×40.3m・ゴール7.32×2.44m）。
+    外部ライブラリも WebGL も使っていません（要件 §6）。
+    <strong>カメラの向き・見下ろし・引きを動かしても、絵を描き直す必要がありません</strong>
+    — これが3Dにする一番の理由です。
+  </p>
+</div>
+
+<script type="module" src="js/web/pitch3d.js"></script>
+</body>
+</html>

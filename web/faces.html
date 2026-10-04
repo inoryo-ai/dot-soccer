@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>顔パーツの確認台 — 髪20 × 顔10 × 色5（.soccer）</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+/* 🔑 確認用。ゲーム本体には出ない。並べて見ることだけに絞った見た目。 */
+.fc { max-width: 1500px; margin: 0 auto; padding: calc(var(--px) * 8); }
+.fc-head-row { display: flex; gap: calc(var(--px) * 6); align-items: baseline; flex-wrap: wrap; }
+.fc-note { color: var(--ink-dim); font-size: .82rem; }
+.fc-ctrl {
+  display: flex; gap: calc(var(--px) * 6); flex-wrap: wrap; align-items: center;
+  margin: calc(var(--px) * 6) 0;
+  padding: calc(var(--px) * 5);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+}
+.fc-ctrl .chip { display: flex; align-items: center; gap: calc(var(--px) * 2); }
+.fc-ctrl canvas { display: block; }
+
+#grid { overflow-x: auto; }
+.fc-row { display: flex; align-items: center; gap: var(--px); }
+.fc-label {
+  width: 7rem; flex: none;
+  font-size: .76rem; font-weight: 800; color: var(--ink-dim);
+  text-align: right; padding-right: calc(var(--px) * 3);
+}
+.fc-head {
+  width: calc(var(--px) * 30); flex: none;
+  font-size: .72rem; font-weight: 800; color: var(--ink-dim); text-align: center;
+}
+.fc-cell {
+  width: calc(var(--px) * 30); flex: none;
+  display: grid; place-items: center;
+  padding: var(--px) 0;
+}
+.fc-cell canvas { display: block; }
+
+#names { display: flex; flex-wrap: wrap; gap: calc(var(--px) * 5); margin-top: calc(var(--px) * 4); }
+.fc-name {
+  display: flex; flex-direction: column; align-items: center; gap: var(--px);
+  padding: calc(var(--px) * 3);
+  background: var(--panel);
+  border: var(--w-frame) solid var(--ui-edge);
+  min-width: calc(var(--px) * 46);
+}
+.fc-name canvas { display: block; }
+.fc-name-text { font-size: .8rem; font-weight: 800; }
+.fc-name-sub { font-size: .68rem; color: var(--ink-dim); }
+#nameInput { width: 100%; min-height: 7rem; font: inherit; }
+</style>
+</head>
+<body>
+
+<div class="fc">
+  <div class="fc-head-row">
+    <h1 style="margin:0;font-size:1.3rem;">顔パーツの確認台</h1>
+    <span class="fc-note">
+      <strong id="count">—</strong>。
+      12×12 のドットに<strong>コードで描いている</strong>（画像ファイルは持ち込まない・要件 §6）。
+    </span>
+  </div>
+
+  <div class="fc-ctrl">
+    <label style="font-weight:800;">髪の色</label>
+    <div id="colors" class="chip-row"></div>
+    <label for="zoom" style="font-weight:800;">大きさ</label>
+    <input id="zoom" type="range" min="2" max="8" value="4">
+    <span id="zoomVal" style="font-weight:800;">4倍</span>
+  </div>
+
+  <h2 class="sub-title">髪20 × 顔10（選んだ色で）</h2>
+  <div id="grid"></div>
+
+  <h2 class="sub-title" style="margin-top:calc(var(--px) * 10);">名前から決まる顔</h2>
+  <p class="fc-note">
+    🔴 誰がどの顔になるかは<strong>名前から決まる</strong>（保存しない）。
+    セーブに顔の番号を書くと、髪型を1つ足したときに<strong>全員の顔がずれる</strong>。
+    ここで見たいのは「同じ名前が同じ顔になること」より、
+    <strong>違う名前が散らばること</strong>。偏ると同じ顔ばかりのチームになる。
+  </p>
+  <textarea id="nameInput" spellcheck="false">九条 翔太
+御堂 涼
+遠野 礼
+白瀬 涼
+東雲 礼
+犬飼 隼
+巴 蒼真
+遠野 叶
+御堂 拓実
+東雲 陸
+遠野 陸</textarea>
+  <div id="names"></div>
+</div>
+
+<script type="module" src="js/web/faces.js"></script>
+</body>
+</html>

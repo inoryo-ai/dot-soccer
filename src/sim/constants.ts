@@ -130,8 +130,14 @@ export const STAMINA_DRAIN_PER_METER = 0.028;     // 走った距離に比例し
 //    実測（2026-10-01）: 息切れ人数が全チームほぼ同じ（11.0〜11.8人）で、
 //    走力型（stamina=100）の全体勝率が 31.5% と最下位だった。
 //    体力差が後半の差になるよう、疲れたときの落ち込みを深くする。
-export const STAMINA_SKILL_FLOOR = 0.56;          // スタミナ0のとき技術・体の強さがこの割合まで落ちる
-export const STAMINA_SPEED_FLOOR = 0.30;          // スタミナ0でも最大速度の30%は出る（走り続ける戦術の代償）
+// 🔴 D-41（2026-10-04）で 0.56 → 0.80 / 0.30 → 0.35 に直した。
+//    判断が効用（最大を選ぶ）になると、体力の差がそのまま「動けない相手を走り負かす」差になり、
+//    体力100の走力型が勝率 87% になった（くじの頃は 54%）。疲れの効きを和らげて戻した。
+//    不採用: 速度の床 0.45 … 走力型は 48〜53% に戻るが、今度は**プレス型が 72〜82%**・走行 116km超
+//            （走り続ける代償が消える。下の「速度だけに効かせると」と同じ失敗）
+//    不採用: 体力の減り 0.014〜0.020 … 全員が元気なぶん攻め合いになり、得点 2.2〜3.5・走行 107〜132km
+export const STAMINA_SKILL_FLOOR = 0.80;          // スタミナ0のとき技術・体の強さがこの割合まで落ちる
+export const STAMINA_SPEED_FLOOR = 0.35;          // スタミナ0でも最大速度の35%は出る（走り続ける戦術の代償）
 export const ARRIVE_EPSILON = 0.35;               // これ未満の距離は移動しない（微振動を防ぐ）
 // 🔑 この2つは「走行距離が1試合191kmになった」ときの抑制として入れた。
 //    いまは逆に効きすぎていて、**持ち場の微調整がすべて55%速度**になり、
@@ -165,7 +171,11 @@ export const MARK_MAX_M = 22.0;
 
 // ------------------------------------------------------------------- 判定 §9
 export const SHOOT_RANGE_M = 24.0;                // これより遠いと基本的に撃たない
-export const SHOOT_BASE = 0.62;                   // ゴール期待値の基準（距離0・kick50・GK50）
+// 🔴 D-41（2026-10-04）で 0.62 → 0.48。撃つ判断が「入る見込みが一番高いときに撃つ」になり、
+//    同じ物理のままだと決定率が 13〜30% に上がった（くじの頃は撃つ位置を選んでいなかった）。
+//    🔑 下げると「遠くから撃たずに近くまで運ぶ」に切り替わるので、得点は単調には下がらない
+//       （他の値をそろえて 0.42 で得点 2.09 / 0.48 で 2.01・各組4試合）。掃き出し `scripts/sweep.ts` で決めた
+export const SHOOT_BASE = 0.48;                   // ゴール期待値の基準（距離0・kick50・GK50）
 export const SHOOT_DISTANCE_DECAY = 0.115;        // 距離1mあたりの減衰（指数）
 export const SHOOT_KICK_WEIGHT = 0.8;             // kick の効き（kick=50 で係数1.0）
 // 🔴 **技術が「決める力」に効いていなかった。** 入るかどうかは kick だけで決まり、
@@ -176,47 +186,41 @@ export const SHOOT_TECHNIQUE_WEIGHT = 0.35;       // technique の効き（techn
 export const SHOOT_GK_WEIGHT = 0.9;               // GKの能力差の効き
 export const SHOOT_PRESSURE_PENALTY = 0.13;       // 半径4m以内の相手1人あたりの減衰
 
-// ----------------------------------------------- 撃つかどうか（入るかどうかとは別）
+// ------------------------------------------ ボールを持った人の判断（効用・D-41）
 //
-// 🔴 **「入る確率」と「撃つ確率」を同じ数字にしない。**
-//    以前は `撃つ = 0.015 + 1.00 × ゴール期待値` だったので、12mで期待値0.10なら
-//    撃つのも10%。実測で **6〜12mの判断2回すべてで撃たなかった**。
-//    オーナー指摘（2026-09-30）「シュート出来る位置にいるのにシュートしない」。
+// 🔑 撃つ・出す・運ぶを**同じ物差し**（そこから点になる見込み＝得点の単位）で採点し、
+//    最大を選ぶ（`engine.ts` の `onBallChoices`）。くじは引かない。
 //
-// 🔑 実際の選手は別に考える。近ければ入る確率が低くても撃つ。
-//    期待値は**入るかどうか**（`expectedGoal`）だけに使う。
-// 🔑 撃つ気は**距離で直接**決める。期待値に比例させると、
-//    期待値が低い遠距離でもそれなりに撃ってしまい、シュートだけ増えて
-//    決定率が落ちる（実測 2026-10-01: シュート16〜28本・決定率4.7〜8.3%）。
-export const SHOOT_WILL_NEAR = 1.08;              // 距離0mでの撃つ気（1を超えるのは意図的）
-export const SHOOT_WILL_PER_M = 0.048;            // 1m遠くなるごとに下がる量
-export const SHOOT_WILL_PRESSURE = 0.11;          // 半径4m以内の相手1人あたり下がる量
-export const SHOOT_DECISION_GOAL_WAIT = 0.0018;   // goal_wait 1あたり撃ちたがる
+// 🔴 **ここに以前あった「くじ」の定数は、D-41 で捨てた。** 次の人が戻さないよう経緯を残す。
+//    - `SHOOT_WILL_NEAR 1.08 / SHOOT_WILL_PER_M 0.048 / SHOOT_WILL_PRESSURE 0.11 /
+//      SHOOT_DECISION_GOAL_WAIT 0.0018` … 撃つ気を距離で直接決めていた（D-13）。
+//      「入る確率をそのまま撃つ確率に使わない」という D-13 の教訓は、効用でも守っている。
+//      撃つの採点は入る確率だが、比べる相手は「持ち続けた場合の見込み」なので、
+//      近ければ入る確率が低くても撃つ（`tests/ball_decisions.test.ts`）。
+//    - `PASS_URGE_BASE 0.32 / PASS_URGE_PER_PRESSER 0.14` … 出すかどうかのくじ。
+//    - `PASS_MIN_SCORE 0.34` … 「出さない」の基準（D-14）。効用では運ぶ・撃つと
+//      比べて負ければ出さないので、別の基準が要らなくなった。
+//    - `PASS_URGENCY_RELIEF 0.0` … 追い込まれたら基準を下げる案は**不採用**だった
+//      （0.22 で堅守型の勝率が 70.2% → 74.0% に悪化・2026-10-01）。
+//    - `PASS_BACKWARD_PENALTY 0.55 / PASS_FORWARD_BONUS_M 40.0` … 前向きを好む補正。
+//      効用では受け手の位置の価値（`THREAT_*`）がそのまま前を好む形になる。
+//    🔴 これらは「ゴール前で攻撃が止まる」（16.5〜24m に保持の 76.5%）の原因の側にあった。
+//
+// 🔑 そこでボールを持っていることの価値 = THREAT_PEAK × exp(-THREAT_DECAY × ゴールまでの距離)
+//    xT（期待脅威）の考え方。撃つ価値（`expectedGoal`）より緩やかに減るので、
+//    遠くでは「撃つより持ち続ける」、近くでは「持ち続けるより撃つ」が自然に出る。
+export const THREAT_PEAK = 0.42;                  // ゴールの目の前で持っている価値
+export const THREAT_DECAY = 0.06;                // 1m遠くなるごとの減衰（指数）
+export const SHOOT_GOAL_WAIT_BIAS = 0.5;          // goal_wait=100 で撃つ採点が何倍増しになるか
 
 export const PASS_MAX_M = 45.0;
-export const PASS_URGE_BASE = 0.32;               // 出す／運ぶの基礎確率
-export const PASS_URGE_PER_PRESSER = 0.14;        // 6m以内の相手1人あたり出したくなる
-
-// ----------------------------------------------------- 出す相手を選ぶ（§9）
-//
-// 🔴 **「出さない」を選べるようにする。**
-//    以前は候補が1人でもいれば必ず最善の1人へ出していたので、
-//    囲まれた味方にも出していた。実測で**4本に1本（26.9%）が相手に渡っていた**。
-//    オーナー指摘（2026-09-30）「意図的に相手にボールを渡しているような場面が多い」。
-export const PASS_MIN_SCORE = 0.34;               // これ未満しか無ければ出さずに運ぶ
-// 🔑 追い込まれたときに基準を下げる案（PASS_URGENCY_RELIEF = 0.22）は**不採用**。
-//    無理なパスは寄せてくる相手に拾われるだけで、堅守型の勝率が
-//    70.2% → 74.0% に悪化した（2026-10-01 実測）。
-export const PASS_URGENCY_RELIEF = 0.0;
-// 🔑 囲まれている味方の魅力をしっかり下げる。
+// 🔑 囲まれている味方の価値をしっかり下げる（受けた瞬間に奪われる・D-14）。
 //    以前は `0.5 + 1/(1+人数)` で、マークされていても free の3分の2の魅力があった
 export const PASS_MARK_PENALTY = 1.25;            // 6m以内の相手1人あたり
 // 🔴 **技術の高い選手は、寄せられていても受けられる。**
 //    これが無いと、マンマークしてくる相手に対して保持型が出しどころを完全に失い、
 //    一方通行の負けになる（2026-10-01 実測: 堅守型 vs パス型 が 0.906）。
 export const PASS_MARK_TECHNIQUE_RELIEF = 0.60;   // technique=100 で、寄せの減点をこの割合まで消す
-export const PASS_BACKWARD_PENALTY = 0.55;        // 後ろ向きのパスの魅力（前向きを1.0とする）
-export const PASS_FORWARD_BONUS_M = 40.0;         // 前へ何m運べると魅力が2倍になるか
 export const PRESSURE_RADIUS_M = 6.0;
 
 // 局面ごとの位置補正を、ポジションでどれだけ効かせるか（DFが全員上がり切らないようにする）
@@ -262,12 +266,20 @@ export const PASS_LANE_WIDTH_M = 4.0;             // 経路の幅（この帯に
 //    足元に収めるのは現実には起きず、「わざと渡した」ように見える。
 //    この距離まで＝本当に進路上にいる場合だけ奪取。外はこぼれ球（取り合い）。
 export const PASS_INTERCEPT_M = 1.8;
-export const OFFSIDE_MISTIME_RATE = 0.5;          // 出せる相手が裏の選手しかいないとき、出してしまう割合
+export const OFFSIDE_MISTIME_RATE = 0.5;          // オフサイドの位置の選手へ出したとき、笛が鳴る割合（1秒刻みなので並んでいたかもしれない）
+export const OFFSIDE_PASS_APPEAL = 0.05;          // 受け手がオフサイドの位置にいるパスの魅力の倍率（出し手には線が見えている・D-41。0.3で14.0回・0.15で9.4回・0.05で6.9回）
 export const THROUGH_BALL_BONUS = 0.55;           // THROUGH_BALLS 発動時、裏のパス候補の評価に掛ける加点
 
-export const DRIBBLE_BASE = 0.66;
+// 🔴 D-41（2026-10-04）で 0.66 → 0.63、前進 3.2 → 2.8m。くじの頃は「運ぶ」がたまにしか選ばれず、
+//    1秒ごとの勝負で 66% 以上抜ける強さが目立たなかった。効用だと勝てる勝負は毎回選ぶので、
+//    箱まで運ばれ放題になった（得点 2.0〜2.4）。現実のドリブル成功率は5割前後
+export const DRIBBLE_BASE = 0.63;
 export const DRIBBLE_WEIGHT = 0.0055;             // (speed+technique) - physical の差1あたり
-export const DRIBBLE_ADVANCE_M = 3.2;             // 成功したときに前進する距離
+export const DRIBBLE_ADVANCE_M = 2.8;             // 成功したときに前進する距離
+// 🔑 運ぶかどうかを決めるとき、目の前の1人だけでなく「その先の道のり」を見る（D-41）。
+//    実行（抜けるかどうか）は今までどおり目の前の1人で決まる。変えたのは判断だけ
+export const DRIBBLE_LOOKAHEAD_M = 10.0;          // 運ぶ先として見る道のりの長さ
+export const DRIBBLE_PATH_PENALTY = 1.0;          // 道のりの帯（PASS_LANE_WIDTH_M）にいる相手1人あたりの減点
 
 export const TACKLE_RADIUS_M = 2.2;               // この距離に守備者がいると奪い合いが起きる
 export const TACKLE_BASE = 0.20;
@@ -369,6 +381,27 @@ export const SUPPORT_LOOK_AROUND = 6;             // 見比べる方向の数
 export const SUPPORT_OPEN_RADIUS_M = 7.0;         // 「空いている」と数える半径
 export const SUPPORT_CROWD_PENALTY = 1.0;         // 相手1人あたりの減点
 export const SUPPORT_FORWARD_BIAS = 0.10;         // 前寄りを好む度合い（1mあたり）
+
+// ------------------------------------- ボールを持っていない人の判断（効用・D-41）
+//
+// 🔑 攻める側は「そこで受けたら点にどれだけ近いか（THREAT_*）× 空き × 選びやすさ」、
+//    守る側は「放っておいたら相手がどれだけ点に近づくか × 選びやすさ」で採点し、
+//    最大を選ぶ（`engine.ts` の `decideAttack` / `decideDefend`）。
+//    持ち場を保つ・守るは**場所によらない一定値**で、これを超えた時だけ動く。
+//
+// 🔴 以前の「くじ」の重み（KEEP_SHAPE 35/90・HOLD_ZONE 40+zone）は D-41 で捨てた。
+//    くじだと、自陣で持っていても敵陣で持っていても同じ割合で裏へ走っていた。
+export const KEEP_SHAPE_VALUE = 0.01;             // 攻撃時に持ち場を保つ価値
+export const KEEP_SHAPE_BLIND_BONUS = 2.5;        // ボールが見えていないとき、保つ側へ倒す倍率（くじの頃の 90/35）
+export const HOLD_ZONE_VALUE = 0.024;             // 守備時に持ち場を守る価値
+export const OFFBALL_TENDENCY_FLOOR = 0.4;       // 隠しパラメーター0でも残る選びやすさ
+export const OFFBALL_BLIND_REACT = 0.25;          // ボールが見えていないとき、受け・裏への反応の倍率
+export const OFFBALL_CROWD_PENALTY = 0.5;         // 行き先の半径7m以内の相手1人あたりの減点
+export const RUN_BEHIND_LEAD_M = 14.0;             // 裏へ走る価値を測る点（相手最終ラインの何m先で受けるか）
+export const OFFBALL_REACH_DECAY = 0.05;          // ボールから行き先まで1mあたりの「届くか」の減衰（指数）
+export const SUPPORT_RESCUE_VALUE = 0.01;         // 保持者に寄せている相手1人あたり、顔を出す価値の加点
+export const FATIGUE_INTENT_FLOOR = 0.7;          // 体力0のとき、走る意思の選びやすさがこの割合まで落ちる（1.0＝落ちない）
+export const COVER_FAR_RATIO = 0.25;              // 寄せの届く距離の外にいるときのカバーの価値の倍率
 
 // ----------------------------------------------------------------- 試合の再生
 // 何ティックごとに選手の位置を残すか。

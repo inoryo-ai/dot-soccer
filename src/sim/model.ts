@@ -248,35 +248,44 @@ export class Player {
 
 // ------------------------------------------------------------- 戦術・方針
 
-/** (ポジション, x_frac: 0=自ゴール 1=相手ゴール, y_frac: 0=下 1=上) */
+/**
+ * (ポジション, x_frac: 0=自ゴール 1=相手ゴール, y_frac: 0=下 1=上)
+ *
+ * 🔴 **2026-10-03: 全員を 0.05 ぶん前へ出した**（オーナー指摘「デフォルトの位置を
+ *    あと2マスくらい前に。GKが枠線からはみ出ないくらいの範囲に」）。
+ *    GK は 0.04（ゴールライン上）だったので、配置盤で駒が枠からはみ出していた。
+ *    盤の駒の幅から、収まる下限は x ≒ 0.066。0.09 にして余裕を取った。
+ *    🔑 全員を同じだけ動かしているので、隊形の形は変わっていない。
+ *    🔴 これは規則の層。試合結果が変わるのでゴールデンを作り直した（D-18 の手順）。
+ */
 export type Slot = readonly [Position, number, number];
 
 export const FORMATIONS: Readonly<Record<string, readonly Slot[]>> = {
   "4-4-2": [
-    ["GK", 0.04, 0.50],
-    ["DF", 0.20, 0.14], ["DF", 0.19, 0.38], ["DF", 0.19, 0.62], ["DF", 0.20, 0.86],
-    ["MF", 0.44, 0.14], ["MF", 0.42, 0.38], ["MF", 0.42, 0.62], ["MF", 0.44, 0.86],
-    ["FW", 0.70, 0.38], ["FW", 0.70, 0.62],
+    ["GK", 0.09, 0.50],
+    ["DF", 0.25, 0.14], ["DF", 0.24, 0.38], ["DF", 0.24, 0.62], ["DF", 0.25, 0.86],
+    ["MF", 0.49, 0.14], ["MF", 0.47, 0.38], ["MF", 0.47, 0.62], ["MF", 0.49, 0.86],
+    ["FW", 0.75, 0.38], ["FW", 0.75, 0.62],
   ],
   "3-5-2": [
-    ["GK", 0.04, 0.50],
-    ["DF", 0.19, 0.28], ["DF", 0.18, 0.50], ["DF", 0.19, 0.72],
-    ["MF", 0.46, 0.10], ["MF", 0.40, 0.32], ["MF", 0.38, 0.50],
-    ["MF", 0.40, 0.68], ["MF", 0.46, 0.90],
-    ["FW", 0.70, 0.40], ["FW", 0.70, 0.60],
+    ["GK", 0.09, 0.50],
+    ["DF", 0.24, 0.28], ["DF", 0.23, 0.50], ["DF", 0.24, 0.72],
+    ["MF", 0.51, 0.10], ["MF", 0.45, 0.32], ["MF", 0.43, 0.50],
+    ["MF", 0.45, 0.68], ["MF", 0.51, 0.90],
+    ["FW", 0.75, 0.40], ["FW", 0.75, 0.60],
   ],
   "4-5-1": [
-    ["GK", 0.04, 0.50],
-    ["DF", 0.19, 0.14], ["DF", 0.18, 0.38], ["DF", 0.18, 0.62], ["DF", 0.19, 0.86],
-    ["MF", 0.44, 0.12], ["MF", 0.40, 0.32], ["MF", 0.38, 0.50],
-    ["MF", 0.40, 0.68], ["MF", 0.44, 0.88],
-    ["FW", 0.72, 0.50],
+    ["GK", 0.09, 0.50],
+    ["DF", 0.24, 0.14], ["DF", 0.23, 0.38], ["DF", 0.23, 0.62], ["DF", 0.24, 0.86],
+    ["MF", 0.49, 0.12], ["MF", 0.45, 0.32], ["MF", 0.43, 0.50],
+    ["MF", 0.45, 0.68], ["MF", 0.49, 0.88],
+    ["FW", 0.77, 0.50],
   ],
   "3-4-3": [
-    ["GK", 0.04, 0.50],
-    ["DF", 0.20, 0.28], ["DF", 0.19, 0.50], ["DF", 0.20, 0.72],
-    ["MF", 0.46, 0.16], ["MF", 0.43, 0.40], ["MF", 0.43, 0.60], ["MF", 0.46, 0.84],
-    ["FW", 0.72, 0.20], ["FW", 0.74, 0.50], ["FW", 0.72, 0.80],
+    ["GK", 0.09, 0.50],
+    ["DF", 0.25, 0.28], ["DF", 0.24, 0.50], ["DF", 0.25, 0.72],
+    ["MF", 0.51, 0.16], ["MF", 0.48, 0.40], ["MF", 0.48, 0.60], ["MF", 0.51, 0.84],
+    ["FW", 0.77, 0.20], ["FW", 0.79, 0.50], ["FW", 0.77, 0.80],
   ],
 };
 
@@ -333,11 +342,26 @@ export class Manager {
   }
 }
 
+/** 立ち位置の上書き。`[x_frac, y_frac]` を**フォーメーションの枠と同じ順**で持つ */
+export type SlotSpot = readonly [number, number];
+
+/**
+ * ゴールキーパーの枠を前へ出せる上限。
+ *
+ * 🔴 **枠の順番と位置の名前は動かさない。** 試合の処理は
+ * 「`pos === "GK"` の選手がちょうど1人いる」ことを前提に `find(...)!` で探している。
+ * 上書きできるのは**座標だけ**にしてあるので、この前提は壊れない。
+ * ただし座標だけでも、GKを前線まで連れて行くと自ゴールが無人になるので、
+ * 自陣の3割までに留める。
+ */
+export const GK_MAX_X_FRAC = 0.30;
+
 export interface TacticsData {
   line_height?: number;
   zone_width?: number;
   attitude?: string;
   formation?: string;
+  slots?: readonly SlotSpot[];
 }
 
 export class Tactics {
@@ -345,6 +369,8 @@ export class Tactics {
   zone_width: number;
   attitude: string;
   formation: string;
+  /** 立ち位置の上書き。無ければ（＝`null`）フォーメーションの既定どおり */
+  slots: readonly SlotSpot[] | null;
 
   constructor(d: TacticsData = {}) {
     this.line_height = d.line_height ?? 3;
@@ -363,7 +389,47 @@ export class Tactics {
     if (!(this.formation in FORMATIONS)) {
       throw new ValueError(`未知のフォーメーション: ${this.formation}`);
     }
+    this.slots = d.slots === undefined ? null : Tactics.checkSlots(d.slots, this.formation);
   }
+
+  /** 🔴 黙って捨てない・黙って直さない。おかしければ弾く */
+  private static checkSlots(slots: readonly SlotSpot[], formation: string): readonly SlotSpot[] {
+    const base = FORMATIONS[formation]!;
+    if (!Array.isArray(slots)) throw new ValueError("slots が配列でない");
+    if (slots.length !== base.length) {
+      throw new ValueError(`slots は ${base.length} 個: ${slots.length} 個だった`);
+    }
+    return slots.map((s, i) => {
+      if (!Array.isArray(s) || s.length !== 2) {
+        throw new ValueError(`slots[${i}] は [x, y] の2つ組でない`);
+      }
+      const [x, y] = s as [number, number];
+      for (const [name, v] of [["x", x], ["y", y]] as const) {
+        if (typeof v !== "number" || !Number.isFinite(v)) {
+          throw new ValueError(`slots[${i}] の ${name} が数でない`);
+        }
+        if (v < 0 || v > 1) throw new ValueError(`slots[${i}] の ${name} は 0〜1: ${v}`);
+      }
+      if (base[i]![0] === "GK" && x > GK_MAX_X_FRAC) {
+        throw new ValueError(
+          `ゴールキーパーはここまで出せません（自陣 ${GK_MAX_X_FRAC} まで・指定 ${x}）`);
+      }
+      return [x, y] as SlotSpot;
+    });
+  }
+}
+
+/**
+ * 実際に使う枠。立ち位置の上書きがあれば**座標だけ**差し替える。
+ *
+ * 🔑 試合もUIもここを通す。2か所で同じ計算を書くと、
+ *    画面に出ている配置と試合で使う配置がずれる。
+ */
+export function effectiveSlots(t: Tactics): readonly Slot[] {
+  const base = FORMATIONS[t.formation]!;
+  const over = t.slots;
+  if (over === null) return base;
+  return base.map((s, i) => [s[0], over[i]![0], over[i]![1]] as const);
 }
 
 export interface TeamData {
@@ -439,6 +505,10 @@ export class Team {
         zone_width: this.tactics.zone_width,
         attitude: this.tactics.attitude,
         formation: this.tactics.formation,
+        /* 🔑 既定どおりなら書き出さない。昔のセーブと同じ中身になる */
+        ...(this.tactics.slots === null
+            ? {}
+            : { slots: this.tactics.slots.map(([x, y]) => [x, y] as SlotSpot) }),
       },
       policy: this.policy.map((r) => ({ condition: r.condition, action: r.action })),
       manager: {
@@ -454,7 +524,8 @@ export class Team {
 
   static fromDict(d: TeamData): Team {
     // 🔑 Python 版は `Tactics(**d)` で、知らない鍵があれば落ちていた。同じ厳しさにする
-    rejectUnknown("tactics", d.tactics, ["line_height", "zone_width", "attitude", "formation"]);
+    rejectUnknown("tactics", d.tactics,
+                  ["line_height", "zone_width", "attitude", "formation", "slots"]);
     rejectUnknown("manager", d.manager, ["style", "rigidity", "substitution", "selection"]);
     for (const r of d.policy ?? []) rejectUnknown("policy", r, ["condition", "action"]);
     return new Team({
