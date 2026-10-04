@@ -11,6 +11,7 @@
  *   ⑤ 決定論: 同じシードで2回回して完全一致
  *   ⑥ 抜け道: 時間切れ＋区切りの外が、学習前どうしの2倍かつ 10% を超えない／撃たずに終わる攻撃が増えすぎない
  *   ⑦ 評価だけのチーム（学習で見ていない選手）でも ① ② が成り立つ
+ *   ⑧ 仕掛けの成功率が現実の幅に入る（出典つき・`TAKE_ON_RANGE`）
  * 🔑 学習に使っていないシード（評価専用）で測る。
  */
 
@@ -27,6 +28,15 @@ import { HOLDOUT_TEAM, TRAIN_TEAMS, pairings, policyFingerprint, rate, runAttack
 import type { Pairing } from "./s1.ts";
 
 const EVAL_SEED = 424242;   // 学習（train_s1.ts）が使わない種
+
+/**
+ * ⑧ 仕掛け（ドリブルで前の相手を抜きにかかる）の成功率の相場。
+ * 出典: The Analyst（Opta）「Defending Against Dribblers: The Premier League's Best and Worst One-v-One Defenders」—
+ *       プレミアリーグ 2024-25 の平均 36.7%（上手い選手は 50〜65%）
+ *       https://theanalyst.com/articles/premier-league-best-worst-one-v-one-defenders
+ * 🔴 学習が物理の抜け道を使うと、ここが大きく外れる（2026-10-05: 学習した守りが間合いを取るだけで毎秒奪いに行けた・D-49）
+ */
+export const TAKE_ON_RANGE = { low: 0.25, high: 0.55 } as const;
 
 export function learned(): { att: AttackPolicy; def: DefendPolicy } {
   const H = POLICY_S1.hidden;
@@ -105,6 +115,13 @@ export function main(out: (l?: string) => void = (l = "") => console.log(l)): nu
     out(`  ${mark(ok6)} ⑥ 抜け道: 時間切れ＋外 ${(100 * stall(base)).toFixed(1)}% → ${(100 * stall(la)).toFixed(1)}%`
         + ` ／ 撃たずに終わった（奪われた以外） ${(100 * noShot(base)).toFixed(1)}% → ${(100 * noShot(la)).toFixed(1)}%`);
     if (!ok6) fails.push(`${label}: ⑥`);
+    // ⑧ 仕掛けの成功率（出典つき）。学習どうしで現実の幅に入るか
+    const takeOn = (l: readonly AttackLog[]): number =>
+      l.reduce((s, x) => s + x.takeOnsWon, 0) / Math.max(1, l.reduce((s, x) => s + x.takeOns, 0));
+    const ok8 = takeOn(ll) >= TAKE_ON_RANGE.low && takeOn(ll) <= TAKE_ON_RANGE.high;
+    out(`  ${mark(ok8)} ⑧ 仕掛けの成功率（学習どうし）${(100 * takeOn(ll)).toFixed(1)}%`
+        + `（学習前どうし ${(100 * takeOn(base)).toFixed(1)}%・相場 ${(100 * TAKE_ON_RANGE.low).toFixed(0)}〜${(100 * TAKE_ON_RANGE.high).toFixed(0)}%）`);
+    if (!ok8) fails.push(`${label}: ⑧ 仕掛けの成功率`);
   }
 
   // ③ 動きの種類と、能力の型による違い

@@ -78,6 +78,9 @@ export interface AttackLog {
   endValue: number;
   /** 攻めがドリブルの勝負に勝った回数・守りが奪い合いを仕掛けて止められた回数 */
   duelsWon: number;
+  /** ドリブルの勝負（攻めが前の相手を抜きにかかった）の回数と、そのうち抜いた回数（現実の「仕掛けの成功率」と比べる） */
+  takeOns: number;
+  takeOnsWon: number;
   /** 行動の回数（撃つ・運ぶ） */
   shots: number;
   dribbles: number;
@@ -234,7 +237,7 @@ export class Arena {
     this.record();
     const log: AttackLog = { who, outcome: "TIME", ticks: 0,
                              startValue: placeValue(this.table, this.ball_x, this.ball_y), endValue: 0,
-                             duelsWon: 0, shots: 0, dribbles: 0 };
+                             duelsWon: 0, takeOns: 0, takeOnsWon: 0, shots: 0, dribbles: 0 };
 
     for (let t = 0; t < C.ARENA_MAX_TICKS; t++) {
       this.tick += 1;
@@ -307,10 +310,12 @@ export class Arena {
     // 運ぶ・抜く（11対11 の `dribble` と同じ式）
     const defender = Phys.opponentAhead(opps, h.x, h.y, h.x + act.dirX * 100.0, h.y + act.dirY * 100.0);
     if (defender !== null) {
+      log.takeOns += 1;
       if (this.rng.random() >= Phys.dribbleChance(h, defender)) {
         return this.lose(defender, `${h.name} のドリブルを止めた`);
       }
       log.duelsWon += 1;
+      log.takeOnsWon += 1;
     }
     const [nx, ny] = Phys.dribbleTarget(h, act.dirX, act.dirY);
     const stepLen = hypot(nx - h.x, ny - h.y);
