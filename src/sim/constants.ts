@@ -12,7 +12,7 @@ export const GOAL_WIDTH = 7.32;
 // 🔑 **1刻み（ティック）が何秒か**（D-49）。時間で決まる数はすべて「秒 × 1秒あたりの刻み」で書く。
 //    1秒刻みでは、ドリブルの勝負を 6m 先で起こすしかなく、勝っても相手を抜けなかった（学習した守りが
 //    間合いを取るだけで毎秒奪いに行けた）。細かくすると勝負は体の触れる距離で起き、抜いた相手は置いていかれる。
-export const TICKS_PER_SECOND = 1;
+export const TICKS_PER_SECOND = 4;
 export const TICK_S = 1.0 / TICKS_PER_SECOND;
 export const MATCH_SECONDS = 90 * 60;
 export const TICKS_PER_MATCH = MATCH_SECONDS * TICKS_PER_SECOND;
@@ -174,8 +174,10 @@ export const URGENT_INTENTS: ReadonlySet<string> = new Set(["ENGAGE", "CHASE_LOO
 // 1ティック＝1秒。毎秒ボールを蹴る／毎秒奪い合うのは実際の試合と合わないので、
 // 「1回の行動が何秒かかるか」を明示する（これが無いと1試合4000回の奪い合いになる）。
 // 🔑 D-44 で 2 → 1。2秒だと、ゴール前で受けた選手が判断できないまま密集へ運ばされた
-export const ACTION_CONTROL_S = 1;                // 受けてから次の判断までの秒数
-export const ACTION_CONTROL_TICKS = ACTION_CONTROL_S * TICKS_PER_SECOND;
+// 🔴 D-49: 1秒刻みの「ACTION_CONTROL_TICKS = 1」は、受けた秒・運ぶ1秒・次の秒で判断＝**受けてから2秒で最初の判断**だった。
+//    刻みを細かくしたとき「1秒」と読み替えたら 1.25秒になり、パスが 876 → 1,060本/チームに増えた。意味どおり2秒にする
+export const ACTION_CONTROL_S = 2;                // 受けてから最初の判断までの秒数
+export const ACTION_CONTROL_TICKS = Math.round(ACTION_CONTROL_S * TICKS_PER_SECOND) - 1;   // 受けた刻みを含めて数える
 // 🔑 D-46: 蹴る動作にかかる秒数。1秒のうち**残りは出した人がボールを持たない選手として動く**。
 //    これが無いと、出した人は蹴った秒に1歩も動かず、画面で「出した直後に固まる」ように見えた
 //    （助走・踏み込み・振り抜きで約0.5秒という見立て。出典なし＝目視で調整するつまみ）
@@ -215,7 +217,7 @@ export const SHOOT_KICK_WEIGHT = 0.8;             // kick の効き（kick=50 �
 //    落ち着いて流し込む、は技術の仕事。
 export const SHOOT_TECHNIQUE_WEIGHT = 0.35;       // technique の効き（technique=50 で係数1.0）
 export const SHOOT_GK_WEIGHT = 0.9;               // GKの能力差の効き
-export const SHOOT_PRESSURE_PENALTY = 0.25;       // 半径4m以内の相手1人あたりの減衰（D-47 で 0.13 → 0.25。撃つ基準を下げたぶん、寄せられた低い確率のシュートを減らす）
+export const SHOOT_PRESSURE_PENALTY = 0.45;       // 半径4m以内の相手1人あたりの減衰（D-47 で 0.13 → 0.25。撃つ基準を下げたぶん、寄せられた低い確率のシュートを減らす）
 // 🔑 撃つ線の上の相手がブロックする（D-44）。現実のシュートの約4分の1はブロックされる
 export const SHOT_BLOCK_LANE_M = 1.0;             // 撃つ線からこの距離以内のフィールドの相手を数える
 export const SHOT_BLOCK_PER_DEFENDER = 0.55;      // そういう相手1人あたり、入る確率を減らす割合（D-47 で 0.45 → 0.55）
@@ -315,19 +317,30 @@ export const THROUGH_BALL_BONUS = 0.55;           // THROUGH_BALLS 発動時、�
 
 // 🔑 D-41 で 0.66 → 0.63・前進 3.2 → 2.8m、D-44 で 0.56（掃き出し）。くじの頃は「運ぶ」がたまにしか
 //    選ばれず、1秒ごとの勝負で 66% 以上抜ける強さが目立たなかった。現実のドリブル成功率は5割前後
-export const DRIBBLE_BASE = 0.56;
+export const DRIBBLE_BASE = 0.36;
 export const DRIBBLE_WEIGHT = 0.0055;             // (speed+technique) - physical の差1あたり
 export const DRIBBLE_ADVANCE_M = 2.8;             // 成功したときに前進する距離
 // 🔴 ドリブルの勝負になるのは**前にいる**相手だけ（D-42）。以前は向きに関係なく 8m 以内の誰とでも毎秒勝負になり、
 //    後ろから追う相手にもゴール前で奪われ続けた。後ろの相手は追いついて奪い合い（`TACKLE_RADIUS_M`）でしか奪えない。
 //    D-41 の「前が詰まっている」の減点（DRIBBLE_LOOKAHEAD_M 10 / DRIBBLE_PATH_PENALTY 1.0）は、
 //    道のりの上の勝負を `positionValue` が一歩ずつ見るようになったので外した（二重に数える）
-export const DRIBBLE_DUEL_M = 6;                // この距離以内で前にいる相手とドリブルの勝負になる
-export const DRIBBLE_BEHIND_M = 3.0;              // 後ろ・横の相手でも、この距離まで追いついたら勝負になる
+// 🔑 D-49: この2つは**見積もり**（判断の1回ぶん＝`HOLDER_DECIDE_S` 秒のうちに勝負になりそうか）の広さ。
+//    実際の勝負は、体の触れる距離（`TAKE_ON_M`）に来たときに1回だけ起きる
+export const DRIBBLE_DUEL_M = 6;                // この距離以内で前にいる相手とは、次の判断までに勝負になると見る
+export const DRIBBLE_BEHIND_M = 3.0;              // 後ろ・横の相手でも、この距離まで追いついていれば勝負になると見る
+// 🔴 D-49: 1秒刻みでは勝負を 6m 先で起こすしかなく、勝っても 2.8m 進むだけで**相手を抜けなかった**
+//    （次の秒にまた前にいて、また勝負）。学習した守りが間合いを取るだけで毎秒奪いに行けた。
+//    実際の仕掛けは「触れる距離で1回」。勝てば相手は振り向くあいだ置いていかれる。
+export const TAKE_ON_M = 1.8;                    // 前にいる相手とドリブルの勝負になる距離（触れる距離）
+export const BEATEN_S = 0.5;                     // 抜かれた相手が動けず・勝負にも来られない秒数（振り向いて追い直す。出典なし＝目視と仕掛けの成功率で調整）
+export const BEATEN_TICKS = Math.round(BEATEN_S * TICKS_PER_SECOND);
+// 🔑 保持者は**この秒数ごとに**判断し直し、そのあいだは決めた向きへ運び続ける（刻みごとに判断すると、細かい刻みで毎秒何本もパスを出す）
+export const HOLDER_DECIDE_S = 1.0;
+export const HOLDER_DECIDE_TICKS = Math.round(HOLDER_DECIDE_S * TICKS_PER_SECOND);
 export const DRIBBLE_LANE_MIN_SIN = 0.2;          // ゴールの真ん中への向きがこれより横を向いていなければ「筋をまっすぐ」は別に持たない（D-45）
 
-export const TACKLE_RADIUS_M = 2.2;               // この距離に守備者がいると奪い合いが起きる
-export const TACKLE_BASE = 0.55;                  // D-47 で 0.50 → 0.55（疲れの作り直しの再調整）。D-44 で 0.20 → 0.42。奪い合いが「間をあけて」起きるように直したぶん（D-42）、1回の重みを上げた
+export const TACKLE_RADIUS_M = 1.8;               // この距離に守備者がいると奪い合いが起きる
+export const TACKLE_BASE = 0.4;                  // D-47 で 0.50 → 0.55（疲れの作り直しの再調整）。D-44 で 0.20 → 0.42。奪い合いが「間をあけて」起きるように直したぶん（D-42）、1回の重みを上げた
 // 🔴 **奪う側と守る側で、効く能力を分ける。**
 //    以前は両側とも (technique + physical) の単純和だったので、
 //    physical を伸ばした型（堅守型）が攻守どちらでも有利になり、

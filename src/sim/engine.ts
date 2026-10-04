@@ -57,6 +57,11 @@ export interface MatchStats {
   duels_lost: number;
   possession_ticks: number;
   beaten_behind: number;
+  /** 仕掛け（ドリブルで前の相手を抜きにかかった）の回数・抜いた回数（攻める側）。D-49・出典つきで比べる */
+  takeons: number;
+  takeons_won: number;
+  /** タックルで奪った回数（守る側）＝奪い合いに勝った＋仕掛けを止めた（現実の「タックル成功」） */
+  tackles: number;
   offsides: number;
   stamina_low_players: number;
   distance_m: number;
@@ -75,6 +80,7 @@ function newStats(): MatchStats {
     passes: 0, passes_completed: 0,
     tackles_won: 0, duels: 0, duels_lost: 0,
     possession_ticks: 0, beaten_behind: 0,
+    takeons: 0, takeons_won: 0, tackles: 0,
     offsides: 0,
     stamina_low_players: 0, distance_m: 0.0,
   };
@@ -125,6 +131,11 @@ export interface MatchEvent {
   team: string;
   player: string | null;
   detail: string;
+  /**
+   * その人がコマ（`Replay.frames`）の何番目か（D-49）。名前では引かない（名簿は試合の終わりの顔ぶれ）。
+   * 🔑 1秒に何度も持ち主が変わるので、「その秒の始めの持ち主」から人を当てられない
+   */
+  slot?: number;
 }
 
 export interface RosterEntry {
@@ -206,7 +217,10 @@ export class Match {
   ball_y = C.PITCH_Y / 2;
   owner: Actor | null = null;
   loose_ticks = 0;
-  action_cd = 0;          // 保持者が次の判断をするまでの残り秒数
+  action_cd = 0;          // 保持者が次の判断をするまでの残り刻み
+  /** 保持者が判断のあいだ運び続ける向きと、ドリブル（仕掛けの速さ）か運ぶ（`CARRY_SPEED_RATIO`）か（D-49） */
+  hold_dir: [number, number] = [1.0, 0.0];
+  hold_dribble = false;
   contest_cd = 0;         // 次に奪い合いが起きるまでの残り秒数
   /**
    * ゴールの後、キックオフを待っている間だけ入る。null なら試合が動いている。
@@ -281,6 +295,7 @@ export class Match {
         // 🔑 攻める方を向いて立つ。0 のままだと全員が右を向いて始まり、
         //    左へ攻めるチームが最初の数秒だけ曲がれない
         a.heading = ts.direction > 0 ? 0.0 : PI;
+        a.beaten_until = -1;   // 置き直したら、抜かれていた状態も消す（D-49）
         a.intent = "KEEP_SHAPE";
         a.aim_x = a.x;
         a.aim_y = a.y;
@@ -627,6 +642,7 @@ export class Match {
   private moveOffBall(ts: TeamState, a: Actor, hasBall: boolean, owner: Actor | null,
                       oppDeep: number, isEngager: boolean, dt: number): void {
     this.think(ts, a, hasBall, owner, oppDeep, isEngager);
+    if (a.beaten_until > this.tick) return;   // 抜かれて振り向いている（D-49）
     const [tx, ty] = this.aimPoint(ts, a);
     // 🔴 持ち場を守る意思ほど本気度が低く、90分の3分の2がそれだった。
     //    カバー範囲が広い選手は、守るときでも歩かない
@@ -1154,9 +1170,9 @@ export class Match {
     }
 
     if (this.action_cd > 0) {
-      // 受けた直後・運んでいる最中。判断はまだしないが、ボールは前に運ぶ
+      // 受けた直後・運んでいる最中。判断はまだしないが、決めた向きへ運び続ける（D-49）
       this.action_cd -= 1;
-      this.carry(holder, ts);
+      this.advance(holder, ts);
       return;
     }
 
@@ -1172,7 +1188,13 @@ export class Match {
       this.pass(holder, ts, choice.action);
       this.afterRelease(holder, ts);
     }
-    else this.dribble(holder, ts, choice.action);
+    else {
+      // 🔑 判断の1回ぶん（`HOLDER_DECIDE_S`）その向きへ運び続ける。仕掛けは触れる距離に来たとき（`advance`）
+      this.hold_dir = [choice.action.dirX, choice.action.dirY];
+      this.hold_dribble = true;
+      this.action_cd = C.HOLDER_DECIDE_TICKS - 1;
+      this.advance(holder, ts);
+    }
   }
 
   // ------------------------------------------------- ボールを持った人の判断（D-41）
@@ -1395,15 +1417,49 @@ export class Match {
     Phys.keepInside(a);
   }
 
-  /** 判断待ちの間、保持者はゴール方向へボールを運ぶ。 */
-  private carry(holder: Actor, ts: TeamState): void {
-    // 🔑 受けた直後のひと運びは**自分の筋をまっすぐ前へ**（D-45）。ゴールの真ん中へ向けていたので、
-    //    サイドで受けた選手も受けるたびに中央へ寄った
-    if (Math.abs(ts.targetGoalX() - holder.x) < 1.0) return;
-    const stepLen = holder.pace(C.CARRY_SPEED_RATIO) * C.TICK_S;
-    holder.x += ts.direction * stepLen;
-    holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
-    ts.stats.distance_m += stepLen;
+  /**
+   * 保持者を決めた向きへ1刻み運ぶ。前の触れる距離に（抜かれていない）相手がいれば仕掛け（式は `physics.ts` の `advanceHolder`・D-49）。
+   * 🔴 勝負になるのは**運ぶ向きの前にいる**相手だけ（D-42）。勝てば相手は `BEATEN_TICKS` 刻み置いていかれる。
+   */
+  private advance(holder: Actor, ts: TeamState): void {
+    const opp = this.teams[1 - ts.idx]!;
+    const [dx, dy] = this.hold_dir;
+    // 🔑 運ぶ（受けた直後）はゴールラインの手前で止まる（D-45 以前からの約束）
+    if (!this.hold_dribble && Math.abs(ts.targetGoalX() - holder.x) < 1.0) return;
+    const speed = this.hold_dribble ? Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M)
+      : holder.pace(C.CARRY_SPEED_RATIO);
+    const opps = this.actors[opp.idx]!.filter((o) => o.beaten_until <= this.tick);
+    // 🔴 D-49: 受けた直後のひと運びで前の触れる距離に相手がいたら、**仕掛けずに止まってボールを守り、すぐ判断する**。
+    //    自動で仕掛けにしていたら、仕掛けで奪われるのが1チーム1試合 82回（現実の仕掛けは 13〜21回）になった。
+    //    仕掛けは自分でドリブルを選んだときだけ
+    if (!this.hold_dribble
+        && Phys.opponentAhead(opps, holder.x, holder.y, holder.x + dx * 100.0, holder.y + dy * 100.0,
+                              0.0, C.TAKE_ON_M, 0.0) !== null) {
+      this.action_cd = 0;
+      return;
+    }
+    const r = Phys.advanceHolder(holder, dx, dy, speed * C.TICK_S, opps, () => this.rng.random());
+    const challenger = r.lostTo ?? r.beat;
+    if (challenger !== null) {
+      ts.stats.duels += 1;
+      opp.stats.duels += 1;
+      ts.stats.takeons += 1;
+    }
+    if (r.lostTo !== null) {
+      ts.stats.duels_lost += 1;
+      opp.stats.tackles_won += 1;
+      opp.stats.tackles += 1;
+      this.takePossession(r.lostTo);
+      if (this.log_enabled) this.log("奪取", r.lostTo.name, opp.idx, `${holder.name} のドリブルを止めた`);
+      return;
+    }
+    if (r.beat !== null) {
+      opp.stats.duels_lost += 1;
+      ts.stats.takeons_won += 1;
+      r.beat.beaten_until = this.tick + C.BEATEN_TICKS;
+      if (hypot(r.beat.x - holder.x, r.beat.y - holder.y) <= C.BEATEN_BEHIND_RADIUS_M) opp.stats.beaten_behind += 1;
+    }
+    ts.stats.distance_m += r.moved;
     Match.keepInside(holder);   // 運ぶ・ドリブルで外へ出さない
     this.ball_x = holder.x;
     this.ball_y = holder.y;
@@ -1442,6 +1498,9 @@ export class Match {
     this.action_cd = C.ACTION_CONTROL_TICKS;
     this.contest_cd = C.TACKLE_COOLDOWN_TICKS;
     this.loose_ticks = 0;
+    // 🔑 受けた直後のひと運びは**自分の筋をまっすぐ前へ**（D-45）
+    this.hold_dir = [this.teams[actor.team_idx]!.direction, 0.0];
+    this.hold_dribble = false;
   }
 
   private countWithin(teamIdx: number, x: number, y: number, r: number): number {
@@ -1454,6 +1513,7 @@ export class Match {
     let challenger: Actor | null = null;
     let bestD = C.TACKLE_RADIUS_M;
     for (const o of this.actors[opp.idx]!) {
+      if (o.beaten_until > this.tick) continue;   // 抜かれて振り向いている（D-49）
       const dd = hypot(o.x - holder.x, o.y - holder.y);
       if (dd < bestD) {
         challenger = o;
@@ -1467,6 +1527,7 @@ export class Match {
     if (this.rng.random() < p) {
       ts.stats.duels_lost += 1;
       opp.stats.tackles_won += 1;
+      opp.stats.tackles += 1;
       this.takePossession(challenger);
       if (this.log_enabled) this.log("奪取", challenger.name, opp.idx, `${holder.name} から`);
       return true;
@@ -1666,40 +1727,6 @@ export class Match {
     return Phys.dribbleChance(holder, defender);
   }
 
-  /** 運ぶ。前に相手がいれば抜きにかかり、失敗すれば奪われる。 */
-  private dribble(holder: Actor, ts: TeamState, act: DribbleAction): void {
-    const opp = this.teams[1 - ts.idx]!;
-    // 🔴 勝負になるのは**運ぶ向きの前にいる**相手だけ（`opponentAhead`・D-42）
-    const defender = this.opponentAhead(opp.idx, holder.x, holder.y,
-                                        holder.x + act.dirX * 100.0, holder.y + act.dirY * 100.0);
-    if (defender !== null) {
-      ts.stats.duels += 1;
-      opp.stats.duels += 1;
-      if (this.rng.random() >= this.dribbleChance(holder, defender)) {
-        ts.stats.duels_lost += 1;
-        opp.stats.tackles_won += 1;
-        this.takePossession(defender);
-        if (this.log_enabled) {
-          this.log("奪取", defender.name, opp.idx, `${holder.name} のドリブルを止めた`);
-        }
-        return;
-      }
-      opp.stats.duels_lost += 1;
-    }
-    const [nx, ny] = this.dribbleTarget(holder, act);
-    const stepLen = hypot(nx - holder.x, ny - holder.y);
-    holder.x = nx;
-    holder.y = ny;
-    holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
-    ts.stats.distance_m += stepLen;
-    this.ball_x = holder.x;
-    this.ball_y = holder.y;
-    if (defender !== null
-        && hypot(defender.x - holder.x, defender.y - holder.y) <= C.BEATEN_BEHIND_RADIUS_M) {
-      opp.stats.beaten_behind += 1;
-    }
-  }
-
   private resolveLooseBall(): void {
     this.loose_ticks += 1;
     const candidates: { d: number; a: Actor }[] = [];
@@ -1734,7 +1761,16 @@ export class Match {
       team: this.teams[teamIdx]!.team.name,
       player,
       detail,
+      ...this.slotOf(player, teamIdx),
     });
+  }
+
+  /** その名前の選手が、いまコマの何番目か（コマの並び＝`recordFrame` と同じ） */
+  private slotOf(player: string | null, teamIdx: number): { slot?: number } {
+    if (player === null) return {};
+    const i = this.actors[teamIdx]!.findIndex((a) => a.name === player);
+    if (i < 0) return {};
+    return { slot: (teamIdx === 0 ? 0 : this.actors[0]!.length) + i };
   }
 
   private result(): MatchResult {

@@ -112,17 +112,18 @@ export function tackleChance(holder: Actor | null, challenger: Actor, press: num
  *    すぐ後ろ（`DRIBBLE_BEHIND_M`）まで追いついたとき・奪い合いの距離に入ったときだけ。
  */
 export function opponentAhead(opps: readonly Actor[], x: number, y: number, gx: number, gy: number,
-                              closing = 0.0): Actor | null {
+                              closing = 0.0, reach: number = C.DRIBBLE_DUEL_M,
+                              behind: number = C.DRIBBLE_BEHIND_M): Actor | null {
   const dx = gx - x;
   const dy = gy - y;
   let best: Actor | null = null;
-  let bestD = C.DRIBBLE_DUEL_M + closing;
+  let bestD = reach + closing;
   for (const o of opps) {
     const ox = o.x - x;
     const oy = o.y - y;
     const dd = hypot(ox, oy);
     // 前にいない相手は、すぐ後ろ（`DRIBBLE_BEHIND_M`）まで追いついたときだけ勝負になる（後ろから突く）
-    if (ox * dx + oy * dy <= 0 && dd > C.DRIBBLE_BEHIND_M + closing) continue;
+    if (ox * dx + oy * dy <= 0 && dd > behind + closing) continue;
     if (dd < bestD) {
       best = o;
       bestD = dd;
@@ -184,9 +185,13 @@ export function keeperAim(ownGoalX: number, direction: number, ballY: number): [
   return [ownGoalX + depth, ty];
 }
 
-/** ドリブル（運ぶ・抜く）で1刻みに着く場所。決めた向き（単位ベクトル）へ、1秒あたり `DRIBBLE_ADVANCE_M` まで進む。 */
-export function dribbleTarget(holder: Actor, dirX: number, dirY: number): [number, number] {
-  const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M) * C.TICK_S;
+/**
+ * ドリブル（運ぶ・抜く）で `seconds` 秒後に着く場所の見積もり。決めた向き（単位ベクトル）へ、1秒あたり `DRIBBLE_ADVANCE_M` まで進む。
+ * 既定は判断の1回ぶん（`HOLDER_DECIDE_S`）＝次に判断し直すまでに着く場所。
+ */
+export function dribbleTarget(holder: Actor, dirX: number, dirY: number,
+                              seconds: number = C.HOLDER_DECIDE_S): [number, number] {
+  const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M) * seconds;
   return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + dirX * stepLen)),
           Math.max(0.0, Math.min(C.PITCH_Y, holder.y + dirY * stepLen))];
 }
@@ -206,4 +211,36 @@ export function tableValueAt(t: ValueTable, ax: number, y: number): number {
   const v = (i: number, j: number): number => t.values[i * t.ny + j]!;
   return (v(ix, iy) * (1 - wx) * (1 - wy) + v(ix + 1, iy) * wx * (1 - wy)
           + v(ix, iy + 1) * (1 - wx) * wy + v(ix + 1, iy + 1) * wx * wy);
+}
+
+/** 保持者を1刻み進めた結果 */
+export interface AdvanceResult {
+  /** 仕掛けで奪われた相手（奪われたら進まない） */
+  lostTo: Actor | null;
+  /** 仕掛けで抜いた相手（呼び出し側が `beaten_until` を付ける） */
+  beat: Actor | null;
+  moved: number;
+}
+
+/**
+ * 保持者を決めた向きへ1刻み（`stepLen` m）進める。前の**触れる距離**（`TAKE_ON_M`）に相手がいれば仕掛け（1回）。
+ * 🔑 11対11 と練習場の唯一の式（D-49）。`opps` には**抜かれていない**相手だけを渡す。
+ * 🔑 乱数は呼び出し側のもの（`rnd`）。引くのは仕掛けが起きたときの1回だけ。
+ */
+export function advanceHolder(h: Actor, dirX: number, dirY: number, stepLen: number,
+                              opps: readonly Actor[], rnd: () => number): AdvanceResult {
+  const ahead = opponentAhead(opps, h.x, h.y, h.x + dirX * 100.0, h.y + dirY * 100.0, 0.0, C.TAKE_ON_M, 0.0);
+  let beat: Actor | null = null;
+  if (ahead !== null) {
+    if (rnd() >= dribbleChance(h, ahead)) return { lostTo: ahead, beat: null, moved: 0.0 };
+    beat = ahead;
+  }
+  const nx = Math.max(0.0, Math.min(C.PITCH_X, h.x + dirX * stepLen));
+  const ny = Math.max(0.0, Math.min(C.PITCH_Y, h.y + dirY * stepLen));
+  const moved = hypot(nx - h.x, ny - h.y);
+  if (moved > 0) h.heading = atan2(ny - h.y, nx - h.x);
+  h.x = nx;
+  h.y = ny;
+  h.stamina = Math.max(0.0, h.stamina - moved * C.STAMINA_DRAIN_PER_METER);
+  return { lostTo: null, beat, moved };
 }

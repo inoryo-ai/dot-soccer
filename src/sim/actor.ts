@@ -29,6 +29,7 @@ export class Actor {
   mark: Actor | null = null;   // 誰を捕まえているか
   seen_epoch = -1;        // どの局面まで見たか
   heading = 0.0;          // 向き（急には変えられない）
+  beaten_until = -1;      // この刻みまでは抜かれて振り向いている（動けない・勝負に来られない・D-49）
 
   constructor(player: Player, teamIdx: number, base: Slot) {
     this.player = player;

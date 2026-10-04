@@ -52,6 +52,13 @@ const holds = (e: Expected, v: number): boolean => e.low <= v && v <= e.high;
 //   [JL]   Jリーグ 1993年 180試合532得点＝2.96点/試合、1995年 364試合1,214得点＝3.34点/試合
 //          （両チーム合計。1チームあたりは概ね 1.5 前後）
 //          https://en.wikipedia.org/wiki/1993_J.League
+//   [OPTA-TO] The Analyst「Defending Against Dribblers」— プレミアリーグ 2024-25 の仕掛けの成功率 平均 36.7%
+//          https://theanalyst.com/articles/premier-league-best-worst-one-v-one-defenders
+//   [FB-TO] FBref の集計（fivda「Premier League's Top Dribblers 2024-25」）— 仕掛けの成功率 平均 43.7%、
+//          仕掛けの回数 1チーム1試合 12.9（最少）〜21（最多）
+//          https://fivda.com/2025/01/24/premier-league-top-dribblers-2025/
+//   [FB-DEF] FBref「2024-2025 Premier League Defensive Action Stats」— タックル成功（TklW）1チーム1シーズン 299〜493（38試合で 7.9〜13.0/試合）
+//          https://fbref.com/en/comps/9/2024-2025/defense/2024-2025-Premier-League-Stats
 export const EXPECTED: Readonly<Record<string, Expected>> = {
   goals: { low: 1.0, high: 1.9,
            source: "[JL] 両チーム合計 2.96〜3.34点/試合 → 1チームあたり 1.5 前後" },
@@ -63,6 +70,13 @@ export const EXPECTED: Readonly<Record<string, Expected>> = {
                  source: "[CIES] 31リーグ平均 99.9km／FIFA W杯2022 総走行 108.1km（1チーム1試合）" },
   possession_pct: { low: 35.0, high: 65.0,
                     source: "定義上 両チームの合計が100%。どのチームも50%付近に収まるはず" },
+  // 🔑 D-49: 刻みを細かくしたら、仕掛けとタックルが現実の数倍になった（受けた直後に自動で仕掛けていた）。物理の部品を出典に合わせる
+  takeons: { low: 10.0, high: 25.0,
+            source: "[FB-TO] 仕掛けの回数 1チーム1試合 12.9〜21" },
+  takeon_success_pct: { low: 30.0, high: 50.0,
+                       source: "[OPTA-TO] 36.7% ／ [FB-TO] 43.7%" },
+  tackles: { low: 6.0, high: 16.0,
+            source: "[FB-DEF] タックル成功 7.9〜13.0/試合" },
 };
 
 // --------------------------------------------------------------- 判定の仕方
@@ -94,7 +108,7 @@ export const WATCH_ONLY = [
 const RAW_KEYS = [
   "shots", "goals", "passes", "pass_success_pct", "duels", "duels_lost",
   "tackles_won", "distance_km", "beaten_behind", "possession_pct",
-  "shots_against", "stamina_low_players",
+  "shots_against", "stamina_low_players", "takeons", "takeons_won", "tackles",
 ] as const satisfies readonly (keyof MatchStatsOut)[];
 
 export const LABELS: Readonly<Record<string, string>> = {
@@ -102,7 +116,8 @@ export const LABELS: Readonly<Record<string, string>> = {
   shots_against: "被シュート", passes: "パス", pass_success_pct: "パス成功%",
   tackles_won: "奪取", duels_lost_pct: "競り負け%", beaten_behind: "裏を取られ",
   distance_km: "走行km", possession_pct: "支配%", stamina_low_players: "息切れ人数",
-  win_pct: "勝率%",
+  win_pct: "勝率%", takeons: "仕掛け", takeons_won: "仕掛け成功", takeon_success_pct: "仕掛け成功%",
+  tackles: "タックル",
 };
 
 export type Rows = Record<string, Record<string, number>>;
@@ -409,9 +424,8 @@ export function releaseCounts(result: MatchResult): number[] {
     if ((e.type !== "パス" && e.type !== "シュート") || e.player === null) continue;
     const t = frameBefore(rp, e.tick) + 1;   // 蹴った秒の終わりのコマ
     if (t < 1 || t + 3 >= rp.frames.length) continue;
-    // 🔑 出した人＝その直前の秒にボールを持っていた人。名前で名簿を引かない
-    //    （名簿は試合の終わりの顔ぶれなので、交代で下がった選手が見つからない）
-    const p = rp.frames[t - 1]![2]!;
+    // 🔑 出した人＝出来事に付いたコマの番号（D-49。1秒に何度も持ち主が変わるので、秒の始めの持ち主では当てられない）
+    const p = e.slot ?? -1;
     const team = e.team === result.teams[0] ? 0 : 1;
     if (p < 0 || rp.roster[p]!.team !== team) throw new Error(`${e.time} の${e.type}の直前に、蹴ったチームの持ち主がいない`);
     const d = moved(t - 1, t, p);           // 出した秒（コマ t-1 → t）
@@ -516,8 +530,8 @@ export function shotPlaceCounts(result: MatchResult): number[] {
     if (e.type !== "シュート" && e.type !== "ゴール") continue;
     const t = frameBefore(rp, e.tick) + 1;
     if (t < 1) throw new Error(`${e.time} の${e.type}が試合の最初の秒にある（直前の持ち主を引けない）`);
-    // 🔑 撃った人＝直前の秒の持ち主。保持者はその秒の移動では動かないので、直前の位置＝撃った位置
-    const p = rp.frames[t - 1]![2]!;
+    // 🔑 撃った人＝出来事に付いたコマの番号。場所はその秒の始めのコマ（撃つまでに1秒ぶん動きうる・D-49）
+    const p = e.slot ?? -1;
     const team = e.team === result.teams[0] ? 0 : 1;
     if (p < 0 || rp.roster[p]!.team !== team) throw new Error(`${e.time} の${e.type}の直前に、撃ったチームの持ち主がいない`);
     const x = rp.frames[t - 1]![3 + p * 2]! / k;
@@ -581,6 +595,7 @@ export function measure(reps: number): [Rows, number, number[], number[], number
     // 🔑 率は「平均の平均」ではなく合計から出す（試合ごとの本数が違うため）
     row.conversion_pct = 100.0 * sum(s.goals!) / Math.max(1.0, sum(s.shots!));
     row.duels_lost_pct = 100.0 * sum(s.duels_lost!) / Math.max(1.0, sum(s.duels!));
+    row.takeon_success_pct = 100.0 * sum(s.takeons_won!) / Math.max(1.0, sum(s.takeons!));
     row.win_pct = 100.0 * mean(wins[n]!);
     out[n] = row;
   }

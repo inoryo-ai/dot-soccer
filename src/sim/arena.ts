@@ -180,6 +180,9 @@ export class Arena {
   frames: number[][] = [];
   events: MatchEvent[] = [];
   private contest_cd = 0;
+  /** 保持者が判断のあいだ運び続ける向き（11対11 の `Match` と同じ・D-49） */
+  private action_cd = 0;
+  private hold_dir: [number, number] = [1.0, 0.0];
   private readonly attackPolicy: AttackPolicy;
   private readonly defendPolicy: DefendPolicy;
   private readonly recording: boolean;
@@ -221,7 +224,11 @@ export class Arena {
                        area: this.area, table: this.table };
     const a = this.area;
     // 🔑 体力は攻撃ごとに戻す（S1 は1回ずつの勝負を覚える段階。疲れは段階が進んでから）
-    for (const m of this.men) m.stamina = m.max_stamina;
+    for (const m of this.men) {
+      m.stamina = m.max_stamina;
+      m.beaten_until = -1;
+    }
+    this.action_cd = 0;
     s.attacker.x = a.x0 + 1.0;
     s.attacker.y = C.PITCH_Y / 2 + this.rng.uniform(-C.ARENA_START_SPREAD_M, C.ARENA_START_SPREAD_M);
     s.attacker.heading = 0.0;
@@ -243,8 +250,11 @@ export class Arena {
       this.tick += 1;
       log.ticks += 1;
       // 1. ボールを持たない2人が動く（11対11 の `moveAll` と同じ順番）
-      const mv = this.defendPolicy.move(s);
-      Phys.stepActor(s.defender, mv.tx, mv.ty, mv.effort * C.EFFORT_SCALE, C.TICK_S, !mv.urgent);
+      // 🔑 抜かれて振り向いているあいだは動けない（11対11 と同じ・D-49）
+      if (s.defender.beaten_until <= this.tick) {
+        const mv = this.defendPolicy.move(s);
+        Phys.stepActor(s.defender, mv.tx, mv.ty, mv.effort * C.EFFORT_SCALE, C.TICK_S, !mv.urgent);
+      }
       const [kx, ky] = Phys.keeperAim(C.PITCH_X, -1, this.ball_y);
       Phys.stepActor(s.keeper, kx, ky, (C.EFFORT["GOALKEEP"] ?? 0.7) * C.EFFORT_SCALE, C.TICK_S, true);
       // 2. ボール
@@ -272,6 +282,7 @@ export class Arena {
       let challenger: Actor | null = null;
       let bestD = C.TACKLE_RADIUS_M;
       for (const o of opps) {
+        if (o.beaten_until > this.tick) continue;   // 抜かれて振り向いている
         const dd = hypot(o.x - h.x, o.y - h.y);
         if (dd < bestD) {
           challenger = o;
@@ -288,6 +299,11 @@ export class Arena {
       }
     }
 
+    // 🔑 判断は `HOLDER_DECIDE_S` 秒ごと。合間は決めた向きへ運び続ける（11対11 と同じ・D-49）
+    if (this.action_cd > 0) {
+      this.action_cd -= 1;
+      return this.advance(s, log);
+    }
     const act = this.attackPolicy.decide(s);
     if (act.kind === "SHOOT") {
       log.shots += 1;
@@ -307,22 +323,25 @@ export class Arena {
       return "SAVED";
     }
     log.dribbles += 1;
-    // 運ぶ・抜く（11対11 の `dribble` と同じ式）
-    const defender = Phys.opponentAhead(opps, h.x, h.y, h.x + act.dirX * 100.0, h.y + act.dirY * 100.0);
-    if (defender !== null) {
-      log.takeOns += 1;
-      if (this.rng.random() >= Phys.dribbleChance(h, defender)) {
-        return this.lose(defender, `${h.name} のドリブルを止めた`);
-      }
+    this.hold_dir = [act.dirX, act.dirY];
+    this.action_cd = C.HOLDER_DECIDE_TICKS - 1;
+    return this.advance(s, log);
+  }
+
+  /** 決めた向きへ1刻み運ぶ。前の触れる距離に相手がいれば仕掛け（11対11 と同じ `advanceHolder`・D-49） */
+  private advance(s: Scene, log: AttackLog): Outcome | null {
+    const h = s.attacker;
+    const opps = [s.defender, s.keeper].filter((o) => o.beaten_until <= this.tick);
+    const speed = Math.min(h.currentSpeed(), C.DRIBBLE_ADVANCE_M);
+    const r = Phys.advanceHolder(h, this.hold_dir[0], this.hold_dir[1], speed * C.TICK_S, opps,
+                                 () => this.rng.random());
+    if (r.lostTo !== null || r.beat !== null) log.takeOns += 1;
+    if (r.lostTo !== null) return this.lose(r.lostTo, `${h.name} のドリブルを止めた`);
+    if (r.beat !== null) {
       log.duelsWon += 1;
       log.takeOnsWon += 1;
+      r.beat.beaten_until = this.tick + C.BEATEN_TICKS;
     }
-    const [nx, ny] = Phys.dribbleTarget(h, act.dirX, act.dirY);
-    const stepLen = hypot(nx - h.x, ny - h.y);
-    if (stepLen > 0) h.heading = atan2(ny - h.y, nx - h.x);
-    h.x = nx;
-    h.y = ny;
-    h.stamina = Math.max(0.0, h.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
     this.ball_x = h.x;
     this.ball_y = h.y;
     if (!inside(this.area, h.x, h.y)) {

@@ -28,13 +28,9 @@ import * as measure from "../scripts/measure.ts";
 import type { Rows } from "../scripts/measure.ts";
 
 // 🔑 すべて相場の内側にある1チーム分。ここから1項目だけ外して故障を注入する
-const INSIDE: Record<string, number> = {
-  goals: 1.4,
-  shots: 13.5,
-  conversion_pct: 10.3,
-  distance_km: 102.0,
-  possession_pct: 50.0,
-};
+// 🔴 D-49: 手で並べていたので、相場（仕掛け・タックル）を足したら「平均 inf」で赤になった。**相場の真ん中から作る**
+const INSIDE: Record<string, number> = Object.fromEntries(
+  Object.entries(measure.EXPECTED).map(([k, e]) => [k, (e.low + e.high) / 2]));
 
 /** 1チームだけの実測表を作る。指定した項目だけ差し替える。 */
 function rows(overrides: Record<string, number> = {}): Rows {
