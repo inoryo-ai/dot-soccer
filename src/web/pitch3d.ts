@@ -79,7 +79,7 @@ function drawFrame(dt: number): void {
   if (c === null) return;
 
   const last = rp.frames.length - 1;
-  if (playing) frameIndex = Math.min(last, frameIndex + (dt * speed) / rp.sample_ticks * 60);
+  if (playing) frameIndex = Math.min(last, frameIndex + (dt * speed) / (rp.sample_ticks * rp.tick_s) * 60);
   const a = Math.floor(frameIndex);
   const bIdx = Math.min(last, a + 1);
   const t = frameIndex - a;
@@ -112,7 +112,7 @@ function drawFrame(dt: number): void {
     const y = lerp(4 + i * 2);
     const dx = (fb[3 + i * 2]! - fa[3 + i * 2]!) / k;
     const dy = (fb[4 + i * 2]! - fa[4 + i * 2]!) / k;
-    const sp = Math.hypot(dx, dy) / rp.sample_ticks;
+    const sp = Math.hypot(dx, dy) / (rp.sample_ticks * rp.tick_s);
     if (sp > 0.25) facings[i] = Math.atan2(dy, dx);
     /* 🔴 **実際の秒数で進める。** `voxel.ts` の姿勢は秒を前提に周期を書いている。
           進んだ距離で進めると、止まっている選手は呼吸も止まる。 */
@@ -162,7 +162,7 @@ function drawFrame(dt: number): void {
   ballPrev = { x: bx, y: by };
   Field.drawBall(c, cam, { x: bx, y: by, z: 0.30 }, ballSpin, ballDir);
 
-  const sec = Math.round((frameIndex * rp.sample_ticks));
+  const sec = Math.round(frameIndex * rp.sample_ticks * rp.tick_s);
   $("clock").textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 

@@ -9,8 +9,14 @@
 export const PITCH_X = 105.0;
 export const PITCH_Y = 68.0;
 export const GOAL_WIDTH = 7.32;
-export const TICKS_PER_MATCH = 5400;          // 90分 × 60秒
-export const TICKS_PER_HALF = 2700;
+// 🔑 **1刻み（ティック）が何秒か**（D-49）。時間で決まる数はすべて「秒 × 1秒あたりの刻み」で書く。
+//    1秒刻みでは、ドリブルの勝負を 6m 先で起こすしかなく、勝っても相手を抜けなかった（学習した守りが
+//    間合いを取るだけで毎秒奪いに行けた）。細かくすると勝負は体の触れる距離で起き、抜いた相手は置いていかれる。
+export const TICKS_PER_SECOND = 1;
+export const TICK_S = 1.0 / TICKS_PER_SECOND;
+export const MATCH_SECONDS = 90 * 60;
+export const TICKS_PER_MATCH = MATCH_SECONDS * TICKS_PER_SECOND;
+export const TICKS_PER_HALF = TICKS_PER_MATCH / 2;
 export const PLAYERS_ON_PITCH = 11;
 export const BENCH_SIZE = 5;
 export const MAX_SUBSTITUTIONS = 3;
@@ -168,12 +174,14 @@ export const URGENT_INTENTS: ReadonlySet<string> = new Set(["ENGAGE", "CHASE_LOO
 // 1ティック＝1秒。毎秒ボールを蹴る／毎秒奪い合うのは実際の試合と合わないので、
 // 「1回の行動が何秒かかるか」を明示する（これが無いと1試合4000回の奪い合いになる）。
 // 🔑 D-44 で 2 → 1。2秒だと、ゴール前で受けた選手が判断できないまま密集へ運ばされた
-export const ACTION_CONTROL_TICKS = 1;            // 受けてから次の判断までの秒数
+export const ACTION_CONTROL_S = 1;                // 受けてから次の判断までの秒数
+export const ACTION_CONTROL_TICKS = ACTION_CONTROL_S * TICKS_PER_SECOND;
 // 🔑 D-46: 蹴る動作にかかる秒数。1秒のうち**残りは出した人がボールを持たない選手として動く**。
 //    これが無いと、出した人は蹴った秒に1歩も動かず、画面で「出した直後に固まる」ように見えた
 //    （助走・踏み込み・振り抜きで約0.5秒という見立て。出典なし＝目視で調整するつまみ）
 export const PASS_KICK_SECONDS = 0.5;
-export const TACKLE_COOLDOWN_TICKS = 3;           // 同じ保持局面で奪い合いが起きる間隔
+export const TACKLE_COOLDOWN_S = 3;               // 同じ保持局面で奪い合いが起きる間隔（秒）
+export const TACKLE_COOLDOWN_TICKS = TACKLE_COOLDOWN_S * TICKS_PER_SECOND;
 // 🔑 0.55 だと攻撃が前へ進まず、保持時間の74%が中盤に留まっていた
 //    （2026-10-01 実測。敵陣3分の1は16%）。0.90 で敵陣 20% まで戻る
 export const CARRY_SPEED_RATIO = 0.90;            // 判断待ちの間、ボールを運ぶ速度
@@ -284,12 +292,12 @@ export const KICKOFF_CIRCLE_MARGIN_M = 0.5;       // 守る側がセンターサ
 // 🔴 **ゴールの後、瞬間移動で並び直さない。** 1コマで 40m 以上飛び、
 //    次の1秒でもうボールが動いていた（2026-10-02 オーナー指摘）。
 //    → 全員が歩いて戻り、そろってからキックオフ。その間も時計は進む（オーナー判断）。
-export const RESTART_MIN_TICKS = 10;              // 全員そろっていても、これより早くは始めない
-export const RESTART_MAX_TICKS = 120;             // これを過ぎたら、戻りきれない人がいても始める
+export const RESTART_MIN_TICKS = 10 * TICKS_PER_SECOND;   // 全員そろっていても、これより早くは始めない（10秒）
+export const RESTART_MAX_TICKS = 120 * TICKS_PER_SECOND;  // これを過ぎたら、戻りきれない人がいても始める（120秒）
 export const RESTART_SETTLE_M = 1.5;              // 立ち位置からこの距離以内なら「戻った」
 export const RESTART_BALL_SPEED_MPS = 6.0;        // ボールがセンターへ戻る速さ
 export const RESTART_APPROACH_RATIO = 0.5;        // 立ち位置の近くでは、残りのこの割合ずつ詰める
-export const LOOSE_BALL_MAX_TICKS = 20;           // これ以上こぼれ球が続いたら最近接に渡す
+export const LOOSE_BALL_MAX_TICKS = 20 * TICKS_PER_SECOND;  // これ以上（20秒）こぼれ球が続いたら最近接に渡す
 export const BEATEN_BEHIND_RADIUS_M = 3.0;        // この距離の守備者を抜いたら「抜かれた」と数える
 export const PASS_BASE = 1.0;                     // D-44 で 0.94 → 1.0（土台がプロになり、通る確率が技術の分だけ上がる前提を戻した）
 export const PASS_TECHNIQUE_WEIGHT = 0.22;
@@ -345,12 +353,12 @@ export const LOOSE_BALL_RADIUS_M = 2.6;           // こぼれ球を拾える距
 export const KEEPER_CLAIM_RADIUS_M = 6.0;
 
 // ------------------------------------------------------------ チーム方針 §10
-export const POLICY_CHECK_INTERVAL = 60;          // 60ティックごとに上から判定
+export const POLICY_CHECK_INTERVAL = 60 * TICKS_PER_SECOND;  // 60秒ごとに上から判定
 export const POLICY_MAX_RULES = 5;
 export const POLICY_LINE_STEP = 2;                // LINE_DOWN / PUSH_UP で動かす段数
 export const POLICY_PRESS_DELTA = 30;             // HIGH_PRESS / LESS_PRESS の press 補正
-export const POLICY_LEADING_LATE_TICK = 75 * 60;
-export const POLICY_TRAILING_LATE_TICK = 70 * 60;
+export const POLICY_LEADING_LATE_TICK = 75 * 60 * TICKS_PER_SECOND;
+export const POLICY_TRAILING_LATE_TICK = 70 * 60 * TICKS_PER_SECOND;
 export const POLICY_OPP_GK_WEAK_KICK = 62;           // D-43: GKの土台55＋個人差±6の上。旧50は土台45の頃の値（全GKが当てはまっていた）。土台を上げたら一緒に上げる（tests/sim.test.ts）
 export const POLICY_OPP_HIGH_LINE = 4;
 export const POLICY_OWN_STAMINA_LOW = 0.40;
@@ -359,8 +367,8 @@ export const RIGIDITY_BLOCK_STEP = 0.18;          // rigidity +1 あたり発動
 
 // ------------------------------------------------------------------- 交代 §10
 export const SUB_STAMINA_RATIO = 0.45;            // これを下回った選手を交代候補にする
-export const SUB_EARLIEST_TICK = 55 * 60;         // substitution=0 のときの最初の交代可能時刻
-export const SUB_AGGRESSIVE_SHIFT = 6 * 60;       // substitution +1 あたり早まるティック数
+export const SUB_EARLIEST_TICK = 55 * 60 * TICKS_PER_SECOND;   // substitution=0 のときの最初の交代可能時刻
+export const SUB_AGGRESSIVE_SHIFT = 6 * 60 * TICKS_PER_SECOND;  // substitution +1 あたり早まるティック数（6分）
 
 // --------------------------------------------------------------- ゲーム進行
 export const LEAGUE_DOUBLE_ROUND = true;          // 2回戦総当たり（ホーム・アウェー）
@@ -378,11 +386,11 @@ export const MAX_CARD_STOCK = 99;                 // 同じカードの所持上
 //    原因は3つで、どれも「式が11個並んでいるだけ」という同じ形をしていた:
 //      ①判断の瞬間が全員同じ ②意思が持続しない ③向きを変えるのに時間が掛からない
 
-export const DECIDE_INTERVAL_TICKS = 5;           // 何秒ごとに「いま何をするか」を考え直すか
+export const DECIDE_INTERVAL_TICKS = 5 * TICKS_PER_SECOND;  // 5秒ごとに「いま何をするか」を考え直す
 // 🔑 全員が同じ秒に考え直すと、結局そろって動く。選手ごとに 0〜4 秒ずらす
 export const DECIDE_STAGGER = DECIDE_INTERVAL_TICKS;
 
-export const REACTION_LAG_MAX_TICKS = 3;          // 攻守が入れ替わってから考え直すまでの個人差（秒）
+export const REACTION_LAG_MAX_TICKS = 3 * TICKS_PER_SECOND;  // 攻守が入れ替わってから考え直すまでの個人差（最大3秒）
 export const SEAT_JITTER_M = 2.5;                 // 持ち場そのものの個人差（同じ枠でも立ち位置が違う）
 
 // 🔴 向きを変えるのに時間を掛ける。ここが無いと全員が同じ瞬間に反転でき、
@@ -476,7 +484,8 @@ export const RECOVER_DEPTH = 0.4;                 // ボールから自ゴール
 // 🔑 5→1 で1試合 1,080コマ → 5,400コマ（約1MB）。
 //    再生データは**画面の中だけで使い、セーブにも通信にも乗らない**ので、
 //    ここは容量より見え方を取ってよい（`Career.toDict` に replay は入らない）。
-export const REPLAY_SAMPLE_TICKS = 1;
+// 🔑 D-49: 刻みを細かくしても、コマは**1秒に1枚**のまま（画面は間を補って滑らかに描く・測る道具はコマを秒として読む）
+export const REPLAY_SAMPLE_TICKS = TICKS_PER_SECOND;
 // 🔑 座標は 0.1m 単位の整数で持つ（小数のまま JSON にすると容量が3倍になる）
 export const REPLAY_COORD_SCALE = 10;
 
@@ -493,8 +502,8 @@ export const BATCH_WIN_RATE_WARN_LOW = 0.30;      // 床も測る（学習台帳
 //       https://pmc.ncbi.nlm.nih.gov/articles/PMC5260560
 export const ARENA_DEPTH_M = 28.0;               // ゴールラインから前へ（m）
 export const ARENA_WIDTH_M = 20.0;               // 横幅（ゴールの真ん中から左右 10m ずつ）
-export const ARENA_MAX_TICKS = 15;               // 1回の攻撃の長さの上限（秒）。これを過ぎたら時間切れ＝攻めの失敗
-export const ARENA_PAUSE_TICKS = 2;              // 攻撃と攻撃のあいだに、終わった場面を止めて見せるコマ数（結果には効かない）
+export const ARENA_MAX_TICKS = 15 * TICKS_PER_SECOND;   // 1回の攻撃の長さの上限（15秒）。これを過ぎたら時間切れ＝攻めの失敗
+export const ARENA_PAUSE_TICKS = 2 * TICKS_PER_SECOND;  // 攻撃と攻撃のあいだに、終わった場面を止めて見せる長さ（2秒・結果には効かない）
 export const ARENA_START_SPREAD_M = 6.0;         // 攻めが始める横の位置のばらつき（真ん中から±）
 export const ARENA_DEFENDER_START_M = 12.0;      // 守りが始める位置（区切りの入口から前へ。ほぼエリアの端）
 export const ARENA_ATTACKS = 20;                 // 1回の練習で攻める回数（2人が10回ずつ）

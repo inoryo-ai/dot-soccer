@@ -105,6 +105,10 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
    * 🔑 2026-10-03 にフォーメーションを前へ出したとき、ゴールの1つがこの窓に入って
    *    初めて表に出た。試合の中身が変わると露出する、という類の見落とし。
    */
+  /** 刻み `tick` を含むコマの番号（コマは1秒に1枚・D-49。1秒刻みなら刻みそのもの） */
+  const frameOf = (tick: number): number => Math.ceil(tick / C.REPLAY_SAMPLE_TICKS);
+  const RESTART_MIN_FRAMES = C.RESTART_MIN_TICKS / C.REPLAY_SAMPLE_TICKS;
+
   const crossesHalfTime = (tick: number): boolean =>
     tick < C.TICKS_PER_HALF && tick + C.RESTART_MAX_TICKS >= C.TICKS_PER_HALF;
 
@@ -120,12 +124,12 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
       const k = res.replay!.coord_scale;
       for (const g of res.events.filter((e) => e.type === "ゴール")) {
         if (crossesHalfTime(g.tick)) continue;
-        let t = g.tick;
+        let t = frameOf(g.tick);
         do {
           for (let i = 0; i < 22; i++) {
             const d = hypot(fr[t]![3 + i * 2]! - fr[t - 1]![3 + i * 2]!,
                             fr[t]![4 + i * 2]! - fr[t - 1]![4 + i * 2]!) / k;
-            assert.ok(d <= limit, `${label} ${g.time} のゴール後 ${t - g.tick}秒目に ${fmtF(d, 1)}m 動いた`);
+            assert.ok(d <= limit, `${label} ${g.time} のゴール後 ${t - frameOf(g.tick)}秒目に ${fmtF(d, 1)}m 動いた`);
           }
           t += 1;
         } while (t < fr.length && fr[t - 1]![2] === -1);
@@ -137,10 +141,10 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
     for (const { label, res } of games) {
       const fr = res.replay!.frames;
       for (const g of res.events.filter((e) => e.type === "ゴール")) {
-        if (g.tick + C.RESTART_MIN_TICKS >= fr.length) continue;   // 試合終了間際のゴール
+        if (frameOf(g.tick) + RESTART_MIN_FRAMES >= fr.length) continue;   // 試合終了間際のゴール
         if (crossesHalfTime(g.tick)) continue;                     // 前半終了間際のゴール
-        for (let t = g.tick; t < g.tick + C.RESTART_MIN_TICKS; t++) {
-          assert.equal(fr[t]![2], -1, `${label} ${g.time} のゴールの ${t - g.tick}秒後に誰かが持っている`);
+        for (let t = frameOf(g.tick); t < frameOf(g.tick) + RESTART_MIN_FRAMES; t++) {
+          assert.equal(fr[t]![2], -1, `${label} ${g.time} のゴールの ${t - frameOf(g.tick)}秒後に誰かが持っている`);
         }
       }
     }
@@ -153,6 +157,6 @@ describe("🔴 ゴールの後は全員が歩いて戻り、そろってから�
   });
 
   test("戻っている間も時計は進む（試合は 5,400 秒で終わる）", () => {
-    for (const { res } of games) assert.equal(res.replay!.frames.length, C.TICKS_PER_MATCH);
+    for (const { res } of games) assert.equal(res.replay!.frames.length, C.TICKS_PER_MATCH / C.REPLAY_SAMPLE_TICKS);
   });
 });

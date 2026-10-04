@@ -11,6 +11,7 @@ import type { MatchEvent, MatchStatsOut } from "../sim/engine.ts";
 import * as Bg from "./bg.ts";
 import * as Board from "./board.ts";
 import * as Ceremony from "./ceremony.ts";
+import { TICK_S } from "../sim/constants.ts";
 import * as Fx from "./fx.ts";
 /* 🔑 試合の描画は3Dに一本化した（D-33）。外から見える形は前のままなので、
       ここは読み込み先が変わるだけ。別名は `Pitch` のまま置く。 */
@@ -159,8 +160,10 @@ function call<T>(fn: () => T): T | null {
 }
 
 function minuteText(tick: number): string {
-  const m = Math.floor(tick / 60);
-  const s = tick % 60;
+  /* 🔑 刻みは秒ではない（D-49）。秒に直してから分・秒にする */
+  const sec = Math.floor(tick * TICK_S);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 

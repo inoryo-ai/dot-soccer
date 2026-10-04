@@ -244,9 +244,9 @@ export class Arena {
       log.ticks += 1;
       // 1. ボールを持たない2人が動く（11対11 の `moveAll` と同じ順番）
       const mv = this.defendPolicy.move(s);
-      Phys.stepActor(s.defender, mv.tx, mv.ty, mv.effort * C.EFFORT_SCALE, 1.0, !mv.urgent);
+      Phys.stepActor(s.defender, mv.tx, mv.ty, mv.effort * C.EFFORT_SCALE, C.TICK_S, !mv.urgent);
       const [kx, ky] = Phys.keeperAim(C.PITCH_X, -1, this.ball_y);
-      Phys.stepActor(s.keeper, kx, ky, (C.EFFORT["GOALKEEP"] ?? 0.7) * C.EFFORT_SCALE, 1.0, true);
+      Phys.stepActor(s.keeper, kx, ky, (C.EFFORT["GOALKEEP"] ?? 0.7) * C.EFFORT_SCALE, C.TICK_S, true);
       // 2. ボール
       const end = this.resolve(s, log);
       this.record();
@@ -343,8 +343,9 @@ export class Arena {
 
   private log(type: string, who: Actor, detail: string): void {
     if (!this.recording) return;
-    const mm = String(Math.floor(this.tick / 60)).padStart(2, "0");
-    const ss = String(this.tick % 60).padStart(2, "0");
+    const sec = Math.floor(this.tick * C.TICK_S);
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
     // 🔑 得点の表示（試合の画面）はチーム名で数えるので、選手の名前をチーム名にする。
     //    tick はコマの番号（止めて見せるコマを含む）にそろえる
     this.events.push({ time: `${mm}:${ss}`, tick: this.frames.length, type, team: who.name,
@@ -364,7 +365,7 @@ export class Arena {
   private replay(): Replay {
     const roster: RosterEntry[] = this.men.map((m) => ({ name: m.name, team: m.team_idx, pos: m.pos,
                                                          type: m.player.typeName }));
-    return { sample_ticks: 1, coord_scale: C.REPLAY_COORD_SCALE, pitch: [C.PITCH_X, C.PITCH_Y],
+    return { sample_ticks: 1, tick_s: C.TICK_S, coord_scale: C.REPLAY_COORD_SCALE, pitch: [C.PITCH_X, C.PITCH_Y],
              roster, frames: this.frames,
              area: [this.area.x0, this.area.y0, this.area.x1, this.area.y1] };
   }

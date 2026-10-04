@@ -73,10 +73,11 @@ function checkConstantsInvariants(): void {
     bad(`寄せの間合い ${C.PRESS_STANDOFF_M}m が奪い合いの距離 ${C.TACKLE_RADIUS_M}m の内側`
         + "（全員が毎秒奪い合いに参加する。実測で1試合4,081回になった）");
   }
-  if (C.TICKS_PER_MATCH === C.TICKS_PER_HALF * 2 && C.TICKS_PER_MATCH === 5400) {
-    ok("90分 = 5400ティック（前後半 2700 ずつ）");
+  if (C.TICKS_PER_MATCH === C.TICKS_PER_HALF * 2 && C.TICKS_PER_MATCH === 5400 * C.TICKS_PER_SECOND
+      && C.TICK_S * C.TICKS_PER_SECOND === 1 && Number.isInteger(C.TICKS_PER_SECOND)) {
+    ok(`90分 = ${C.TICKS_PER_MATCH}刻み（1刻み ${C.TICK_S}秒・前後半 ${C.TICKS_PER_HALF} ずつ）`);
   } else {
-    bad(`試合の長さが 5400 ティックでない: ${C.TICKS_PER_MATCH}`);
+    bad(`試合の長さが 5400秒×${C.TICKS_PER_SECOND}刻み でない: ${C.TICKS_PER_MATCH}`);
   }
   if (C.TYPE_THRESHOLD > 0 && C.TYPE_THRESHOLD <= C.HIDDEN_MAX) {
     ok(`タイプ判定の閾値 ${C.TYPE_THRESHOLD} が範囲内`);

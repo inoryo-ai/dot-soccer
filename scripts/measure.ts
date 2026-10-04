@@ -183,7 +183,8 @@ export function openGoalCounts(result: MatchResult): number[] {
   const shotTicks = [new Set<number>(), new Set<number>()];
   for (const e of result.events) {
     if (e.type !== "シュート" && e.type !== "ゴール") continue;
-    shotTicks[e.team === result.teams[0] ? 0 : 1]!.add(e.tick);
+    // 撃った刻みを、その刻みを含むコマの番号にする（1秒刻みなら刻みそのもの）
+    shotTicks[e.team === result.teams[0] ? 0 : 1]!.add(frameBefore(rp, e.tick) + 1);
   }
   const teamOf = (owner: number): number => (owner < nHome ? 0 : 1);
   const counts = new Array<number>(OPEN_GOAL_BANDS.length * 4).fill(0);
@@ -211,7 +212,7 @@ export function openGoalCounts(result: MatchResult): number[] {
     let j = i;
     let hit = false;
     while (j < rp.frames.length && j - i <= OPEN_GOAL_WINDOW) {
-      if (shotTicks[team]!.has(j * rp.sample_ticks)) { hit = true; break; }
+      if (shotTicks[team]!.has(j)) { hit = true; break; }
       const o = rp.frames[j]![2]!;
       if (o >= 0 && teamOf(o) !== team) break;
       j += 1;
@@ -374,12 +375,26 @@ export const RELEASE_STILL_M = 0.3;
 /** 出した秒にほぼ動かなかったパスの割合の上限（判定する）。直す前は 100%・直した後は約 11% */
 export const RELEASE_STILL_MAX = 0.25;
 
+/**
+ * コマを秒として読む道具のための確認。**1秒に1コマ**で記録した試合だけを受け付ける（D-49: 刻みは秒ではない）。
+ */
+export function needPerSecond(rp: { sample_ticks: number; tick_s: number }): void {
+  if (rp.sample_ticks * rp.tick_s !== 1) {
+    throw new Error(`1秒に1コマで記録した試合を渡すこと（${rp.sample_ticks}刻み×${rp.tick_s}秒）`);
+  }
+}
+
+/** 刻み `tick` に起きた出来事の、**その秒の始めのコマ**の番号（1秒刻みなら tick−1） */
+export function frameBefore(rp: { sample_ticks: number }, tick: number): number {
+  return Math.floor((tick - 1) / rp.sample_ticks);
+}
+
 /** [パスと外れたシュートの数, 蹴った秒に動いた距離の合計, 出した秒にほぼ動かなかった数, 出した後3秒の移動の合計]。 */
 export function releaseCounts(result: MatchResult): number[] {
   const rp = result.replay;
   if (rp === undefined) throw new Error("record=true で回した試合を渡すこと");
   // 🔴 コマの番号＝秒として読む。間引いて記録した試合では1秒ぶんの移動が取れない
-  if (rp.sample_ticks !== 1) throw new Error(`1秒ごとに記録した試合を渡すこと（sample_ticks=${rp.sample_ticks}）`);
+  needPerSecond(rp);
   const k = rp.coord_scale;
   const at = (t: number, p: number): [number, number] =>
     [rp.frames[t]![3 + p * 2]! / k, rp.frames[t]![4 + p * 2]! / k];
@@ -392,7 +407,7 @@ export function releaseCounts(result: MatchResult): number[] {
   for (const e of result.events) {
     // 🔑 外れた・止められたシュートも同じ（入ったときは笛が鳴って喜ぶので数えない）
     if ((e.type !== "パス" && e.type !== "シュート") || e.player === null) continue;
-    const t = e.tick;
+    const t = frameBefore(rp, e.tick) + 1;   // 蹴った秒の終わりのコマ
     if (t < 1 || t + 3 >= rp.frames.length) continue;
     // 🔑 出した人＝その直前の秒にボールを持っていた人。名前で名簿を引かない
     //    （名簿は試合の終わりの顔ぶれなので、交代で下がった選手が見つからない）
@@ -439,7 +454,7 @@ export const REPOSITION_M = C.SPEED_MAX_MPS * 1.5;
 export function fatigueCounts(result: MatchResult): number[] {
   const rp = result.replay;
   if (rp === undefined) throw new Error("record=true で回した試合を渡すこと");
-  if (rp.sample_ticks !== 1) throw new Error(`1秒ごとに記録した試合を渡すこと（sample_ticks=${rp.sample_ticks}）`);
+  needPerSecond(rp);
   const k = rp.coord_scale;
   const F = rp.frames;
   const quarter = C.TICKS_PER_MATCH / 6;          // 15分
@@ -450,10 +465,11 @@ export function fatigueCounts(result: MatchResult): number[] {
       const d = hypot(F[t]![3 + p * 2]! / k - F[t - 1]![3 + p * 2]! / k,
                       F[t]![4 + p * 2]! / k - F[t - 1]![4 + p * 2]! / k);
       if (d > REPOSITION_M) return;               // 後半開始の並び直し・交代（走ったのではない）
-      out[t < C.TICKS_PER_HALF ? 0 : 1]! += d;
+      const tick = t * rp.sample_ticks;
+      out[tick < C.TICKS_PER_HALF ? 0 : 1]! += d;
       if (d >= HIGH_INTENSITY_MPS) {
-        if (t < quarter) out[2]! += d;
-        else if (t >= C.TICKS_PER_MATCH - quarter) out[3]! += d;
+        if (tick < quarter) out[2]! += d;
+        else if (tick >= C.TICKS_PER_MATCH - quarter) out[3]! += d;
       }
     });
   }
@@ -493,12 +509,12 @@ export const BOX_WIDTH_M = 40.32;
 export function shotPlaceCounts(result: MatchResult): number[] {
   const rp = result.replay;
   if (rp === undefined) throw new Error("record=true で回した試合を渡すこと");
-  if (rp.sample_ticks !== 1) throw new Error(`1秒ごとに記録した試合を渡すこと（sample_ticks=${rp.sample_ticks}）`);
+  needPerSecond(rp);
   const k = rp.coord_scale;
   const out = [0, 0, 0];
   for (const e of result.events) {
     if (e.type !== "シュート" && e.type !== "ゴール") continue;
-    const t = e.tick;
+    const t = frameBefore(rp, e.tick) + 1;
     if (t < 1) throw new Error(`${e.time} の${e.type}が試合の最初の秒にある（直前の持ち主を引けない）`);
     // 🔑 撃った人＝直前の秒の持ち主。保持者はその秒の移動では動かないので、直前の位置＝撃った位置
     const p = rp.frames[t - 1]![2]!;
@@ -506,7 +522,7 @@ export function shotPlaceCounts(result: MatchResult): number[] {
     if (p < 0 || rp.roster[p]!.team !== team) throw new Error(`${e.time} の${e.type}の直前に、撃ったチームの持ち主がいない`);
     const x = rp.frames[t - 1]![3 + p * 2]! / k;
     const y = rp.frames[t - 1]![4 + p * 2]! / k;
-    const homeDir = t < C.TICKS_PER_HALF ? 1 : -1;
+    const homeDir = e.tick < C.TICKS_PER_HALF ? 1 : -1;
     const toward = team === 0 ? homeDir : -homeDir;      // +1 なら x=PITCH_X のゴールを攻める
     const depth = toward > 0 ? rp.pitch[0] - x : x;
     const outside = depth > BOX_DEPTH_M || Math.abs(y - rp.pitch[1] / 2) > BOX_WIDTH_M / 2;

@@ -184,9 +184,9 @@ export function keeperAim(ownGoalX: number, direction: number, ballY: number): [
   return [ownGoalX + depth, ty];
 }
 
-/** ドリブル（運ぶ・抜く）で1回に着く場所。決めた向き（単位ベクトル）へ `DRIBBLE_ADVANCE_M` まで進む。 */
+/** ドリブル（運ぶ・抜く）で1刻みに着く場所。決めた向き（単位ベクトル）へ、1秒あたり `DRIBBLE_ADVANCE_M` まで進む。 */
 export function dribbleTarget(holder: Actor, dirX: number, dirY: number): [number, number] {
-  const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M);
+  const stepLen = Math.min(holder.currentSpeed(), C.DRIBBLE_ADVANCE_M) * C.TICK_S;
   return [Math.max(0.0, Math.min(C.PITCH_X, holder.x + dirX * stepLen)),
           Math.max(0.0, Math.min(C.PITCH_Y, holder.y + dirY * stepLen))];
 }

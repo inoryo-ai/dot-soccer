@@ -144,7 +144,8 @@ describe("試合が必ず90分で終わる（要件定義書 §11）", () => {
     for (const seed of [1, 2, 3, 99, 12345]) {
       const r = play(a.clone(), b.clone(), seed, false);
       assert.equal(r.ticks, C.TICKS_PER_MATCH);
-      assert.equal(C.TICKS_PER_MATCH, 5400);
+      assert.equal(C.MATCH_SECONDS, 5400);
+      assert.equal(C.TICKS_PER_MATCH, C.MATCH_SECONDS * C.TICKS_PER_SECOND);
     }
   });
 

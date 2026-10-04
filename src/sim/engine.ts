@@ -135,7 +135,10 @@ export interface RosterEntry {
 }
 
 export interface Replay {
+  /** 何刻みごとに1コマ残したか */
   sample_ticks: number;
+  /** 1刻みの秒数（D-49）。1コマ＝sample_ticks × tick_s 秒 */
+  tick_s: number;
   coord_scale: number;
   pitch: [number, number];
   roster: RosterEntry[];
@@ -359,19 +362,19 @@ export class Match {
         const d = hypot(tx - a.x, ty - a.y);
         const effort = Math.min(C.EFFORT["RETURN_KICKOFF"]!,
                                 d * C.RESTART_APPROACH_RATIO / a.currentSpeed());
-        this.step(a, tx, ty, effort);
+        this.step(a, tx, ty, effort, C.TICK_S);
         if (hypot(tx - a.x, ty - a.y) > C.RESTART_SETTLE_M) settled = false;
       }
     }
     const cx = C.PITCH_X / 2;
     const cy = C.PITCH_Y / 2;
     const d = hypot(cx - this.ball_x, cy - this.ball_y);
-    if (d <= C.RESTART_BALL_SPEED_MPS) {
+    if (d <= C.RESTART_BALL_SPEED_MPS * C.TICK_S) {
       this.ball_x = cx;
       this.ball_y = cy;
     } else {
-      this.ball_x += (cx - this.ball_x) / d * C.RESTART_BALL_SPEED_MPS;
-      this.ball_y += (cy - this.ball_y) / d * C.RESTART_BALL_SPEED_MPS;
+      this.ball_x += (cx - this.ball_x) / d * C.RESTART_BALL_SPEED_MPS * C.TICK_S;
+      this.ball_y += (cy - this.ball_y) / d * C.RESTART_BALL_SPEED_MPS * C.TICK_S;
       settled = false;
     }
     if ((settled && r.ticks >= C.RESTART_MIN_TICKS) || r.ticks >= C.RESTART_MAX_TICKS) {
@@ -615,7 +618,7 @@ export class Match {
       }
       for (const a of this.actors[ts.idx]!) {
         if (a === owner) continue;                // 保持者はボール処理側で動かす
-        this.moveOffBall(ts, a, hasBall, owner, oppDeep, a === engager, 1.0);
+        this.moveOffBall(ts, a, hasBall, owner, oppDeep, a === engager, C.TICK_S);
       }
     }
   }
@@ -648,7 +651,7 @@ export class Match {
     passer.seen_epoch = -1;                          // 受ける前の意思を捨てて、いまの局面で考え直す
     const oppDeep = this.lastDefenderX(this.teams[1 - ts.idx]!);
     this.moveOffBall(ts, passer, owner !== null && owner.team_idx === ts.idx, owner, oppDeep,
-                     false, 1.0 - C.PASS_KICK_SECONDS);
+                     false, Math.max(0.0, C.TICK_S - C.PASS_KICK_SECONDS));
   }
 
   // ------------------------------------------------------- 一人ぶんの判断
@@ -1397,7 +1400,7 @@ export class Match {
     // 🔑 受けた直後のひと運びは**自分の筋をまっすぐ前へ**（D-45）。ゴールの真ん中へ向けていたので、
     //    サイドで受けた選手も受けるたびに中央へ寄った
     if (Math.abs(ts.targetGoalX() - holder.x) < 1.0) return;
-    const stepLen = holder.pace(C.CARRY_SPEED_RATIO);
+    const stepLen = holder.pace(C.CARRY_SPEED_RATIO) * C.TICK_S;
     holder.x += ts.direction * stepLen;
     holder.stamina = Math.max(0.0, holder.stamina - stepLen * C.STAMINA_DRAIN_PER_METER);
     ts.stats.distance_m += stepLen;
@@ -1721,8 +1724,9 @@ export class Match {
 
   // ------------------------------------------------------------- 出力
   private log(kind: string, player: string | null, teamIdx: number, detail = ""): void {
-    const mm = String(Math.floor(this.tick / 60)).padStart(2, "0");
-    const ss = String(this.tick % 60).padStart(2, "0");
+    const sec = Math.floor(this.tick * C.TICK_S);
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
     this.events.push({
       time: `${mm}:${ss}`,
       tick: this.tick,
@@ -1759,6 +1763,7 @@ export class Match {
     if (this.record_enabled) {
       out.replay = {
         sample_ticks: C.REPLAY_SAMPLE_TICKS,
+        tick_s: C.TICK_S,
         coord_scale: C.REPLAY_COORD_SCALE,
         pitch: [C.PITCH_X, C.PITCH_Y],
         roster: this.replayRoster(),

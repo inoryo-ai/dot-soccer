@@ -297,8 +297,8 @@ function step(stamp: number): void {
 
   if (playing) {
     /* 🔴 ×1 は実時間（試合の1秒＝実際の1秒）。
-          1コマ = sample_ticks 秒ぶんなので、進むコマ数は speed ÷ sample_ticks */
-    frameIndex += (dt * speed) / replay.sample_ticks;
+          1コマ = sample_ticks × tick_s 秒ぶん（D-49 で刻みは秒ではなくなった） */
+    frameIndex += (dt * speed) / (replay.sample_ticks * replay.tick_s);
     const last = replay.frames.length - 1;
     /* 🔴 前半の終わりの判定を**試合終了より先に**置く。後ろに置くと、
           速さを上げたときに1コマで両方を跨いで、ハーフタイムが飛ぶ。 */
@@ -442,7 +442,7 @@ function draw(dt: number): void {
     const y = lerp(4 + i * 2);
     const dx = (fb[3 + i * 2]! - fa[3 + i * 2]!) / k;
     const dy = (fb[4 + i * 2]! - fa[4 + i * 2]!) / k;
-    const sp = Math.hypot(dx, dy) / rp.sample_ticks;
+    const sp = Math.hypot(dx, dy) / (rp.sample_ticks * rp.tick_s);
     if (sp > 0.25) facings[i] = Math.atan2(dy, dx);
     /* 🔴 **実際の秒数で進める**（2026-10-03 のレビューで判明）。
           ここは「進んだ距離に比例して進む歩調カウンタ」だった（`sp * dt * 0.9`）が、
