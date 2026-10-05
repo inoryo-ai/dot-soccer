@@ -200,3 +200,14 @@ describe("走るペース（2026-10-05 オーナー指摘）", () => {
     assert.equal(sim.restart, null, "キックオフから1分たっても再開を待っている");
   });
 });
+
+describe("ゴール前で陣形を詰める（2026-10-05）", () => {
+  test("🔴 守るとき、ボールが自陣ゴールに近いほど陣形の縦の長さと横幅が小さい", async () => {
+    const { compactDefence } = await import("../src/sim/match/team_ai.ts");
+    const far = compactDefence(60.0);
+    const mid = compactDefence(30.0);
+    const near = compactDefence(10.0);
+    assert.ok(far.length > mid.length && mid.length > near.length);
+    assert.ok(far.width > mid.width && mid.width > near.width);
+  });
+});

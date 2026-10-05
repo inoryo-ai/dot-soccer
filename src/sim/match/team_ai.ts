@@ -62,6 +62,26 @@ export const SHAPE: Readonly<Record<"ATTACK" | "DEFEND", { length: number; width
 };
 
 /**
+ * 🔑 ゴール前で陣形を詰める（どの戦術でも使う守り方の部品）。守るときの縦の長さと横幅を、ボールが自陣ゴールに
+ *    近づくほど縮める。ボールが COMPACT_FROM_M 以上離れていれば SHAPE.DEFEND のまま、COMPACT_TO_M まで来たら
+ *    COMPACT_SHAPE、その間は直線でつなぐ。
+ *    詰めた形は、出典の実測（守備時 縦 32.5±8.7m × 横 37.3±4.8m・Forcher ら 2024）のばらつきの下側
+ *    （平均 − 標準偏差1つ）。🔴 いつも平均の 32.5m のままだと、ゴール前で DF と MF の2列の間が空き、
+ *    そこへ運び込まれて 1試合 20〜30点入った（2026-10-05）
+ */
+export const COMPACT_FROM_M = 50.0;
+export const COMPACT_TO_M = 15.0;
+export const COMPACT_SHAPE = { length: 24.0, width: 32.0 } as const;
+
+export function compactDefence(ballDepth: number): { length: number; width: number } {
+  const t = clamp((ballDepth - COMPACT_TO_M) / (COMPACT_FROM_M - COMPACT_TO_M), 0.0, 1.0);
+  return {
+    length: COMPACT_SHAPE.length + (SHAPE.DEFEND.length - COMPACT_SHAPE.length) * t,
+    width: COMPACT_SHAPE.width + (SHAPE.DEFEND.width - COMPACT_SHAPE.width) * t,
+  };
+}
+
+/**
  * ブロックの真ん中を、自陣ゴールから「ボールまでの距離 × BLOCK_FOLLOW ＋ ずらし」に置く。
  * 🔑 設計値（出典なし）。確かめ方: 最終ラインと自陣ゴールの距離が、
  *    守備時はボールの位置しだいで約 6〜45m、攻撃時は 38±8m（Rico-González ら 2022・監視のみ）に入るか。
@@ -151,9 +171,9 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
   //       下がり、受けるとまた出る往復になった。FW がボールを受けた場所の 8割以上が中盤になり、
   //       FW どうしの短い横パスが 50分で 449本・FW が1人 約470回ボールを持った（2026-10-05）
   const attacking = phase === "ATTACK" || (phase === "LOOSE" && lastTeam === team);
-  const shape = SHAPE[attacking ? "ATTACK" : "DEFEND"];
   const offset = BLOCK_OFFSET_M[attacking ? "ATTACK" : "DEFEND"];
   const ballDepth = Math.abs(ball.x - ownGoalX);            // 自陣ゴールからボールまで
+  const shape = attacking ? SHAPE.ATTACK : compactDefence(ballDepth);
   const center = clamp(BLOCK_FOLLOW * ballDepth + offset,
                        shape.length / 2 + 6.0, PITCH_LENGTH_M - shape.length / 2 - 6.0);
   const centerY = PITCH_WIDTH_M / 2 + (ball.y - PITCH_WIDTH_M / 2) * BLOCK_SLIDE;
