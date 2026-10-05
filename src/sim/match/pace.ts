@@ -25,6 +25,8 @@ export const PACE_MPS: Readonly<Record<Exclude<Pace, "SPRINT">, number>> = {
  * 現実の選手は数十cm ずれても立ち位置を直さない。直し続けると、90分ずっと小刻みに走ることになる。
  */
 export const HOLD_DEADBAND_M = 1.5;
+/** 持ち場がこれより近ければ歩く（m）。🔑 設計値（出典なし）。現実の選手は試合時間の4割ほどを歩いている */
+export const WALK_WITHIN_M = 5.0;
 /** 持ち場がこれより遠ければ、ジョグではなくランニングで戻る（m）。🔑 設計値（出典なし） */
 export const RECOVER_RUN_M = 12.0;
 
@@ -38,7 +40,12 @@ export function effortOf(body: Body, pace: Pace): number {
   return Math.min(1.0, PACE_MPS[pace] / body.topSpeed);
 }
 
-/** 持ち場へ向かうときのペース（遠ければランニング、それ以外はジョグ） */
+/**
+ * 持ち場へ向かうときのペース（近ければ歩き、少し離れていればジョグ、遠ければランニング）。
+ * 🔴 いつもジョグだと、チームAI が1秒ごとに持ち場を動かすたびに全員がジョグで動き直し、
+ *    1人 90分で 13〜15km 走った（現実 約10km・2026-10-05）
+ */
 export function positionalPace(distance: number): Pace {
-  return distance >= RECOVER_RUN_M ? "RUN" : "JOG";
+  if (distance >= RECOVER_RUN_M) return "RUN";
+  return distance >= WALK_WITHIN_M ? "JOG" : "WALK";
 }

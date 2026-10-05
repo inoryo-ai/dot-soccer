@@ -9,9 +9,11 @@
  * 🔑 合わせる相手（Mohr・Krustrup・Bangsbo 2003, J Sports Sci 21:519-528・プロ 42人の実測）:
  *    ① 試合の最後の15分の高強度の走りは、最初の15分より 35〜45% 少ない（ポジション・競技レベルによらない）
  *    ② いちばん激しく走った5分間の直後の5分間は、試合平均より 12% 少ない
- *    係数はこの2つに合うように、標準の選手でシミュレーションして決めた（2026-10-05・4通りを2試合ずつ比べ、
- *    最後÷最初 0.62〜0.65・ピーク直後÷平均 0.88〜0.99 になった組み合わせ）。`tests/match_stamina.test.ts` が確かめる。
- *    ⚠️ いまの試合はまだ現実より走りすぎ（高強度で約2〜3倍）。標準の型で走る量が現実に近づいたら合わせ直す。
+ *    係数はこの2つに合うように、標準の選手でシミュレーションして決めた。`tests/match_stamina.test.ts` が確かめる。
+ *    2026-10-05: 走る量を現実に寄せた（止まっている時間・歩き・追いかけ役の絞り込み）あとに合わせ直し、
+ *    4通りを2試合ずつ比べて ① 最後÷最初 0.59〜0.65 になった組み合わせにした。
+ *    ⚠️ ② ピーク直後÷平均はどの組み合わせでも 1.0 前後で、まだ 0.88 に合っていない（一時的な疲れが弱い）。
+ *    ⚠️ 走る量はまだ現実より多め（1人 約13km・高強度 約770m）。さらに近づいたらもう一度合わせ直す。
  * 🔑 能力 stamina（0〜100）は「同じだけ走ったときの減りにくさ」（効率）に効く。
  */
 
@@ -22,14 +24,14 @@ export const HI_MPS = 5.5;
 
 /** 持久力の減り: 走った 1m あたり（速さによらない分）と、高強度で走った 1m あたりの上乗せ */
 export const ENDURANCE_PER_M = 1.6e-5;
-export const ENDURANCE_HI_PER_M = 2.0e-4;
+export const ENDURANCE_HI_PER_M = 3.5e-4;
 /** 瞬発力の減り: 高強度で走った 1m あたり */
-export const BURST_HI_PER_M = 4.0e-3;
+export const BURST_HI_PER_M = 6.0e-3;
 /** 瞬発力の戻り: 減った分が戻る時定数（秒）。ジョグより速いとこの倍かかる */
-export const BURST_RECOVER_S = 150.0;
+export const BURST_RECOVER_S = 200.0;
 /** 疲れの効き: 持久力・瞬発力が 0 のとき、今の最高速は疲れていない時のこの割合 */
-export const CAP_AT_ZERO_ENDURANCE = 0.75;
-export const CAP_AT_ZERO_BURST = 0.85;
+export const CAP_AT_ZERO_ENDURANCE = 0.65;
+export const CAP_AT_ZERO_BURST = 0.80;
 /** 瞬発力がこれより少なければスプリントできない（ランニングに落ちる） */
 export const SPRINT_MIN_BURST = 0.25;
 

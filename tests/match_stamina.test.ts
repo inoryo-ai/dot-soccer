@@ -21,8 +21,8 @@ describe("体力の仕組み", () => {
     }
     assert.ok(sprint.endurance < jog.endurance, "スプリントのほうが持久力が減っていない");
     assert.ok(sprint.burst < 0.25 && !sprint.canSprint, "1分スプリントし続けてもまだスプリントできる");
-    for (let i = 0; i < 3000; i++) sprint.update(1.5, 0.1);   // 5分歩く
-    assert.ok(sprint.burst > 0.8, `5分歩いても瞬発力が戻らない（${sprint.burst.toFixed(2)}）`);
+    for (let i = 0; i < 3000; i++) sprint.update(1.5, 0.1);   // 5分歩く（時定数 BURST_RECOVER_S で戻る）
+    assert.ok(sprint.burst > 0.7, `5分歩いても瞬発力が戻らない（${sprint.burst.toFixed(2)}）`);
   });
 
   test("疲れると今の最高速が下がる。スタミナが高いほど減りにくい", () => {

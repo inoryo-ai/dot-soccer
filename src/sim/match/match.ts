@@ -62,8 +62,21 @@ export const GK_HOLD_TICKS = 20;
 export const BLOCK_REBOUND = 0.3;
 /** GK が弾いたボールの速さ（もとの速さに対する割合）。横へそらす。🔑 設計値（出典なし） */
 export const PARRY_SPEED = 0.35;
+/**
+ * 再開までに少なくとも止まっている時間（秒）。ボールが外へ出てから（得点してから）蹴るまで。
+ * 🔑 現実: 1試合に約108回止まり、1回あたり平均 18.7秒（Siegle & Lames 2012, J Sports Sci・ブンデスリーガ）。
+ *    種類ごとの「自然な長さ」の上限の目安はスローイン 20秒・ゴールキック 30秒・CK 45秒・FK 60秒
+ *    （FiveThirtyEight 2018 W杯 3,194回の中断の分析・非査読）。両方に合うよう、Siegle & Lames の内訳
+ *    （スローイン40・FK33・GK17・CK10・キックオフ3）で平均が約20秒になる値にした。
+ * 🔴 以前は蹴る人が着いて 2〜5秒で蹴り、実プレー時間が 約84分（現実 約56分）あった。
+ *    プレーが 1.5倍続くので、パス・シュート・得点・走行距離がどれも 1.5倍になっていた（2026-10-05）。
+ *    ⚠️ ファウル（現実は1試合 約33回の FK）がまだ無いので、これだけでは現実の 56分までは下がらない。
+ */
+export const RESTART_STOPPAGE_S: Readonly<Record<RestartKind, number>> = {
+  KICKOFF: 45, THROW_IN: 10, GOAL_KICK: 20, CORNER: 30, FREE_KICK: 25,
+};
 /** キックオフは全員が自陣に戻るまで待つ。ただしこれ以上は待たない（コマ） */
-export const KICKOFF_WAIT_MAX_TICKS = 200;
+export const KICKOFF_WAIT_MAX_TICKS = 600;
 
 export interface Spawn {
   team: 0 | 1;
@@ -355,6 +368,9 @@ export class MatchSim {
       return;
     }
     if (this.tick < this.restartReadyAt || !there) return;
+    // 🔑 再開の種類ごとの止まっている時間（試合の最初のキックオフは待たない）
+    const stoppage = r.kind === "KICKOFF" && this.restartBegan === 0 ? 0 : RESTART_STOPPAGE_S[r.kind];
+    if (this.tick - this.restartBegan < stoppage * 10) return;
     if (r.kind === "KICKOFF" && !this.everyoneInOwnHalf()
         && this.tick - this.restartBegan < KICKOFF_WAIT_MAX_TICKS) return;
     const plan = decideRestartKick(this.view(), taker, r.kind);

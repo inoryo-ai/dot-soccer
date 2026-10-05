@@ -92,8 +92,13 @@ export const PASS_SPEEDS_MPS: readonly number[] = [9.0, 12.0, 15.0, 18.0, 22.0];
 export const THROW_SPEEDS_MPS: readonly number[] = [9.0, 12.0, 15.0];
 export const PASS_MIN_M = 5.0;
 export const PASS_MAX_M = 45.0;
-/** 🔑 設計値（出典なし）。前方にこの距離まで相手が来たら「寄せられた」とみなして出す */
+/**
+ * 「寄せられている」: 相手が PRESSURE_NEAR_M 以内、または PRESSED_M 以内でこちらへ CLOSING_MPS 以上で近づいている。
+ * 🔑 設計値（出典なし）。
+ */
+export const PRESSURE_NEAR_M = 4.0;
 export const PRESSED_M = 8.0;
+export const CLOSING_MPS = 2.0;
 /** 🔑 設計値（出典なし）。相手ゴールラインまでこの距離を切ったら運ばずに出す（シュートは作る順 5 以降） */
 export const NO_CARRY_NEAR_GOAL_M = 20.0;
 /** ボールを運ぶときのペース。ボールを持っていると全力では走れない（設計値・出典なし） */
@@ -149,6 +154,8 @@ export type HolderPlan =
   | { kind: "CLEAR"; vx: number; vy: number; vz: number }
   | { kind: "CARRY"; x: number; y: number };
 
+/** 相手が先に触るボールでも、この秒数以内の遅れなら競り合いに行く。🔑 設計値（出典なし） */
+export const CONTEST_MARGIN_S = 0.5;
 /** ボールを取りに行く人が、ボールよりこれだけ早く着けるなら、その地点で止まって待つ（秒）。🔑 設計値（出典なし） */
 export const CHASE_WAIT_MARGIN_S = 0.5;
 /** 浮かせるパスを試す、出し先までの距離の下限（m）。🔑 設計値（出典なし） */
@@ -380,10 +387,16 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
   const dir = attackDir(me.team);
   const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const opponents = v.agents.filter((a) => a.team !== me.team);
-  // 前の半円に相手が近いか
+  // 寄せられているか: すぐそばにいる、または近くにいてこちらへ詰めてきている
+  // 🔴 「前方 8m に相手がいる」だけで寄せられているとみなすと、相手が立っているだけで受けた瞬間に出してしまい、
+  //    パスが現実の約2倍（実プレー1分あたり 1チーム 約18本・現実 約8.4本）になった（2026-10-05）
   const pressed = opponents.some((o) => {
-    const dx = (o.body.x - me.body.x) * dir;
-    return dx > -1.0 && hypot(o.body.x - me.body.x, o.body.y - me.body.y) <= PRESSED_M;
+    const dx = me.body.x - o.body.x;
+    const dy = me.body.y - o.body.y;
+    const d = hypot(dx, dy);
+    if (d <= PRESSURE_NEAR_M) return true;
+    if (d > PRESSED_M || d === 0.0) return false;
+    return (o.body.vx * dx + o.body.vy * dy) / d >= CLOSING_MPS;
   });
   const nearGoal = Math.abs(goalLineX - me.body.x) <= NO_CARRY_NEAR_GOAL_M;
 
@@ -555,6 +568,15 @@ export function decideOffBall(v: View): void {
       const blocked = new Set<number>(v.blocked);
       for (const a of v.agents) if (a.team !== team) blocked.add(a.id);
       chaser[team] = firstTouch(v.ball, v.bodies, blocked, keepersOf(v.agents));
+    }
+    // 🔑 相手が先に触るボールを追うのは、競り合える（相手が触る時刻から CONTEST_MARGIN_S 以内に着ける）ときだけ。
+    //    間に合わないのに全力で追うと、受け手が触った瞬間にいつも相手がそばにいて「寄せられて」すぐ出し、
+    //    パスが現実の約2倍・スプリントが約2倍・PPDA が約5（現実 8〜12）になった（2026-10-05・
+    //    手放した 1,509回のうち 1,249回が寄せられた状態）
+    const [c0, c1] = chaser;
+    if (c0 !== null && c1 !== null) {
+      if (c1.t > c0.t + CONTEST_MARGIN_S) chaser[1] = null;
+      else if (c0.t > c1.t + CONTEST_MARGIN_S) chaser[0] = null;
     }
   }
 

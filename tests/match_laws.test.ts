@@ -12,6 +12,7 @@ import { KEEP_AWAY_M, goalScored, offsidePositions, restartAfterOut } from "../s
 import { MatchSim, standardSetup } from "../src/sim/match/match.ts";
 import type { Setup, Spawn } from "../src/sim/match/match.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M } from "../src/sim/match/reach.ts";
+import { STANDARD } from "../src/sim/match/tactics.ts";
 
 const spawn = (team: 0 | 1, x: number, y: number, role: Spawn["role"] = "MF"): Spawn =>
   ({ team, role, x, y, homeX: x, homeY: y, topSpeed: 8.8 });
@@ -188,11 +189,15 @@ describe("オフサイドライン（走り込みの基準）", () => {
 
 describe("裏への走り込み", () => {
   test("🔴 味方が蹴れる体勢になるまではラインの手前で待ち、なったら裏へ走り出す", () => {
+    // 🔑 持っている人が受けてすぐ出すと、走り出す前に場面が終わる。戦術「受けてから出すまでの間」を 2秒にして、
+    //    少し運ぶ間に走り込みが始まるかを見る
+    const hold = { ...STANDARD, holdBeforePassS: 2.0 };
     const sim = new MatchSim({
       // 走り込み役には DF が張り付いている（足元へは出せない）。裏へ走り出してから出すしかない
       players: [spawn(0, 60.0, 34.0), spawn(0, 79.0, 34.0, "FW"), spawn(1, 104.0, 34.0, "GK"),
                 spawn(1, 80.0, 18.0, "DF"), spawn(1, 80.0, 50.0, "DF"), spawn(1, 80.5, 33.5, "DF")],
       ball: { x: 60.5, y: 34.0 },
+      tactics: [hold, hold],
     });
     const runner = sim.agents[1]!;
     let waited = false;
