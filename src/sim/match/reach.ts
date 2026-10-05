@@ -196,7 +196,8 @@ export interface Touch {
  */
 export function firstTouch(ball: Ball, bodies: readonly Body[],
                            blocked: ReadonlySet<number> = new Set(),
-                           keepers: ReadonlyMap<number, 0 | 1> = new Map()): Touch | null {
+                           keepers: ReadonlyMap<number, 0 | 1> = new Map(),
+                           reactOf: (i: number) => number = () => REACT_S): Touch | null {
   const b = new Ball(ball.x, ball.y);
   b.kick(ball.vx, ball.vy);
   const steps = Math.round(LOOKAHEAD_S / DT);
@@ -232,14 +233,15 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
         return;
       }
       // 走って届くか: 勢いで流れた先にいちばん近い、線の上の点で見る
-      if (t < REACT_S) return;
-      const ox = body.x + body.vx * REACT_S;
-      const oy = body.y + body.vy * REACT_S;
+      const react = reactOf(i);
+      if (t < react) return;
+      const ox = body.x + body.vx * react;
+      const oy = body.y + body.vy * react;
       const s = closestOn(ax, ay, b.x, b.y, ox, oy);
       const cx = ax + (b.x - ax) * s;
       const cy = ay + (b.y - ay) * s;
-      if (hypot(cx - ox, cy - oy) - reach > body.topSpeed * (t - REACT_S)) return;  // 速くするため
-      const slack = reachSlack(body, cx, cy, t, reach);
+      if (hypot(cx - ox, cy - oy) - reach > body.topSpeed * (t - react)) return;  // 速くするため
+      const slack = reachSlack(body, cx, cy, t, reach, react);
       if (slack < 0.0) return;
       // 線の手前で触れる選手が先。同じなら余裕の大きい（＝早く着ける）選手、それも同じなら並びが前
       const need = -slack;
@@ -257,7 +259,7 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
   let need = Infinity;
   bodies.forEach((body, i) => {
     if (blocked.has(i)) return;
-    const n = timeToReach(body, b.x, b.y, REACH_M, REACT_S);
+    const n = timeToReach(body, b.x, b.y, REACH_M, reactOf(i));
     if (n < need) {
       need = n;
       who = i;

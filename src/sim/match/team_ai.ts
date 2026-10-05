@@ -20,7 +20,7 @@ import type { Ball } from "./ball.ts";
 import type { Agent } from "./player_ai.ts";
 import { attackDir } from "./player_ai.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, timeToReach } from "./reach.ts";
-import { keepAway } from "./laws.ts";
+import { keepAway, offsideLineX } from "./laws.ts";
 import type { Restart } from "./laws.ts";
 
 export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
@@ -29,7 +29,7 @@ export interface Order {
   x: number;
   y: number;
   effort: number;
-  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER";
+  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER";
 }
 
 /** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
@@ -74,6 +74,13 @@ export const GK_DEPTH_M = 5.0;
 export const OUTLET_COUNT = 3;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
 export const COVER_BEHIND_M = 6.0;
+/** 裏へ走り込む役の人数（攻撃時）。🔑 設計値（出典なし） */
+export const RUNNER_COUNT = 2;
+/**
+ * オフサイドラインからゴールラインまでがこれより狭ければ、裏へは走らない（m）。
+ * 🔑 設計値（出典なし）。走り込む先が無い（相手が自陣ゴール前まで下がっている）とき
+ */
+export const RUN_SPACE_MIN_M = 12.0;
 /** 隊形へ戻るときの本気度。設計値（出典なし） */
 export const BLOCK_EFFORT = 0.7;
 
@@ -200,6 +207,25 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     for (const s of scored.slice(0, OUTLET_COUNT)) {
       outlets.push(s.a.id);
       orders.get(s.a.id)!.role = "OUTLET";
+    }
+    // 🔑 裏へ走り込む役: 相手ゴールにいちばん近い前線の選手から RUNNER_COUNT 人。
+    //    裏にスペースがあるときだけ。行き先（ラインの裏）は選手AIが 0.2秒ごとにラインを見て出し直す
+    if (restart === null) {
+      const line = offsideLineX(team, ball.x, agents.map((a) => ({ team: a.team, x: a.body.x })));
+      const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
+      if (Math.abs(goalLineX - line) >= RUN_SPACE_MIN_M) {
+        // FW を相手ゴールに近い順に。足りなければ MF から同じ順で補う
+        const nearer = (p: Agent, q: Agent): number => (q.body.x - p.body.x) * dir || p.id - q.id;
+        const pick = (role: Agent["role"]): Agent[] =>
+          field.filter((a) => a.id !== holder.id && a.role === role).sort(nearer);
+        const attackers = [...pick("FW"), ...pick("MF")];
+        for (const a of attackers.slice(0, RUNNER_COUNT)) {
+          const o = orders.get(a.id)!;
+          o.role = "RUNNER";
+          o.effort = 1.0;
+          if (!outlets.includes(a.id)) outlets.push(a.id);
+        }
+      }
     }
   }
   return { phase, orders, outlets };

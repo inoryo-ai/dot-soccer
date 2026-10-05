@@ -17,13 +17,15 @@
  * 🔴 乱数は一切使わない（D-42）。同じ盤面なら必ず同じ判断になる。
  */
 
+import { exp } from "../detmath.ts";
 import type { Position } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
+import { ACCEL_TAU_S } from "./body.ts";
 import type { Body } from "./body.ts";
-import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, exitPoint, firstTouch } from "./reach.ts";
+import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACT_S, exitPoint, firstTouch } from "./reach.ts";
 import type { Touch } from "./reach.ts";
-import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsidePositions } from "./laws.ts";
+import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsideLineX, offsidePositions } from "./laws.ts";
 import type { RestartKind } from "./laws.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
@@ -57,6 +59,8 @@ export interface View {
   readonly plans: readonly [TeamPlan, TeamPlan];
   /** 再開を待っているなら、その中身 */
   readonly restart: RestartState | null;
+  /** 持っている人がボールを足元に収め、もう蹴れる（走り込みを始める合図） */
+  readonly holderReady: boolean;
 }
 
 /** 攻める向き。チーム0 は x が増える向き */
@@ -90,6 +94,43 @@ export const SHOOT_RANGE_M = 30.0;
 export const SHOT_SPEEDS_MPS: readonly number[] = [28.0, 24.0];
 /** 狙う点の、ゴールの中心からの横のずれ（m）。ポストの内側（3.66m − ボールの半径）まで */
 export const SHOT_AIMS_M: readonly number[] = [GOAL_WIDTH_M / 2 - 0.4, 2.0, 0.0];
+
+/** 走り込む先: オフサイドラインのこれだけ裏（m）。🔑 設計値（出典なし） */
+export const RUN_BEYOND_M = 12.0;
+/** 走り出すまで待つ位置: オフサイドラインのこれだけ手前（m）。🔑 設計値（出典なし） */
+export const HOLD_ONSIDE_M = 1.0;
+/** スルーパスで試す「走り込む人が何秒後に着く地点」（秒）。🔑 設計値（出典なし） */
+export const THROUGH_LEADS_S: readonly number[] = [1.5, 2.5, 3.5];
+/**
+ * パスが安全かを読むとき、相手はこれだけで反応するとみなす（秒）。
+ * 🔑 設計値（出典なし）。相手は反応している間も持ち場へ動き続けていて、それがボールの通り道の向きだと
+ *    「反応の間は勢いのまま」より早く着く（2026-10-05、スルーパスをそばの DF にカットされた）。
+ *    出し手は用心して、相手はほぼすぐ動けるものとして読む。味方の反応は REACT_S のまま。
+ *    ⚠️ 作る順 5 の特性「リスクを取るか」の候補（大胆な出し手ほどこれを長く見る）。
+ */
+export const PASS_OPP_REACT_S = 0.05;
+/** 寄せられていなくても、スルーパスでこれだけ前へ進めるなら運ぶより出す（m）。🔑 設計値（出典なし） */
+export const THROUGH_MIN_GAIN_M = 10.0;
+
+/** 走り込む人の行き先（いまのオフサイドラインの裏）。チームAI の order.y の筋を走る */
+export function runTarget(v: View, a: Agent, laneY: number): { x: number; y: number } {
+  const dir = attackDir(a.team);
+  const line = offsideLineX(a.team, v.ball.x, v.agents.map((b) => ({ team: b.team, x: b.body.x })));
+  const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
+  // ゴールラインの手前 6m（ゴールエリアの前）より奥へは走らない
+  const x = dir > 0 ? Math.min(line + RUN_BEYOND_M, goalLineX - 6.0) : Math.max(line - RUN_BEYOND_M, goalLineX + 6.0);
+  return { x, y: laneY };
+}
+
+/** 速さ v0 から全力で t 秒走って進む距離（body.ts の指数の加速） */
+function runDistance(top: number, v0: number, t: number): number {
+  return top * t - (top - v0) * ACCEL_TAU_S * (1.0 - exp(-t / ACCEL_TAU_S));
+}
+/**
+ * スルーパスは、走り込む人がこの速さ（m/s）以上で裏へ向かって走り出してから出す。
+ * 🔑 設計値（出典なし）。走り出す前に出すと、止まっている走り込み役の足元へのパスになる（2026-10-05）
+ */
+export const THROUGH_RUNNING_MPS = 3.0;
 
 export type HolderPlan =
   | { kind: "PASS"; to: number; vx: number; vy: number; expect: Touch }
@@ -159,6 +200,11 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
   const nearGoal = Math.abs(goalLineX - me.body.x) <= NO_CARRY_NEAR_GOAL_M;
 
   if (!pressed && !nearGoal) {
+    // 🔑 寄せられていなくても、裏へ走り込む味方へのスルーパスで大きく進めるなら出す
+    const through = bestPass(v, me, PASS_SPEEDS_MPS, null, true);
+    if (through !== null && through.kind === "PASS" && (through.expect.x - v.ball.x) * dir >= THROUGH_MIN_GAIN_M) {
+      return through;
+    }
     return { kind: "CARRY", ...inside(me.body.x + dir * 10.0, me.body.y) };
   }
 
@@ -223,10 +269,11 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
  * 🔑 同じ前進なら先に並んだもの（近い速さ・並びが前の味方）。決定論。
  */
 function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MPS,
-                  restartKind: RestartKind | null = null): HolderPlan | null {
+                  restartKind: RestartKind | null = null, runnersOnly = false): HolderPlan | null {
   const dir = attackDir(me.team);
   const blocked = new Set<number>([me.id]);
   const keepers = keepersOf(v.agents);
+  const oppReact = (i: number): number => (v.agents[i]!.team === me.team ? REACT_S : PASS_OPP_REACT_S);
   // 🔑 オフサイドの位置にいる味方には出さない（出し手には線が見えている）。直接受けてよい再開は別（第11条）
   const offside = exemptFromOffside(restartKind)
     ? new Set<number>()
@@ -236,8 +283,28 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
   for (const id of v.plans[me.team].outlets) {
     const mate = v.agents[id]!;
     if (mate.id === me.id || offside.has(mate.id)) continue;
-    const dx = mate.body.x - v.ball.x;
-    const dy = mate.body.y - v.ball.y;
+    const order = v.plans[me.team].orders.get(mate.id);
+    const runner = order?.role === "RUNNER";
+    if (runnersOnly && !runner) continue;
+    // 出す先: 足元。走り込む人なら、走っていく先（スルーパス）も試す。
+    // 🔑 runnersOnly（寄せられていないときの「運ぶより出すか」）は、走っていく先だけを見る
+    const spots: [number, number][] = runnersOnly ? [] : [[mate.body.x, mate.body.y]];
+    if (runner && order !== undefined) {
+      const tgt = runTarget(v, mate, order.y);
+      const ux = tgt.x - mate.body.x;
+      const uy = tgt.y - mate.body.y;
+      const ul = hypot(ux, uy);
+      const going = ul > 1.0 ? (mate.body.vx * ux + mate.body.vy * uy) / ul : 0.0;   // 裏へ向かう速さ
+      if (ul > 1.0 && going >= THROUGH_RUNNING_MPS) {
+        for (const t of THROUGH_LEADS_S) {
+          const run = Math.min(ul, runDistance(mate.body.topSpeed, going, t));
+          spots.push([mate.body.x + ux / ul * run, mate.body.y + uy / ul * run]);
+        }
+      }
+    }
+    for (const [sx, sy] of spots) {
+    const dx = sx - v.ball.x;
+    const dy = sy - v.ball.y;
     const d = hypot(dx, dy);
     if (d < PASS_MIN_M || d > PASS_MAX_M) continue;
     for (const speed of speeds) {
@@ -245,7 +312,7 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
       const vy = dy / d * speed;
       const probe = new Ball(v.ball.x, v.ball.y);
       probe.kick(vx, vy);
-      const touch = firstTouch(probe, v.bodies, blocked, keepers);
+      const touch = firstTouch(probe, v.bodies, blocked, keepers, oppReact);
       // 🔑 味方が先に触っても、速すぎて止められなければ（はね返る）通ったことにならない
       if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)
           || touch.speed > CONTROL_MAX_MPS) continue;
@@ -254,6 +321,7 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
         bestGain = gain;
         best = { kind: "PASS", to: touch.who, vx, vy, expect: touch };
       }
+    }
     }
   }
   return best;
@@ -292,6 +360,24 @@ export function decideOffBall(v: View): void {
       a.aimX = a.homeX;
       a.aimY = a.homeY;
       a.effort = 0.5;
+    } else if (order.role === "RUNNER") {
+      // 🔑 走り込み: 味方が蹴れる体勢になったら、オンサイドの位置から裏へ全力で走る。
+      //    それまではラインの手前で待つ。オフサイドの位置に出てしまったら手前へ戻る
+      const dir = attackDir(a.team);
+      const line = offsideLineX(a.team, v.ball.x, v.agents.map((b) => ({ team: b.team, x: b.body.x })));
+      const onside = (a.body.x - line) * dir <= 0.0;
+      const ours = v.holder !== null && v.holder.team === a.team;
+      if (ours && v.holderReady && onside) {
+        const t = runTarget(v, a, order.y);
+        a.aimX = t.x;
+        a.aimY = t.y;
+        a.effort = 1.0;
+        a.stop = false;
+      } else {
+        a.aimX = line - dir * HOLD_ONSIDE_M;
+        a.aimY = order.y;
+        a.effort = 0.9;
+      }
     } else if (order.role === "PRESS") {
       a.aimX = v.ball.x;
       a.aimY = v.ball.y;

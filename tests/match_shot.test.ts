@@ -80,7 +80,7 @@ describe("撃つかの判断", () => {
       ball: { x: 93.0, y: 34.0 },
     });
     const plan = decideShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
-                              blocked: new Set(), plans: sim.plans, restart: null }, sim.agents[0]!);
+                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true }, sim.agents[0]!);
     assert.equal(plan?.kind, "SHOOT");
     assert.ok(plan!.kind === "SHOOT" && plan.vy > 0.0, "GK のいない側（y が大きい側）へ撃っていない");
   });
@@ -88,7 +88,7 @@ describe("撃つかの判断", () => {
   test("遠すぎれば撃たない", () => {
     const sim = new MatchSim({ players: [spawn(0, 60.0, 34.0, "FW")], ball: { x: 61.0, y: 34.0 } });
     const plan = decideShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
-                              blocked: new Set(), plans: sim.plans, restart: null }, sim.agents[0]!);
+                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true }, sim.agents[0]!);
     assert.equal(plan, null);
   });
 });

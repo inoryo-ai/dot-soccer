@@ -167,3 +167,42 @@ describe("試合の中の再開", () => {
     assert.equal(sim.restart, null, "40秒たってもキックオフしない");
   });
 });
+
+describe("オフサイドライン（走り込みの基準）", () => {
+  const offsideLineXOf = async () => (await import("../src/sim/match/laws.ts")).offsideLineX;
+
+  test("後ろから2人目の相手がボールより深ければ、その相手の位置", async () => {
+    const line = await offsideLineXOf();
+    const players = [{ team: 0 as const, x: 60.0 }, { team: 1 as const, x: 104.0 }, { team: 1 as const, x: 80.0 }];
+    assert.equal(line(0, 60.0, players), 80.0);
+  });
+
+  test("ボールのほうが深ければボールの位置。相手が自陣深くでもハーフウェーラインより手前にはならない", async () => {
+    const line = await offsideLineXOf();
+    const deep = [{ team: 1 as const, x: 104.0 }, { team: 1 as const, x: 80.0 }];
+    assert.equal(line(0, 90.0, deep), 90.0);
+    const high = [{ team: 1 as const, x: 104.0 }, { team: 1 as const, x: 40.0 }];
+    assert.equal(line(0, 30.0, high), PITCH_LENGTH_M / 2);
+  });
+});
+
+describe("裏への走り込み", () => {
+  test("🔴 味方が蹴れる体勢になるまではラインの手前で待ち、なったら裏へ走り出す", () => {
+    const sim = new MatchSim({
+      players: [spawn(0, 60.0, 34.0), spawn(0, 79.0, 34.0, "FW"), spawn(1, 104.0, 34.0, "GK"),
+                spawn(1, 80.0, 18.0, "DF"), spawn(1, 80.0, 50.0, "DF")],
+      ball: { x: 60.5, y: 34.0 },
+    });
+    const runner = sim.agents[1]!;
+    let waited = false;
+    let ran = false;
+    for (let i = 0; i < 30; i++) {
+      sim.step();
+      if (sim.plans[0].orders.get(1)?.role !== "RUNNER" || sim.holder?.team !== 0) continue;
+      if (runner.aimX < 80.0) waited = true;
+      if (runner.aimX > 85.0) ran = true;
+    }
+    assert.ok(waited, "ラインの手前で待っていない");
+    assert.ok(ran, "裏へ走り出していない");
+  });
+});

@@ -200,6 +200,8 @@ export class MatchSim {
     } else {
       const h = this.holder;
       if (h !== null && this.plan !== null && this.tick >= this.settledAt) {
+        // 🔑 蹴るなら、蹴る瞬間の盤面で決め直す（0.1〜0.2秒前の判断のまま蹴ると、その間に動いた相手に読み負ける）
+        if (this.plan.kind !== "CARRY") this.plan = decideHolder(this.view(), h);
         if (this.plan.kind === "PASS") {
           this.kick(h, this.plan.vx, this.plan.vy, this.agents[this.plan.to]!.team, null);
         } else if (this.plan.kind === "SHOOT") {
@@ -245,7 +247,8 @@ export class MatchSim {
       if (this.noTouchUntil[i]! > this.tick || this.doubleTouchBan === i) blocked.add(a.id);
     });
     return { agents: this.agents, bodies: this.bodies, ball: this.ball, holder: this.holder, blocked,
-             plans: this.plans, restart: this.restart };
+             plans: this.plans, restart: this.restart,
+             holderReady: this.holder !== null && this.tick >= this.settledAt };
   }
 
   // ------------------------------------------------------------ 再開

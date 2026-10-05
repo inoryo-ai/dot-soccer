@@ -120,6 +120,21 @@ export function offsidePositions(team: 0 | 1, ballX: number,
   return out;
 }
 
+/**
+ * チーム team から見たオフサイドラインの x（これより相手ゴール側に出ればオフサイドの位置）。
+ * 🔑 相手ゴールラインからの距離で、後ろから2人目の相手・ボール・ハーフウェーラインのうち
+ *    **いちばんゴールラインに近いもの**（offsidePositions と同じ条件・第11条）。
+ */
+export function offsideLineX(team: 0 | 1, ballX: number,
+                             players: readonly { team: 0 | 1; x: number }[]): number {
+  const goalLine = directionOf(team) > 0 ? PITCH_LENGTH_M : 0.0;
+  const toLine = (x: number): number => Math.abs(goalLine - x);
+  const opp = players.filter((p) => p.team !== team).map((p) => toLine(p.x)).sort((a, b) => a - b);
+  const secondLast = opp.length >= 2 ? opp[1]! : Infinity;
+  const depth = Math.min(secondLast, toLine(ballX), PITCH_LENGTH_M / 2);
+  return goalLine - directionOf(team) * depth;
+}
+
 /** 直接受けてもオフサイドにならない再開（第11条） */
 export function exemptFromOffside(kind: RestartKind | null): boolean {
   return kind === "THROW_IN" || kind === "GOAL_KICK" || kind === "CORNER";

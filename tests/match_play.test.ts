@@ -13,7 +13,7 @@ import { MatchSim, standardSetup } from "../src/sim/match/match.ts";
 import type { Setup, Spawn } from "../src/sim/match/match.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, enterAt, firstTouch, timeToReach }
   from "../src/sim/match/reach.ts";
-import { OUTLET_COUNT, planTeam } from "../src/sim/match/team_ai.ts";
+import { OUTLET_COUNT, RUNNER_COUNT, planTeam } from "../src/sim/match/team_ai.ts";
 
 const spawn = (team: 0 | 1, x: number, y: number, role: Spawn["role"] = "MF"): Spawn =>
   ({ team, role, x, y, homeX: x, homeY: y, topSpeed: 8.8 });
@@ -43,7 +43,7 @@ describe("走って着く時間の見積もり", () => {
 describe("パスは位置で決まる（サイコロなし）", () => {
   test("空いている味方へのパスは通る", () => {
     const sim = new MatchSim(passSetup(null));
-    sim.run(4);
+    sim.run(2.5);   // 受けた直後（そのあとは次のパスを出しにいく）
     assert.equal(sim.passes[0]?.result, "COMPLETED");
     assert.equal(sim.holder?.team, 0);
   });
@@ -127,7 +127,7 @@ describe("チームAI", () => {
     assert.ok(meanOf(20.0, 34.0)[0] < meanOf(80.0, 34.0)[0], "ボールが自陣に来ても下がらない");
   });
 
-  test("持っているとき、パスの出し先の候補は OUTLET_COUNT 人まで。持っている人は候補にしか出さない", () => {
+  test("持っているとき、パスの出し先の候補は OUTLET_COUNT 人＋走り込み役まで。持っている人は候補にしか出さない", () => {
     const sim = new MatchSim(standardSetup());
     let checked = 0;
     for (let i = 0; i < 600; i++) {
@@ -135,7 +135,7 @@ describe("チームAI", () => {
       const outlets = sim.holder !== null ? [...sim.plans[sim.holder.team].outlets] : [];
       const passer = sim.holder;
       sim.step();
-      assert.ok(outlets.length <= OUTLET_COUNT);
+      assert.ok(outlets.length <= OUTLET_COUNT + RUNNER_COUNT);
       if (passer !== null && sim.holder === null && sim.passes.length === before && sim.ball.speed > 0) {
         // 蹴った直後: そのコマで使った候補に、蹴った向きの味方が入っている
         checked += 1;
