@@ -9,7 +9,7 @@
  *    続け（50分で 449本）、FW が 1人 約500回ボールを持ち、DF は約15回しか持たなかった。
  */
 
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M } from "./reach.ts";
 import { XT_GRID, XT_NX, XT_NY } from "./xt_grid.ts";
 

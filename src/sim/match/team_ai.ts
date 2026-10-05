@@ -15,7 +15,7 @@
  * 🔴 乱数は一切使わない（D-42）。
  */
 
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import type { Ball } from "./ball.ts";
 import type { Agent } from "./player_ai.ts";
 import { attackDir } from "./player_ai.ts";

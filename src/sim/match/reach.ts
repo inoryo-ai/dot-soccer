@@ -13,7 +13,7 @@
  */
 
 import { exp } from "../detmath.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { Ball, DT } from "./ball.ts";
 import { ACCEL_TAU_S, Body, MAX_DECEL_MPS2 } from "./body.ts";
 import { inOwnPenaltyArea } from "./laws.ts";

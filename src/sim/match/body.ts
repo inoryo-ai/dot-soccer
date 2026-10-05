@@ -17,7 +17,7 @@
  */
 
 import { exp } from "../detmath.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { DT } from "./ball.ts";
 
 /**

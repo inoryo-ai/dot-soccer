@@ -31,7 +31,7 @@ function card(key: string, label: string, visibleKey: VisibleKey, visibleGain: n
 /** カード一覧。**並び順に意味がある**（画面の表示順・配分の入力順）。 */
 export const CARDS: Readonly<Record<string, Card>> = {
   running: card("running", "ランニング", "stamina", 3, "overlap", 2,
-                "スタミナが20%未満になった選手がいた"),
+                "持久力が大きく落ちた選手がいた"),
   man_mark: card("man_mark", "マンツーマン", "physical", 3, "zone_man", 4,
                  "奪い合いの負けが多い"),
   press: card("press", "プレス", "speed", 3, "press", 2,

@@ -182,12 +182,23 @@ export interface RosterEntry {
   type: string;
 }
 
+/** 動作（3D の姿勢）。新エンジンの記録から作る */
+export interface ReplayAct {
+  frame: number;
+  who: number;
+  act: "kick" | "header" | "tackle" | "down";
+}
+
 export interface Replay {
   sample_ticks: number;
   coord_scale: number;
   pitch: [number, number];
   roster: RosterEntry[];
   frames: number[][];
+  /** 新エンジン（D-42・D-51）だけ: コマごとのボールの高さ（地面からの高さ × coord_scale） */
+  ballZ?: number[];
+  /** 新エンジンだけ: 誰が何コマ目に何をしたか（`who` は roster の番号） */
+  acts?: ReplayAct[];
 }
 
 export interface MatchResult {

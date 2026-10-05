@@ -15,7 +15,7 @@
 
 import * as C from "../sim/constants.ts";
 import { Career, SAVE_VERSION, SaveError } from "../sim/career.ts";
-import type { CareerTrainingResult, SaveData, SeasonSummary } from "../sim/career.ts";
+import type { CareerTrainingResult, RoundOutcome, SaveData, SeasonSummary } from "../sim/career.ts";
 import { Match } from "../sim/engine.ts";
 import type { MatchEvent, MatchStatsOut, Replay } from "../sim/engine.ts";
 import { ValueError } from "../sim/errors.ts";
@@ -28,6 +28,7 @@ import { PRESET_PLANS, TRAININGS_PER_PLAYER, buildUserTeam,
 import type { Plan } from "../sim/presets.ts";
 import { pyRoundN } from "../sim/pymath.ts";
 import { CARDS, FORBIDDEN_PAIRS, getCard, issueText, specialName } from "../sim/training.ts";
+import { runMatches } from "./match_pool.ts";
 
 // 🔑 いま遊んでいるキャリア。ブラウザのタブ1つにつき1つ。
 let career: Career | null = null;
@@ -264,11 +265,28 @@ export interface PlayNextResult {
   others: StoredMatchResult[];
 }
 
-/** 次の節を消化する。自チームの試合は**再生用の位置つき**で返る。 */
+/** 次の節を消化する（画面のスレッドで順に回す。テスト・CLI 用）。自チームの試合は**再生用の位置つき**で返る。 */
 export function playNext(): PlayNextResult {
   const car = current();
   if (car.seasonFinished) throw new GameError("全節終了です。シーズンを締めてください");
-  const outcome = car.playRound(true);
+  return shapeNext(car.playRound(true));
+}
+
+/**
+ * 次の節を消化する（**試合は別スレッドで並べて回す**・D-51）。画面はこちらを使う。
+ * 🔑 新エンジンは1試合に数秒かかる。並べ方と種は `playNext` と同じなので、結果も同じ（決定論）
+ */
+export async function playNextAsync(): Promise<PlayNextResult> {
+  const car = current();
+  if (car.seasonFinished) throw new GameError("全節終了です。シーズンを締めてください");
+  const jobs = car.roundJobs();
+  const results = await runMatches(jobs.map((j) => ({
+    home: car.team(j.home).toDict(), away: car.team(j.away).toDict(), seed: j.seed, log: j.mine, record: j.mine,
+  })));
+  return shapeNext(car.applyRound(results));
+}
+
+function shapeNext(outcome: RoundOutcome): PlayNextResult {
   const mine = outcome.mine;
   const match = mine.match;
   if (match.replay === undefined) throw new Error("再生用の位置が残っていない");

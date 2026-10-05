@@ -6,7 +6,7 @@
  */
 
 import { PI, cos, sin } from "../detmath.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { Ball } from "./ball.ts";
 
 /** 浮かせる角度（度）。低め（速く届く）と高め（頭上を越す）。🔑 設計値（出典なし） */

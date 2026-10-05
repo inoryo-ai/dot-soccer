@@ -20,7 +20,8 @@ import { test } from "node:test";
 
 import { formatTable, runBatchSerial } from "../src/sim/batch.ts";
 import { Career } from "../src/sim/career.ts";
-import { play } from "../src/sim/engine.ts";
+// 🔑 D-51: ゲームの試合は新エンジン。正解データも新エンジンで固定する（旧エンジンは tests/sim.test.ts などが固定）
+import { playNew as play } from "../src/sim/match/game.ts";
 import { Player, Team, judgeType } from "../src/sim/model.ts";
 import type { Hidden } from "../src/sim/model.ts";
 import { ALL_PRESET_PLANS, buildPreset, buildUserTeam } from "../src/sim/presets.ts";
@@ -84,7 +85,7 @@ test("試合26件が1イベント・1スタッツまで一致する", () => {
   assert.deepEqual(plain(custom), c.result, "戦術を変えた試合");
 });
 
-test("再生用の座標（5,400コマ）が一致し、記録しても結果は変わらない", () => {
+test("再生用の座標（0.2秒に1コマ）が一致し、記録しても結果は変わらない", () => {
   const g = golden<any>("matches").replay_match;
   const res = play(buildPreset("堅守型"), buildPreset("パス型"), 77, true, true);
   const { replay, ...rest } = res;
