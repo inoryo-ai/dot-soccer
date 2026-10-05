@@ -34,7 +34,9 @@ export interface Order {
   y: number;
   /** どのペースで向かうか（pace.ts）。JOG は「持ち場の調整」で、遠ければ選手AIがランニングに上げる */
   pace: Pace;
-  role: "BLOCK" | "PRESS" | "CONTAIN" | "COVER" | "SHIELD" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
+  role: "BLOCK" | "PRESS" | "CONTAIN" | "COVER" | "SHIELD" | "MARK" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
+  /** MARK のとき、付く相手の番号（選手AI が相手のいまの位置から立ち位置を取り直す） */
+  mark?: number;
 }
 
 /** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
@@ -118,6 +120,9 @@ export const SHIELD_DISTS_M: readonly number[] = [4.0, 7.0];
 export const SHIELD_SPREAD_M = 1.5;
 /** 構える（CONTAIN）とき、ボールから自陣ゴールの向きにどれだけ離れて立つか（m）。🔑 設計値（出典なし） */
 export const CONTAIN_DIST_M = 8.0;
+/** ゴール前のマーク: 自陣ゴールの中心からこの距離以内の相手に付く（m）と、相手からゴール側へ離れる距離（m）。設計値 */
+export const MARK_ZONE_M = 20.0;
+export const MARK_GAP_M = 1.2;
 /** PK のとき、ペナルティマークから離れる距離（第14条: 9.15m） */
 export const KEEP_AWAY_PK_M = 9.15;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
@@ -393,6 +398,45 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         o.pace = "RUN";
         if (!outlets.includes(a.id)) outlets.push(a.id);
       });
+    }
+  }
+  // 🔑 ゴール前のマーク: 攻めていないとき（相手が持っている・相手のパスやクロスが飛んでいる・相手の再開）、
+  //    自陣ゴールから MARK_ZONE_M 以内にいる相手に、危ない順（その位置の価値 xT）で一番近い守備側を1人ずつ付ける。
+  //    相手と自陣ゴールの中心の間、相手から MARK_GAP_M（ゴール側）に立つ。最大 tactics.markCount 人。
+  //    寄せる・埋める・塞ぐ役の選手と GK は付けない。
+  //    🔴 これが無い頃は、クロスに合わせる選手やゴール前で受ける選手が自由で、シュート1本あたりの見込みが
+  //       約0.25（現実 約0.10）、得点が実プレー1分あたり現実の約1.9倍だった（2026-10-05）
+  if (!attacking && tactics.markCount > 0) {
+    const goalY = PITCH_WIDTH_M / 2;
+    const threats = agents
+      .filter((o) => o.team !== team && o !== holder && o.role !== "GK"
+                     && hypot(o.body.x - ownGoalX, o.body.y - goalY) <= MARK_ZONE_M)
+      .map((o) => ({ o, danger: xtAt(o.team, o.body.x, o.body.y) }))
+      .sort((p, q) => q.danger - p.danger || p.o.id - q.o.id)
+      .slice(0, tactics.markCount);
+    const free = new Set(mine.filter((a) => a.role !== "GK" && orders.get(a.id)!.role === "BLOCK").map((a) => a.id));
+    for (const { o } of threats) {
+      let best: Agent | null = null;
+      let bd = Infinity;
+      for (const a of mine) {
+        if (!free.has(a.id)) continue;
+        const d = hypot(a.body.x - o.body.x, a.body.y - o.body.y);
+        if (d < bd || (d === bd && best !== null && a.id < best.id)) {
+          bd = d;
+          best = a;
+        }
+      }
+      if (best === null) break;
+      free.delete(best.id);
+      const gx = ownGoalX - o.body.x;
+      const gy = goalY - o.body.y;
+      const g = hypot(gx, gy) || 1.0;
+      const ord = orders.get(best.id)!;
+      ord.x = clamp(o.body.x + gx / g * MARK_GAP_M, 0.5, PITCH_LENGTH_M - 0.5);
+      ord.y = clamp(o.body.y + gy / g * MARK_GAP_M, 0.5, PITCH_WIDTH_M - 0.5);
+      ord.pace = "RUN";
+      ord.role = "MARK";
+      ord.mark = o.id;
     }
   }
   return { phase, orders, outlets };

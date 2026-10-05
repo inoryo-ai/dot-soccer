@@ -21,7 +21,7 @@ const OUT = join(ROOT, "out", "match_viewer.html");
 
 /** 役割の1文字（画面に出す） */
 const ROLE_MARK: Record<string, string> = {
-  BLOCK: "", PRESS: "寄", CONTAIN: "構", COVER: "埋", SHIELD: "壁", OUTLET: "受", GK: "", TAKER: "蹴", RUNNER: "走", BOX: "箱",
+  BLOCK: "", PRESS: "寄", CONTAIN: "構", COVER: "埋", SHIELD: "壁", MARK: "付", OUTLET: "受", GK: "", TAKER: "蹴", RUNNER: "走", BOX: "箱",
 };
 
 interface ViewerEvent {
@@ -150,7 +150,7 @@ function html(json: string): string {
       <input id="seek" type="range" min="0" value="0">
     </div>
     <div class="legend">青は右へ、赤は左へ攻める。輪の付いた選手がボールを持っている。
-      文字は役割（寄＝寄せる・構＝寄せずにコースを切る・埋＝後ろを埋める・壁＝シュートコースを塞ぐ・受＝パスの出し先候補・走＝裏へ走り込む・箱＝ゴール前へ入る・蹴＝再開で蹴る）。
+      文字は役割（寄＝寄せる・構＝寄せずにコースを切る・埋＝後ろを埋める・壁＝シュートコースを塞ぐ・付＝ゴール前で相手に付く・受＝パスの出し先候補・走＝裏へ走り込む・箱＝ゴール前へ入る・蹴＝再開で蹴る）。
       点線は守っている側のオフサイドライン（後ろから2人目）。浮いたボールは影と高さ（m）で表す。</div>
   </section>
   <section class="board">

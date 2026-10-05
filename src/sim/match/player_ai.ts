@@ -33,7 +33,7 @@ import { directionSigma } from "./execution.ts";
 import type { KickKind } from "./execution.ts";
 import { HOLD_DEADBAND_M, effortOf, positionalPace } from "./pace.ts";
 import type { Pace } from "./pace.ts";
-import { CONTAIN_DIST_M, COVER_BEHIND_M } from "./team_ai.ts";
+import { CONTAIN_DIST_M, COVER_BEHIND_M, MARK_GAP_M } from "./team_ai.ts";
 import { openAt, receiveFactor, xtAt } from "./value.ts";
 import type { Tactics } from "./tactics.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
@@ -156,6 +156,8 @@ export type HolderPlan =
   | { kind: "CLEAR"; vx: number; vy: number; vz: number }
   | { kind: "CARRY"; x: number; y: number };
 
+/** マークで、立ち位置からこれより離されたらスプリントで追う（m）。🔑 設計値（出典なし） */
+export const MARK_CHASE_M = 3.0;
 /** 相手が先に触るボールでも、この秒数以内の遅れなら競り合いに行く。🔑 設計値（出典なし） */
 export const CONTEST_MARGIN_S = 0.5;
 /** ボールを取りに行く人が、ボールよりこれだけ早く着けるなら、その地点で止まって待つ（秒）。🔑 設計値（出典なし） */
@@ -647,6 +649,25 @@ export function decideOffBall(v: View): void {
       const gy = PITCH_WIDTH_M / 2 - v.ball.y;
       const g = hypot(gx, gy) || 1.0;
       moveTo(a, v.ball.x + gx / g * CONTAIN_DIST_M, v.ball.y + gy / g * CONTAIN_DIST_M, order.pace);
+    } else if (order.role === "MARK") {
+      // マークは相手に張り付く。チームAI の割り当ては1秒ごとなので、立ち位置は相手のいまの位置から取り直し、
+      // 動き直さない幅も当てない（当てると走り込む相手に1〜2m ずつ置いていかれる）
+      const o = v.agents.find((x) => x.id === order.mark);
+      let tx = order.x;
+      let ty = order.y;
+      if (o !== undefined) {
+        const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;
+        const gx = ownGoalX - o.body.x;
+        const gy = PITCH_WIDTH_M / 2 - o.body.y;
+        const g = hypot(gx, gy) || 1.0;
+        tx = o.body.x + gx / g * MARK_GAP_M;
+        ty = o.body.y + gy / g * MARK_GAP_M;
+      }
+      a.aimX = tx;
+      a.aimY = ty;
+      // 置いていかれたら（MARK_CHASE_M より離れたら）スプリントで追う
+      const behind = hypot(tx - a.body.x, ty - a.body.y);
+      a.effort = effortOf(a.body, behind > MARK_CHASE_M ? "SPRINT" : order.pace);
     } else if (order.role === "GK") {
       // 🔑 GK の立ち位置は数十cm が勝負。動き直さない幅を当てず、いつもランニングで取り直す
       //    （ジョグと幅を当てたら遠めのシュートが入りすぎた・2026-10-05）

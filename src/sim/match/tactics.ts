@@ -26,6 +26,8 @@ export interface Tactics {
   /** ゴール前でシュートコースを塞ぐ人数と、塞ぎ始める距離（自陣ゴールから m） */
   shieldCount: number;
   shieldZoneM: number;
+  /** ゴール前で相手に1人ずつ付く（マンツーマン）最大の人数。0 なら場所を守るだけ（ゾーン） */
+  markCount: number;
   // ---- 攻撃
   /** 攻めるときのブロックの位置と陣形 */
   attackOffsetM: number;
@@ -56,6 +58,7 @@ export const STANDARD: Tactics = {
   compactShape: { length: 24.0, width: 32.0 },
   shieldCount: 2,
   shieldZoneM: 25.0,
+  markCount: 4,
   attackOffsetM: 22.0,
   attackShape: { length: 36.0, width: 41.0 },
   passOppReactS: 0.05,
