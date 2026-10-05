@@ -103,14 +103,20 @@ describe("触れたかの判定", () => {
 });
 
 describe("チームAI", () => {
-  test("相手が持っているとき、寄せる（PRESS）のは1人、後ろを埋める（COVER）のも1人", () => {
+  test("🔴 プレスのスイッチ: 相手のボールが近ければ寄せる1人＋埋める1人、遠ければ寄せずに構える1人", () => {
     const sim = new MatchSim(standardSetup());
-    sim.run(20);
-    const holder = sim.holder ?? sim.agents[0]!;
-    const plan = planTeam((1 - holder.team) as 0 | 1, sim.agents, sim.ball, holder);
-    const roles = [...plan.orders.values()].map((o) => o.role);
-    assert.equal(roles.filter((r) => r === "PRESS").length, 1);
-    assert.equal(roles.filter((r) => r === "COVER").length, 1);
+    const holder = sim.agents.find((a) => a.team === 1 && a.role === "FW")!;
+    const rolesAt = (bx: number): string[] => {
+      sim.ball.x = bx;
+      sim.ball.y = 34.0;
+      return [...planTeam(0, sim.agents, sim.ball, holder).orders.values()].map((o) => o.role);
+    };
+    const near = rolesAt(40.0);     // チーム0 の自陣ゴールから 40m（スイッチの内側）
+    assert.equal(near.filter((r) => r === "PRESS").length, 1);
+    assert.equal(near.filter((r) => r === "COVER").length, 1);
+    const far = rolesAt(90.0);      // 90m（相手が自陣深くで持っている）
+    assert.equal(far.filter((r) => r === "PRESS").length, 0);
+    assert.equal(far.filter((r) => r === "CONTAIN").length, 1);
   });
 
   test("陣形はボールの側へ寄り、ボールが自陣ゴールに近いほど下がる", () => {

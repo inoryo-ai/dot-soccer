@@ -31,7 +31,7 @@ export interface Order {
   y: number;
   /** どのペースで向かうか（pace.ts）。JOG は「持ち場の調整」で、遠ければ選手AIがランニングに上げる */
   pace: Pace;
-  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
+  role: "BLOCK" | "PRESS" | "CONTAIN" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
 }
 
 /** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
@@ -80,6 +80,15 @@ export const GK_DEPTH_M = 5.0;
 export const GK_DEPTH_RATIO = 0.12;
 /** パスの出し先の候補の数。設計値（出典なし） */
 export const OUTLET_COUNT = 3;
+/**
+ * プレスのスイッチ: 相手のボールが自陣ゴールからこの距離より近ければ寄せる（PRESS）。
+ * それより遠ければ（相手が自陣深くで持っている）寄せずに、ボールと自陣ゴールの間で構える（CONTAIN）。
+ * 🔑 設計値（出典なし）。チームの戦術（ラインの高さ）にあたる。60m ＝ 相手陣に 7.5m 入ったあたり。
+ *    オーナー指摘「プレスが早すぎる」（2026-10-05）。確かめ方: PPDA 8〜12・スプリント回数（`docs/realism-reference.md`）
+ */
+export const PRESS_START_M = 60.0;
+/** 構える（CONTAIN）とき、ボールから自陣ゴールの向きにどれだけ離れて立つか（m）。🔑 設計値（出典なし） */
+export const CONTAIN_DIST_M = 8.0;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
 export const COVER_BEHIND_M = 6.0;
 /** 裏へ走り込む役の人数（攻撃時）。🔑 設計値（出典なし） */
@@ -195,17 +204,25 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       .sort((p, q) => p.t - q.t || p.a.id - q.a.id);
     const press = ranked[0];
     const cover = ranked[1];
-    if (press !== undefined) {
-      orders.set(press.a.id, { x: ball.x, y: ball.y, pace: "SPRINT", role: "PRESS" });
-    }
-    if (cover !== undefined) {
-      const gx = ownGoalX - ball.x;
-      const gy = PITCH_WIDTH_M / 2 - ball.y;
-      const g = hypot(gx, gy) || 1.0;
-      orders.set(cover.a.id, {
-        x: ball.x + gx / g * COVER_BEHIND_M, y: ball.y + gy / g * COVER_BEHIND_M,
-        pace: "RUN", role: "COVER",
-      });
+    const gx = ownGoalX - ball.x;
+    const gy = PITCH_WIDTH_M / 2 - ball.y;
+    const g = hypot(gx, gy) || 1.0;
+    if (g > PRESS_START_M) {
+      // 🔑 プレスのスイッチが入っていない: いちばん近い1人がボールと自陣ゴールの間に立ってコースを切る
+      if (press !== undefined) {
+        orders.set(press.a.id, { x: ball.x + gx / g * CONTAIN_DIST_M, y: ball.y + gy / g * CONTAIN_DIST_M,
+                                 pace: "JOG", role: "CONTAIN" });
+      }
+    } else {
+      if (press !== undefined) {
+        orders.set(press.a.id, { x: ball.x, y: ball.y, pace: "SPRINT", role: "PRESS" });
+      }
+      if (cover !== undefined) {
+        orders.set(cover.a.id, {
+          x: ball.x + gx / g * COVER_BEHIND_M, y: ball.y + gy / g * COVER_BEHIND_M,
+          pace: "RUN", role: "COVER",
+        });
+      }
     }
   } else if (phase === "ATTACK" && holder !== null) {
     // 出し先の候補: 相手からの空き ＋ 前への進み、が大きい順に OUTLET_COUNT 人

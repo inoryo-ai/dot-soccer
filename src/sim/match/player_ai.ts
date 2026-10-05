@@ -33,7 +33,7 @@ import { directionSigma } from "./execution.ts";
 import type { KickKind } from "./execution.ts";
 import { HOLD_DEADBAND_M, effortOf, positionalPace } from "./pace.ts";
 import type { Pace } from "./pace.ts";
-import { COVER_BEHIND_M } from "./team_ai.ts";
+import { CONTAIN_DIST_M, COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
 export interface Agent {
@@ -155,6 +155,8 @@ export type HolderPlan =
   | { kind: "CLEAR"; vx: number; vy: number; vz: number }
   | { kind: "CARRY"; x: number; y: number };
 
+/** 寄せ役は、ボールまでこの距離に入ってから全力で寄せる（それまではランニング・m）。🔑 設計値（出典なし） */
+export const CLOSE_DOWN_M = 10.0;
 /** ボールを取りに行く人が、ボールよりこれだけ早く着けるなら、その地点で止まって待つ（秒）。🔑 設計値（出典なし） */
 export const CHASE_WAIT_MARGIN_S = 0.5;
 /** 浮かせるパスを試す、出し先までの距離の下限（m）。🔑 設計値（出典なし） */
@@ -520,6 +522,9 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
       probe.kick(vx, vy, vz);
       const touch = firstTouch(probe, v.bodies, blocked, keepers, oppReact);
       if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)) continue;
+      // 🔴 実際に触る地点も PASS_MIN_M 以上先であること。狙う地点だけで確かめていたら、スルーパスを
+      //    すぐ隣（0.6m）で待っていた別の FW が蹴った瞬間に触る「パス」が選ばれた（2026-10-05）
+      if (hypot(touch.x - v.ball.x, touch.y - v.ball.y) < PASS_MIN_M) continue;
       // 🔑 味方が先に触っても、速すぎて止められなければ（はね返る）通ったことにならない。
       //    頭の高さなら止められない。ただしゴール前へ入る味方（BOX）へのクロスは、ヘディングで合わせればよい
       const box = v.plans[me.team].orders.get(touch.who)?.role === "BOX";
@@ -587,9 +592,24 @@ export function decideOffBall(v: View): void {
         moveTo(a, line - dir * HOLD_ONSIDE_M, order.y, "JOG");
       }
     } else if (order.role === "PRESS") {
+      // 🔑 遠いうちはランニングで近づき、CLOSE_DOWN_M に入ってから全力で寄せる
       a.aimX = v.ball.x;
       a.aimY = v.ball.y;
-      a.effort = effortOf(a.body, order.pace);
+      const d = hypot(v.ball.x - a.body.x, v.ball.y - a.body.y);
+      a.effort = effortOf(a.body, d > CLOSE_DOWN_M ? "RUN" : order.pace);
+    } else if (order.role === "CONTAIN") {
+      // 構える: ボールと自陣ゴールの間、ボールから CONTAIN_DIST_M（チームAI と同じ）。ボールに合わせて動き直す
+      const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;
+      const gx = ownGoalX - v.ball.x;
+      const gy = PITCH_WIDTH_M / 2 - v.ball.y;
+      const g = hypot(gx, gy) || 1.0;
+      moveTo(a, v.ball.x + gx / g * CONTAIN_DIST_M, v.ball.y + gy / g * CONTAIN_DIST_M, order.pace);
+    } else if (order.role === "GK") {
+      // 🔑 GK の立ち位置は数十cm が勝負。動き直さない幅を当てず、いつもランニングで取り直す
+      //    （ジョグと幅を当てたら遠めのシュートが入りすぎた・2026-10-05）
+      a.aimX = order.x;
+      a.aimY = order.y;
+      a.effort = effortOf(a.body, "RUN");
     } else if (order.role === "COVER") {
       const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;
       const gx = ownGoalX - v.ball.x;
