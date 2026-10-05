@@ -46,7 +46,11 @@ export interface Tactics {
 }
 
 /**
- * 標準の型。2026-10-05 時点の値をそのまま移したもの（ここから現実の数字に合うまで探す）。
+ * 標準の型（2026-10-05 決定・D-42 の「標準の型を決める」）。
+ * 🔑 撃つ見込みの閾値（shootMinChance）0.04 は、シュートのブレ 8°（execution.ts）と組で、12試合の平均が
+ *    シュート 0.237・得点 0.028（実プレー1分あたり・現実 約0.23・0.027）、エリア内から撃つ割合 66%（現実 56〜68%）。
+ *    閾値 0.03〜0.12 × ブレ 4〜8° を回して選んだ。
+ * 🔑 ここからつまみをずらして、ハイプレス・ダイレクト・低ブロック・ポゼッションの4つを作る（次の段階）。
  */
 export const STANDARD: Tactics = {
   pressStartM: 60.0,
@@ -66,6 +70,6 @@ export const STANDARD: Tactics = {
   outletCount: 3,
   runnerCount: 2,
   boxCount: 3,
-  shootMinChance: 0.12,
+  shootMinChance: 0.04,
   crossMinChance: 0.2,
 };
