@@ -36,6 +36,9 @@ export interface Tactics {
   passOppReactS: number;
   /** 寄せられていないとき、受けてからこの秒数は出さずに持つ（運ぶ）。0 なら出せるときはすぐ出す */
   holdBeforePassS: number;
+  /** 前へ急ぐ度合い: パスの価値に「前へ進んだ距離 ÷ ピッチの長さ × これ」を足す。0 なら受ける地点の価値だけで選ぶ。
+   *  大きいほど、安全な横・後ろのパスより、通る見込みのある前へのパス（ロングボール・スルーパス）を選ぶ */
+  progressBonus: number;
   /** 出し先の候補・裏へ走り込む人数・クロスの場面でゴール前へ入る人数 */
   outletCount: number;
   runnerCount: number;
@@ -67,6 +70,7 @@ export const STANDARD: Tactics = {
   attackShape: { length: 36.0, width: 41.0 },
   passOppReactS: 0.05,
   holdBeforePassS: 0.0,
+  progressBonus: 0.0,
   outletCount: 3,
   runnerCount: 2,
   boxCount: 3,
