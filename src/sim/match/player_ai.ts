@@ -23,8 +23,10 @@ import { Ball } from "./ball.ts";
 import type { Body } from "./body.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, firstTouch } from "./reach.ts";
 import type { Touch } from "./reach.ts";
+import { exemptFromOffside, offsidePositions } from "./laws.ts";
+import type { RestartKind } from "./laws.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
-import type { TeamPlan } from "./team_ai.ts";
+import type { RestartState, TeamPlan } from "./team_ai.ts";
 
 export interface Agent {
   /** `bodies` の中の番号 */
@@ -53,6 +55,8 @@ export interface View {
   readonly blocked: ReadonlySet<number>;
   /** チームAIの計画（チーム0、チーム1） */
   readonly plans: readonly [TeamPlan, TeamPlan];
+  /** 再開を待っているなら、その中身 */
+  readonly restart: RestartState | null;
 }
 
 /** 攻める向き。チーム0 は x が増える向き */
@@ -63,7 +67,11 @@ export const attackDir = (team: 0 | 1): 1 | -1 => (team === 0 ? 1 : -1);
  * 🔑 実験室のインサイドキックが 23.4 m/s（Nunome ら 2002）。速いほどカットされにくいが、
  *    受け手の前を通り過ぎやすい。どれが通るかは reach.ts の先読みが決める。
  */
-export const PASS_SPEEDS_MPS = [9.0, 12.0, 15.0, 18.0, 22.0] as const;
+export const PASS_SPEEDS_MPS: readonly number[] = [9.0, 12.0, 15.0, 18.0, 22.0];
+/**
+ * スローインで試す速さ（m/s）。🔑 設計値（出典なし）。手で投げるので蹴るより遅いとして 15 m/s まで
+ */
+export const THROW_SPEEDS_MPS: readonly number[] = [9.0, 12.0, 15.0];
 export const PASS_MIN_M = 5.0;
 export const PASS_MAX_M = 45.0;
 /** 🔑 設計値（出典なし）。前方にこの距離まで相手が来たら「寄せられた」とみなして出す */
@@ -113,29 +121,61 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
 }
 
 /**
+ * 再開のキック（スローインなら投げる）。🔑 再開では運べない（ボールを置いたまま持ち歩けない）ので必ず出す。
+ * 「味方が先に触れる」出し先が無ければ、候補のうちいちばん近い味方へ、それも無ければいちばん近い味方へ。
+ */
+export function decideRestartKick(v: View, me: Agent, kind: RestartKind): HolderPlan {
+  const speeds = kind === "THROW_IN" ? THROW_SPEEDS_MPS : PASS_SPEEDS_MPS;
+  const safe = bestPass(v, me, speeds, kind);
+  if (safe !== null) return safe;
+  const outlets = v.plans[me.team].outlets.map((id) => v.agents[id]!);
+  const pool = outlets.length > 0 ? outlets : v.agents.filter((a) => a.team === me.team && a.id !== me.id);
+  let to = pool[0]!;
+  let best = Infinity;
+  for (const a of pool) {
+    const d = hypot(a.body.x - v.ball.x, a.body.y - v.ball.y);
+    if (d < best) {
+      best = d;
+      to = a;
+    }
+  }
+  const speed = speeds[1]!;
+  const dx = to.body.x - v.ball.x;
+  const dy = to.body.y - v.ball.y;
+  const d = hypot(dx, dy) || 1.0;
+  return { kind: "PASS", to: to.id, vx: dx / d * speed, vy: dy / d * speed,
+           expect: { who: to.id, t: 0.0, x: to.body.x, y: to.body.y } };
+}
+
+/**
  * 出し先の候補（チームAIの OUTLET）へのパスのうち、「味方が先に触れる」もので
  * 触る点がいちばん前へ進むもの。
  * 🔑 同じ前進なら先に並んだもの（近い速さ・並びが前の味方）。決定論。
  */
-function bestPass(v: View, me: Agent): HolderPlan | null {
+function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MPS,
+                  restartKind: RestartKind | null = null): HolderPlan | null {
   const dir = attackDir(me.team);
   const blocked = new Set<number>([me.id]);
+  // 🔑 オフサイドの位置にいる味方には出さない（出し手には線が見えている）。直接受けてよい再開は別（第11条）
+  const offside = exemptFromOffside(restartKind)
+    ? new Set<number>()
+    : offsidePositions(me.team, v.ball.x, v.agents.map((a) => ({ team: a.team, x: a.body.x })));
   let best: HolderPlan | null = null;
   let bestGain = -Infinity;
   for (const id of v.plans[me.team].outlets) {
     const mate = v.agents[id]!;
-    if (mate.id === me.id) continue;
+    if (mate.id === me.id || offside.has(mate.id)) continue;
     const dx = mate.body.x - v.ball.x;
     const dy = mate.body.y - v.ball.y;
     const d = hypot(dx, dy);
     if (d < PASS_MIN_M || d > PASS_MAX_M) continue;
-    for (const speed of PASS_SPEEDS_MPS) {
+    for (const speed of speeds) {
       const vx = dx / d * speed;
       const vy = dy / d * speed;
       const probe = new Ball(v.ball.x, v.ball.y);
       probe.kick(vx, vy);
       const touch = firstTouch(probe, v.bodies, blocked);
-      if (touch === null || v.agents[touch.who]!.team !== me.team) continue;
+      if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)) continue;
       const gain = (touch.x - v.ball.x) * dir;
       if (gain > bestGain) {
         bestGain = gain;
@@ -154,7 +194,8 @@ function bestPass(v: View, me: Agent): HolderPlan | null {
  */
 export function decideOffBall(v: View): void {
   const chaser: [Touch | null, Touch | null] = [null, null];
-  if (v.holder === null) {
+  // 🔑 再開を待っている間は、止まったボールを取りに行かない（蹴る人はチームAIの TAKER で向かう）
+  if (v.holder === null && v.restart === null) {
     for (const team of [0, 1] as const) {
       const blocked = new Set<number>(v.blocked);
       for (const a of v.agents) if (a.team !== team) blocked.add(a.id);

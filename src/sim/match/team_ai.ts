@@ -20,6 +20,8 @@ import type { Ball } from "./ball.ts";
 import type { Agent } from "./player_ai.ts";
 import { attackDir } from "./player_ai.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, timeToReach } from "./reach.ts";
+import { keepAway } from "./laws.ts";
+import type { Restart } from "./laws.ts";
 
 export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
 
@@ -27,7 +29,12 @@ export interface Order {
   x: number;
   y: number;
   effort: number;
-  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK";
+  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER";
+}
+
+/** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
+export interface RestartState extends Restart {
+  taker: number;
 }
 
 export interface TeamPlan {
@@ -75,7 +82,10 @@ export const BLOCK_EFFORT = 0.7;
  * @param holder 持っている人（いなければ null）
  */
 export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
-                         holder: Agent | null): TeamPlan {
+                         holder: Agent | null, restart: RestartState | null = null): TeamPlan {
+  // 🔑 再開を待っている間は、再開するチームが「持っている」側、相手が「持たれている」側。
+  //    蹴る人を持っている人とみなして、出し先の候補もその人から選ぶ
+  if (restart !== null) holder = agents[restart.taker]!;
   const phase: Phase = holder === null ? "LOOSE" : holder.team === team ? "ATTACK" : "DEFEND";
   const orders = new Map<number, Order>();
   const mine = agents.filter((a) => a.team === team);
@@ -116,9 +126,44 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     });
   }
 
+  // ---- 再開を待っている間の並び（第8・13・15・17条）
+  if (restart !== null) {
+    if (restart.kind === "KICKOFF") {
+      // キックオフ: 全員が自陣に入る。持ち場の深さを半分にして自陣へ畳む
+      for (const a of mine) {
+        const o = orders.get(a.id)!;
+        if (a.role === "GK") continue;
+        const depth = Math.min(Math.abs(a.homeX - ownGoalX) / 2.0, PITCH_LENGTH_M / 2 - 1.0);
+        o.x = ownGoalX + dir * depth;
+        o.y = a.homeY;
+      }
+    }
+    if (restart.team === team) {
+      const t = orders.get(restart.taker)!;
+      t.x = restart.x;
+      t.y = restart.y;
+      t.effort = 0.8;
+      t.role = "TAKER";
+    } else {
+      // 相手は決められた距離より外へ（ボールから外向きに押し出す）。キックオフはセンターサークルの外
+      const r = keepAway(restart.kind) + 0.5;
+      for (const a of mine) {
+        const o = orders.get(a.id)!;
+        const dx = o.x - restart.x;
+        const dy = o.y - restart.y;
+        const d = hypot(dx, dy);
+        if (d >= r) continue;
+        const ux = d > 0.0 ? dx / d : -dir;
+        const uy = d > 0.0 ? dy / d : 0.0;
+        o.x = clamp(restart.x + ux * r, 1.0, PITCH_LENGTH_M - 1.0);
+        o.y = clamp(restart.y + uy * r, 1.0, PITCH_WIDTH_M - 1.0);
+      }
+    }
+  }
+
   // ---- 役割
   const outlets: number[] = [];
-  if (phase === "DEFEND") {
+  if (phase === "DEFEND" && restart === null) {
     // いちばん早く寄せられる1人が寄せ、次の1人がその後ろ（ボールと自陣ゴールの間）を埋める
     const ranked = field
       .map((a) => ({ a, t: timeToReach(a.body, ball.x, ball.y, REACH_M) }))
@@ -141,7 +186,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     // 出し先の候補: 相手からの空き ＋ 前への進み、が大きい順に OUTLET_COUNT 人
     const opponents = agents.filter((a) => a.team !== team);
     const scored = field
-      .filter((a) => a.id !== holder.id)
+      .filter((a) => a.id !== holder.id && orders.get(a.id)!.role !== "TAKER")
       .map((a) => {
         const d = hypot(a.body.x - ball.x, a.body.y - ball.y);
         if (d < 5.0 || d > 45.0) return null;
