@@ -15,6 +15,10 @@ import { PITCH_LENGTH_M, PITCH_WIDTH_M } from "./reach.ts";
 
 /** ゴールの幅（第1条: ゴールポストの内側の間が 7.32m） */
 export const GOAL_WIDTH_M = 7.32;
+/** クロスバーの下端の高さ（第1条: 2.44m） */
+export const CROSSBAR_M = 2.44;
+/** ボールの半径（m）。ball.ts と同じ（ここから読むと循環するので値を書く） */
+const BALL_R_M = 0.11;
 /** ゴールエリアの奥行きと、ゴールポストから横へ出る長さ（第1条: 5.5m） */
 export const GOAL_AREA_DEPTH_M = 5.5;
 /** ペナルティエリアの奥行きと、ゴールの中心から横の端まで（第1条: 16.5m、ゴールポストから 16.5m ＋ ゴール幅の半分） */
@@ -51,9 +55,13 @@ export function keepAway(kind: RestartKind): number {
   return kind === "THROW_IN" ? THROW_KEEP_AWAY_M : KEEP_AWAY_M;
 }
 
-/** ゴールに入ったか（ゴールラインを、ゴールポストの間で越えた）。入ったなら得点したチーム */
-export function goalScored(x: number, y: number): 0 | 1 | null {
+/**
+ * ゴールに入ったか（ゴールラインを、ゴールポストの間・クロスバーの下で越えた）。入ったなら得点したチーム。
+ * @param z ボールの中心の高さ（ボール全体がバーの下を通るには、中心が「バーの高さ − 半径」より下）
+ */
+export function goalScored(x: number, y: number, z = 0.0): 0 | 1 | null {
   if (Math.abs(y - PITCH_WIDTH_M / 2) >= GOAL_WIDTH_M / 2) return null;
+  if (z > CROSSBAR_M - BALL_R_M) return null;
   if (x > PITCH_LENGTH_M) return 0;            // チーム0 は x が増える向きへ攻める
   if (x < 0.0) return 1;
   return null;

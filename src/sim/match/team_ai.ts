@@ -29,7 +29,7 @@ export interface Order {
   x: number;
   y: number;
   effort: number;
-  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER";
+  role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
 }
 
 /** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
@@ -87,6 +87,13 @@ export const RUNNER_COUNT = 2;
  * 🔑 設計値（出典なし）。走り込む先が無い（相手が自陣ゴール前まで下がっている）とき
  */
 export const RUN_SPACE_MIN_M = 12.0;
+/**
+ * クロスの場面: ボールが相手ゴールラインからこの距離以内で、かつ中央からこれだけ外（サイド）にあるとき、
+ * ゴール前へ入る役（BOX）を BOX_COUNT 人まで出す。🔑 設計値（出典なし）
+ */
+export const CROSS_ZONE_DEPTH_M = 30.0;
+export const CROSS_ZONE_WIDE_M = 12.0;
+export const BOX_COUNT = 3;
 /** 隊形へ戻るときの本気度。設計値（出典なし） */
 export const BLOCK_EFFORT = 0.7;
 
@@ -237,6 +244,30 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
           if (!outlets.includes(a.id)) outlets.push(a.id);
         }
       }
+    }
+    // 🔑 クロスの場面（サイドの深い位置）: 前線がニアポスト・ファーポスト・ペナルティスポットへ入る。
+    //    コーナーキックもこの場面に入る（ボールがコーナーにある）
+    const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
+    const side = ball.y >= PITCH_WIDTH_M / 2 ? 1.0 : -1.0;
+    if (Math.abs(goalLineX - ball.x) <= CROSS_ZONE_DEPTH_M
+        && Math.abs(ball.y - PITCH_WIDTH_M / 2) >= CROSS_ZONE_WIDE_M) {
+      const spots: [number, number][] = [
+        [goalLineX - dir * 5.0, PITCH_WIDTH_M / 2 + side * 3.0],    // ニアポスト
+        [goalLineX - dir * 6.0, PITCH_WIDTH_M / 2 - side * 4.0],    // ファーポスト
+        [goalLineX - dir * 11.0, PITCH_WIDTH_M / 2],                // ペナルティスポット
+      ];
+      const nearer = (p: Agent, q: Agent): number => (q.body.x - p.body.x) * dir || p.id - q.id;
+      const taker = restart?.taker;
+      const pick = (role: Agent["role"]): Agent[] =>
+        field.filter((a) => a.id !== holder.id && a.id !== taker && a.role === role).sort(nearer);
+      const attackers = [...pick("FW"), ...pick("MF")].slice(0, BOX_COUNT);
+      attackers.forEach((a, i) => {
+        const o = orders.get(a.id)!;
+        [o.x, o.y] = spots[i]!;
+        o.role = "BOX";
+        o.effort = 1.0;
+        if (!outlets.includes(a.id)) outlets.push(a.id);
+      });
     }
   }
   return { phase, orders, outlets };

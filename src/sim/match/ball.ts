@@ -9,7 +9,8 @@
  * 通るか・カットされるか・こぼれるかは、転がっている間に誰が先に触れるかで決まる
  * （それを見るのは上の層）。
  *
- * 🔑 いまは地面を転がるボールだけ（高さなし）。浮き球・クロス・ヘディングは後のステップ。
+ * 🔑 高さ（z）も持つ。浮いている間は重力と空気抵抗、地面に落ちれば弾み、弾みが小さくなれば転がる。
+ *    高さ 0 で転がっている間は、高さを入れる前とまったく同じ計算を通る（転がるだけの試合は1ビットも変わらない）。
  * 🔴 乱数は一切使わない（D-42: まずゼロで作る）。
  * 🔴 hypot は pymath、三角関数・指数関数は detmath（D-16。Math のものは環境ごとに最後のビットが違う）。
  */
@@ -63,29 +64,55 @@ export function ballDecel(s: number): number {
   return BALL_ROLL_DECEL_MPS2 + DRAG_BASE * dragCoef(s) * s * s;
 }
 
+/** 重力加速度（m/s²） */
+export const GRAVITY_MPS2 = 9.81;
+/**
+ * 地面で弾むときの反発係数（落ちる速さに対する跳ね上がる速さの割合）。
+ * FIFA の芝の認証試験「垂直のボールの弾み」は、2m から落として 0.60〜0.85m（乾いた状態）。
+ * 跳ね返る高さの比の平方根が反発係数なので √(0.60/2)〜√(0.85/2) ＝ 0.55〜0.65。その真ん中。
+ */
+export const BOUNCE_RESTITUTION = 0.6;
+/** 弾むとき、横向きの速さが残る割合。🔑 設計値（出典なし。芝との摩擦で少し失う） */
+export const BOUNCE_KEEP = 0.8;
+/** 跳ね上がる速さがこれより小さければ、弾むのをやめて転がる（m/s）。🔑 設計値（出典なし） */
+export const SETTLE_VZ_MPS = 1.0;
+
 export class Ball {
   x: number;
   y: number;
+  /** 高さ（地面から、ボールの中心まで・m。転がっているときは 0） */
+  z = 0.0;
   vx = 0.0;
   vy = 0.0;
+  vz = 0.0;
 
   constructor(x: number, y: number) {
     this.x = x;
     this.y = y;
   }
 
+  /** 速さ（上下も含む）。転がっているときは横の速さそのもの */
   get speed(): number {
-    return hypot(this.vx, this.vy);
+    return this.vz === 0.0 ? hypot(this.vx, this.vy) : hypot(hypot(this.vx, this.vy), this.vz);
   }
 
-  /** 蹴る＝速度を与える。どこへどれだけの速さで蹴るかは上の層が決める */
-  kick(vx: number, vy: number): void {
+  get airborne(): boolean {
+    return this.z > 0.0 || this.vz !== 0.0;
+  }
+
+  /** 蹴る＝速度を与える（vz が正なら浮かせる）。どこへどれだけの速さで蹴るかは上の層が決める */
+  kick(vx: number, vy: number, vz = 0.0): void {
     this.vx = vx;
     this.vy = vy;
+    this.vz = vz;
   }
 
-  /** 1コマぶん転がす */
+  /** 1コマぶん動かす */
   step(dt = DT): void {
+    if (this.airborne) {
+      this.fly(dt);
+      return;
+    }
     const s = this.speed;
     if (s === 0.0) return;
     const k = Math.max(0.0, s - ballDecel(s) * dt) / s;
@@ -96,5 +123,30 @@ export class Ball {
     this.y += (this.vy + nvy) / 2 * dt;
     this.vx = nvx;
     this.vy = nvy;
+  }
+
+  /**
+   * 浮いている間: 重力と空気抵抗（転がりの減速は無い）。地面に着いたら弾む。
+   * 🔑 空気抵抗は速さ（上下も含む）で決まり、速さの向きと逆に働く（転がるときと同じ式）。
+   */
+  private fly(dt: number): void {
+    const s = this.speed;
+    const drag = s > 0.0 ? DRAG_BASE * dragCoef(s) * s : 0.0;    // 抗力 ÷ 速さ（各成分にかける）
+    const nvx = this.vx - drag * this.vx * dt;
+    const nvy = this.vy - drag * this.vy * dt;
+    const nvz = this.vz - (drag * this.vz + GRAVITY_MPS2) * dt;
+    this.x += (this.vx + nvx) / 2 * dt;
+    this.y += (this.vy + nvy) / 2 * dt;
+    this.z += (this.vz + nvz) / 2 * dt;
+    this.vx = nvx;
+    this.vy = nvy;
+    this.vz = nvz;
+    if (this.z > 0.0) return;
+    // 地面に着いた: 跳ね上がる。弾みが小さければ転がる
+    this.z = 0.0;
+    const up = -this.vz * BOUNCE_RESTITUTION;
+    this.vx *= BOUNCE_KEEP;
+    this.vy *= BOUNCE_KEEP;
+    this.vz = up >= SETTLE_VZ_MPS ? up : 0.0;
   }
 }

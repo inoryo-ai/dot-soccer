@@ -17,17 +17,20 @@
  * 🔴 乱数は一切使わない（D-42）。同じ盤面なら必ず同じ判断になる。
  */
 
-import { atan2, cos, exp, sin } from "../detmath.ts";
+import { PI, atan2, cos, exp, sin } from "../detmath.ts";
 import type { Position } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
 import { ACCEL_TAU_S } from "./body.ts";
 import type { Body } from "./body.ts";
-import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACT_S, exitPoint, firstTouch } from "./reach.ts";
+import { CONTROL_MAX_MPS, CONTROL_MAX_Z_M, HEAD_MAX_Z_M, PITCH_LENGTH_M, PITCH_WIDTH_M, REACT_S, exitPoint,
+  firstTouch, timeToReach } from "./reach.ts";
+import { LOFT_ANGLES_DEG, loftKick } from "./aerial.ts";
 import type { Touch } from "./reach.ts";
 import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsideLineX, offsidePositions } from "./laws.ts";
 import type { RestartKind } from "./laws.ts";
 import { directionSigma } from "./execution.ts";
+import type { KickKind } from "./execution.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
@@ -144,11 +147,31 @@ function runDistance(top: number, v0: number, t: number): number {
 export const THROUGH_RUNNING_MPS = 3.0;
 
 export type HolderPlan =
-  | { kind: "PASS"; to: number; vx: number; vy: number; expect: Touch }
-  | { kind: "SHOOT"; vx: number; vy: number; chance: number }
+  | { kind: "PASS"; to: number; vx: number; vy: number; vz: number; expect: Touch }
+  | { kind: "SHOOT"; vx: number; vy: number; vz: number; chance: number }
   /** 出し先を決めずに蹴り出す（パスにもシュートにも数えない） */
-  | { kind: "CLEAR"; vx: number; vy: number }
+  | { kind: "CLEAR"; vx: number; vy: number; vz: number }
   | { kind: "CARRY"; x: number; y: number };
+
+/** ボールを取りに行く人が、ボールよりこれだけ早く着けるなら、その地点で止まって待つ（秒）。🔑 設計値（出典なし） */
+export const CHASE_WAIT_MARGIN_S = 0.5;
+/** 浮かせるパスを試す、出し先までの距離の下限（m）。🔑 設計値（出典なし） */
+export const LOFT_MIN_M = 20.0;
+/**
+ * クロスが合う見込みがこれ以上なら蹴る（0〜1）。🔑 設計値（出典なし）。
+ * 現実のクロスは 4〜5本に1本しか合わない（確かめ方: クロスの成功率 約22%）。確実なときだけ蹴ると、ほぼ蹴らない
+ * （2026-10-05: 1試合でエリアに落ちたクロス 2本）。⚠️ 特性「リスクを取るか」の候補
+ */
+export const CROSS_MIN_CHANCE = 0.2;
+/** クロスの見込みを出すとき、狙いの左右に試す向きの数と、その幅（ブレの標準偏差の何倍まで） */
+const CROSS_SCAN = 9;
+const CROSS_SCAN_SIGMAS = 2.5;
+/** ヘディングの速さ（m/s）。🔑 設計値（出典なし。頭で強く叩いた球として） */
+export const HEADER_SPEED_MPS = 15.0;
+/** ヘディングでゴールを狙う、相手ゴールの中心からの距離（m）。🔑 設計値（出典なし） */
+export const HEADER_SHOT_RANGE_M = 14.0;
+/** ヘディングでクリアする、自陣ゴールの中心からの距離（m）。🔑 設計値（出典なし） */
+export const HEADER_CLEAR_RANGE_M = 30.0;
 
 /** GK の番号 → チーム（reach.ts の先読みで、GK だけ手と飛び込みのぶん遠くまで届く） */
 export function keepersOf(agents: readonly Agent[]): Map<number, 0 | 1> {
@@ -176,6 +199,7 @@ export const SHOT_SCAN_DIRS = 41;
 export interface ShotChoice {
   vx: number;
   vy: number;
+  vz: number;
   /** 入る見込み（0〜1）。自分のブレの分布で「入る向き」を足し合わせたもの＝物理から出したゴール期待値 */
   chance: number;
 }
@@ -188,44 +212,57 @@ export interface ShotChoice {
  *    正規分布の重みをかけて足したもの。乱数は引かない（同じ盤面なら同じ見込み）。
  * 🔑 同じ見込みなら、先に試した（速い・番号の小さい向き）もの（決定論）。
  */
-export function bestShot(v: View, me: Agent): ShotChoice | null {
+export function bestShot(v: View, me: Agent, speeds: readonly number[] = SHOT_SPEEDS_MPS,
+                         kind: KickKind = "SHOT", vz = 0.0, range = SHOOT_RANGE_M): ShotChoice | null {
   const dir = attackDir(me.team);
   const gx = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const gy = PITCH_WIDTH_M / 2;
-  if (hypot(gx - v.ball.x, gy - v.ball.y) > SHOOT_RANGE_M) return null;
+  if (hypot(gx - v.ball.x, gy - v.ball.y) > range) return null;
   const keepers = keepersOf(v.agents);
   const blocked = new Set<number>([me.id]);
   const near = nearestOpponent(v, me);
   const half = GOAL_WIDTH_M / 2 + 1.0;
+  // 🔴 向きはゴールの中心の向きを基準にした「ずれ」で並べる。左のゴール（チーム1 が攻める）は約 ±180° で、
+  //    そのまま角度にすると +180° と −180° の境目をまたぎ、区間の計算が壊れた（見込み 200%・2026-10-05）
+  const base = atan2(gy - v.ball.y, gx - v.ball.x);
   const angles: number[] = [];
   for (let j = 0; j < SHOT_SCAN_DIRS; j++) {
     const ty = gy - half + (2 * half) * j / (SHOT_SCAN_DIRS - 1);
-    angles.push(atan2(ty - v.ball.y, gx - v.ball.x));
+    let rel = atan2(ty - v.ball.y, gx - v.ball.x) - base;
+    if (rel > PI) rel -= 2 * PI;
+    if (rel < -PI) rel += 2 * PI;
+    angles.push(base + rel);
   }
   let best: ShotChoice | null = null;
-  for (const speed of SHOT_SPEEDS_MPS) {
+  for (const speed of speeds) {
     const goal = angles.map((a) => {
       const probe = new Ball(v.ball.x, v.ball.y);
-      probe.kick(cos(a) * speed, sin(a) * speed);
+      probe.z = v.ball.z;                       // ヘディングは頭の高さから
+      probe.kick(cos(a) * speed, sin(a) * speed, vz);
       if (firstTouch(probe, v.bodies, blocked, keepers) !== null) return false;
       const out = exitPoint(probe);
-      return out !== null && goalScored(out.x, out.y) === me.team;
+      return out !== null && goalScored(out.x, out.y, out.z) === me.team;
     });
     if (!goal.some((g) => g)) continue;
-    const sigma = directionSigma("SHOT", speed, me.technique, near);
+    const sigma = directionSigma(kind, speed, me.technique, near);
     // 狙いの候補はポストの内側の向きだけ。
     // 🔑 地図の各向きは「刻みの幅をもつ区間」とみなし、その区間へ飛ぶ確率（正規分布の累積の差）で重みをつける。
     //    区間の真ん中の値（確率密度）× 刻み で足すと、ブレが刻みより小さいとき見込みが 1 を超えた（2026-10-05）。
     //    地図の外へ飛ぶぶんは外れ。
-    const step = Math.abs(angles[1]! - angles[0]!);
+    // 🔴 向きの間隔は不ぞろい（ゴールライン上で等間隔に取っているので、正面からずれると角度の間隔が変わる）。
+    //    区間の境目は隣の向きとの中間にする（どこも同じ幅とみなすと区間が重なり、見込みが 127% になった）
+    const lo = angles.map((a, k) => (k === 0 ? a - (angles[1]! - a) / 2 : (angles[k - 1]! + a) / 2));
+    const hi = angles.map((a, k) => (k === angles.length - 1 ? a + (a - angles[k - 1]!) / 2 : (a + angles[k + 1]!) / 2));
     angles.forEach((aim, j) => {
       if (!goal[j]) return;
       let chance = 0.0;
-      angles.forEach((a, k) => {
+      angles.forEach((_a, k) => {
         if (!goal[k]) return;
-        chance += normalCdf((Math.abs(a - aim) + step / 2) / sigma) - normalCdf((Math.abs(a - aim) - step / 2) / sigma);
+        const p = normalCdf((hi[k]! - aim) / sigma) - normalCdf((lo[k]! - aim) / sigma);
+        chance += p < 0.0 ? -p : p;      // 角度の並びが逆向き（右から左）でも同じ確率
       });
-      if (best === null || chance > best.chance) best = { vx: cos(aim) * speed, vy: sin(aim) * speed, chance };
+      chance = Math.min(1.0, chance);   // 足し合わせの端数（1.0000000000000002 など）を丸める
+      if (best === null || chance > best.chance) best = { vx: cos(aim) * speed, vy: sin(aim) * speed, vz, chance };
     });
   }
   return best;
@@ -250,8 +287,96 @@ export function normalCdf(z: number): number {
 export function decideShot(v: View, me: Agent): HolderPlan | null {
   const shot = bestShot(v, me);
   return shot !== null && shot.chance >= SHOOT_MIN_CHANCE
-    ? { kind: "SHOOT", vx: shot.vx, vy: shot.vy, chance: shot.chance }
+    ? { kind: "SHOOT", vx: shot.vx, vy: shot.vy, vz: shot.vz, chance: shot.chance }
     : null;
+}
+
+/**
+ * クロス: ゴール前へ入る味方（チームAIの BOX）へ浮き球を上げる。合う見込みがいちばん高い狙いを選ぶ。
+ *
+ * 🔑 シュートと同じ考え方（確信が無くても蹴る）: 狙いの向きの左右に CROSS_SCAN 方向を先読みし、
+ *    味方が足か頭で先に触れる向きを、自分のブレの正規分布（区間ごとの累積）で重みをつけて足す。
+ *    見込みが CROSS_MIN_CHANCE 以上なら蹴る。乱数は引かない。
+ */
+export function decideCross(v: View, me: Agent): HolderPlan | null {
+  const plan = v.plans[me.team];
+  const targets = plan.outlets.filter((id) => plan.orders.get(id)?.role === "BOX");
+  if (targets.length === 0) return null;
+  const keepers = keepersOf(v.agents);
+  const blocked = new Set<number>([me.id]);
+  const near = nearestOpponent(v, me);
+  let best: HolderPlan | null = null;
+  let bestChance = 0.0;
+  for (const id of targets) {
+    const o = plan.orders.get(id)!;
+    const dx = o.x - v.ball.x;
+    const dy = o.y - v.ball.y;
+    for (let k = 0; k < LOFT_ANGLES_DEG.length; k++) {
+      const lk = loftKick(dx, dy, k);
+      if (lk === null) continue;
+      const [vx, vy, vz] = lk;
+      const sigma = directionSigma("PASS", hypot(hypot(vx, vy), vz), me.technique, near);
+      const step = 2 * CROSS_SCAN_SIGMAS * sigma / (CROSS_SCAN - 1);
+      let chance = 0.0;
+      for (let j = 0; j < CROSS_SCAN; j++) {
+        const off = -CROSS_SCAN_SIGMAS * sigma + step * j;
+        const c = cos(off);
+        const sn = sin(off);
+        const probe = new Ball(v.ball.x, v.ball.y);
+        probe.kick(vx * c - vy * sn, vx * sn + vy * c, vz);
+        const t = firstTouch(probe, v.bodies, blocked, keepers);
+        if (t === null || v.agents[t.who]!.team !== me.team || t.z > HEAD_MAX_Z_M) continue;
+        const z0 = off / sigma;
+        chance += normalCdf(z0 + step / sigma / 2) - normalCdf(z0 - step / sigma / 2);
+      }
+      if (chance > bestChance) {
+        bestChance = chance;
+        best = { kind: "PASS", to: id, vx, vy, vz,
+                 expect: { who: id, speed: 0.0, z: 0.0, t: 0.0, x: o.x, y: o.y } };
+      }
+    }
+  }
+  return best !== null && bestChance >= CROSS_MIN_CHANCE ? best : null;
+}
+
+/**
+ * ヘディング（頭の高さのボールに触った: 止められないので、その場で向きを決めて弾く）。
+ *
+ * 🔑 相手ゴールに近ければゴールを狙う（入る見込みがあれば）。自陣ゴールに近ければ大きくクリア。
+ *    それ以外は、前にいる近い味方へ落とす。
+ */
+export function decideHeader(v: View, me: Agent): HolderPlan {
+  const dir = attackDir(me.team);
+  const shot = bestShot(v, me, [HEADER_SPEED_MPS], "HEADER", -1.0, HEADER_SHOT_RANGE_M);
+  if (shot !== null && shot.chance > 0.0) {
+    return { kind: "SHOOT", vx: shot.vx, vy: shot.vy, vz: shot.vz, chance: shot.chance };
+  }
+  const ownGoalX = dir > 0 ? 0.0 : PITCH_LENGTH_M;
+  if (hypot(ownGoalX - v.ball.x, PITCH_WIDTH_M / 2 - v.ball.y) <= HEADER_CLEAR_RANGE_M) {
+    // 前へ、外へ（タッチラインの側へ）大きく
+    const side = v.ball.y >= PITCH_WIDTH_M / 2 ? 1.0 : -1.0;
+    const ux = dir * 0.85;
+    const uy = side * 0.53;
+    return { kind: "CLEAR", vx: ux * HEADER_SPEED_MPS, vy: uy * HEADER_SPEED_MPS, vz: 5.0 };
+  }
+  // 前にいる、いちばん近い味方へ落とす
+  let to: Agent | null = null;
+  let best = Infinity;
+  for (const a of v.agents) {
+    if (a.team !== me.team || a.id === me.id) continue;
+    const d = hypot(a.body.x - v.ball.x, a.body.y - v.ball.y);
+    if ((a.body.x - v.ball.x) * dir > -5.0 && d < best) {
+      best = d;
+      to = a;
+    }
+  }
+  if (to === null) return { kind: "CLEAR", vx: dir * HEADER_SPEED_MPS, vy: 0.0, vz: 3.0 };
+  const dx = to.body.x - v.ball.x;
+  const dy = to.body.y - v.ball.y;
+  const d = hypot(dx, dy) || 1.0;
+  const sp = Math.min(HEADER_SPEED_MPS, 4.0 + d * 0.5);
+  return { kind: "PASS", to: to.id, vx: dx / d * sp, vy: dy / d * sp, vz: 2.0,
+           expect: { who: to.id, speed: sp, z: 0.0, t: 0.0, x: to.body.x, y: to.body.y } };
 }
 
 /** 持っている人の判断 */
@@ -260,6 +385,8 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
   if (me.role === "GK") return decideRestartKick(v, me, "FREE_KICK");
   const shot = decideShot(v, me);
   if (shot !== null) return shot;
+  const cross = decideCross(v, me);
+  if (cross !== null) return cross;
   const dir = attackDir(me.team);
   const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const opponents = v.agents.filter((a) => a.team !== me.team);
@@ -316,7 +443,7 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
     const dx = PITCH_LENGTH_M / 2 - v.ball.x;
     const dy = PITCH_WIDTH_M / 2 - v.ball.y;
     const d = hypot(dx, dy) || 1.0;
-    return { kind: "CLEAR", vx: dx / d * speed, vy: dy / d * speed };
+    return { kind: "CLEAR", vx: dx / d * speed, vy: dy / d * speed, vz: 0.0 };
   }
   let to = pool[0]!;
   let best = Infinity;
@@ -330,8 +457,8 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
   const dx = to.body.x - v.ball.x;
   const dy = to.body.y - v.ball.y;
   const d = hypot(dx, dy) || 1.0;
-  return { kind: "PASS", to: to.id, vx: dx / d * speed, vy: dy / d * speed,
-           expect: { who: to.id, speed, t: 0.0, x: to.body.x, y: to.body.y } };
+  return { kind: "PASS", to: to.id, vx: dx / d * speed, vy: dy / d * speed, vz: 0.0,
+           expect: { who: to.id, speed, z: 0.0, t: 0.0, x: to.body.x, y: to.body.y } };
 }
 
 /**
@@ -378,19 +505,28 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
     const dy = sy - v.ball.y;
     const d = hypot(dx, dy);
     if (d < PASS_MIN_M || d > PASS_MAX_M) continue;
-    for (const speed of speeds) {
-      const vx = dx / d * speed;
-      const vy = dy / d * speed;
+    // 試す蹴り方: 転がす（速さ違い）＋ 遠ければ浮かせる（角度違い。その地点に落ちる速さ）
+    const kicks: [number, number, number][] = speeds.map((sp) => [dx / d * sp, dy / d * sp, 0.0]);
+    if (d >= LOFT_MIN_M) {
+      for (let k = 0; k < LOFT_ANGLES_DEG.length; k++) {
+        const lk = loftKick(dx, dy, k);
+        if (lk !== null) kicks.push(lk);
+      }
+    }
+    for (const [vx, vy, vz] of kicks) {
       const probe = new Ball(v.ball.x, v.ball.y);
-      probe.kick(vx, vy);
+      probe.kick(vx, vy, vz);
       const touch = firstTouch(probe, v.bodies, blocked, keepers, oppReact);
-      // 🔑 味方が先に触っても、速すぎて止められなければ（はね返る）通ったことにならない
-      if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)
-          || touch.speed > CONTROL_MAX_MPS) continue;
+      if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)) continue;
+      // 🔑 味方が先に触っても、速すぎて止められなければ（はね返る）通ったことにならない。
+      //    頭の高さなら止められない。ただしゴール前へ入る味方（BOX）へのクロスは、ヘディングで合わせればよい
+      const box = v.plans[me.team].orders.get(touch.who)?.role === "BOX";
+      if (touch.speed > CONTROL_MAX_MPS) continue;
+      if (touch.z > (box ? HEAD_MAX_Z_M : CONTROL_MAX_Z_M)) continue;
       const gain = (touch.x - v.ball.x) * dir;
       if (gain > bestGain) {
         bestGain = gain;
-        best = { kind: "PASS", to: touch.who, vx, vy, expect: touch };
+        best = { kind: "PASS", to: touch.who, vx, vy, vz, expect: touch };
       }
     }
     }
@@ -423,7 +559,10 @@ export function decideOffBall(v: View): void {
       a.aimX = mine.x;
       a.aimY = mine.y;
       a.effort = 1.0;
-      a.stop = false;
+      // 🔑 ボールより十分早く着けるなら、その地点で止まって待つ。ぎりぎりなら走り抜ける。
+      //    いつも走り抜けると、浮き球の落ち際へ早く着きすぎて通り過ぎ、行ったり来たりしているうちに
+      //    頭上を越えられた（2026-10-05）
+      a.stop = timeToReach(a.body, mine.x, mine.y) + CHASE_WAIT_MARGIN_S < mine.t;
       continue;
     }
     const order = v.plans[a.team].orders.get(a.id);

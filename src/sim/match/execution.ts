@@ -27,6 +27,8 @@ import { hypot } from "../pymath.ts";
 export const SHOT_ERROR_DEG = 4.0;
 /** パス（インサイドキック）の向きのブレ（標準偏差・度・28 m/s 換算）。インステップより正確（J Biomech 2018）。設計値 */
 export const PASS_ERROR_DEG = 2.5;
+/** ヘディングの向きのブレ（標準偏差・度・28 m/s 換算）。頭は足より狙いにくい。🔑 設計値（出典なし） */
+export const HEADER_ERROR_DEG = 8.0;
 /** 速さのブレ（蹴った速さに対する標準偏差の割合）。設計値（出典なし） */
 export const SPEED_ERROR_RATIO = 0.05;
 /** 基準の速さ（m/s）。速く蹴るほどブレる（ズレのばらつきは球速とともに増える・J Biomech 2018） */
@@ -36,7 +38,7 @@ export const PRESSURE_RADIUS_M = 3.0;
 /** 相手が体に触れるほど近いとき、ブレが何倍になるか。設計値（出典なし） */
 export const PRESSURE_MAX_FACTOR = 1.5;
 
-export type KickKind = "SHOT" | "PASS";
+export type KickKind = "SHOT" | "PASS" | "HEADER";
 
 /**
  * 向きのブレ（標準偏差・ラジアン）。
@@ -44,7 +46,8 @@ export type KickKind = "SHOT" | "PASS";
  * @param nearestOpp  いちばん近い相手までの距離（m）
  */
 export function directionSigma(kind: KickKind, speed: number, technique: number, nearestOpp: number): number {
-  const base = (kind === "SHOT" ? SHOT_ERROR_DEG : PASS_ERROR_DEG) * PI / 180.0;
+  const deg = kind === "SHOT" ? SHOT_ERROR_DEG : kind === "HEADER" ? HEADER_ERROR_DEG : PASS_ERROR_DEG;
+  const base = deg * PI / 180.0;
   const bySpeed = speed / ERROR_REF_SPEED_MPS;
   const byTech = 1.5 - technique / 100.0;                 // 技術 0 → 1.5倍、50 → 1倍、100 → 0.5倍
   const close = Math.max(0.0, Math.min(1.0, (PRESSURE_RADIUS_M - nearestOpp) / PRESSURE_RADIUS_M));
@@ -71,12 +74,18 @@ export class Execution {
     return (this.rng.random() + this.rng.random() + this.rng.random() - 1.5) * 2.0;
   }
 
-  /** 狙った速度 (vx, vy) に、実行のブレを加えた速度 */
-  kick(kind: KickKind, vx: number, vy: number, technique: number, nearestOpp: number): [number, number] {
-    const speed = hypot(vx, vy);
-    if (speed === 0.0) return [vx, vy];
+  /**
+   * 狙った速度 (vx, vy, vz) に、実行のブレを加えた速度。
+   * 🔑 横の向きを回し、速さ（上向きも含めて）を同じ割合で伸び縮みさせる。
+   *    浮かせないキック（vz = 0）では、高さを入れる前とまったく同じ乱数の引き方・計算になる。
+   */
+  kick(kind: KickKind, vx: number, vy: number, technique: number, nearestOpp: number,
+       vz = 0.0): [number, number, number] {
+    const speed = vz === 0.0 ? hypot(vx, vy) : hypot(hypot(vx, vy), vz);
+    if (speed === 0.0) return [vx, vy, vz];
     const angle = this.normal() * directionSigma(kind, speed, technique, nearestOpp);
-    const scale = 1.0 + this.normal() * SPEED_ERROR_RATIO;
-    return bend(vx, vy, angle, Math.max(0.5, scale));
+    const scale = Math.max(0.5, 1.0 + this.normal() * SPEED_ERROR_RATIO);
+    const [bx, by] = bend(vx, vy, angle, scale);
+    return [bx, by, vz * scale];
   }
 }

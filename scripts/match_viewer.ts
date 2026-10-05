@@ -21,7 +21,7 @@ const OUT = join(ROOT, "out", "match_viewer.html");
 
 /** 役割の1文字（画面に出す） */
 const ROLE_MARK: Record<string, string> = {
-  BLOCK: "", PRESS: "寄", COVER: "埋", OUTLET: "受", GK: "", TAKER: "蹴", RUNNER: "走",
+  BLOCK: "", PRESS: "寄", COVER: "埋", OUTLET: "受", GK: "", TAKER: "蹴", RUNNER: "走", BOX: "箱",
 };
 
 interface ViewerEvent {
@@ -44,7 +44,7 @@ function main(argv: string[]): number {
   const sim = new MatchSim({ ...standardSetup(), seed });
   const ticks = Math.round(minutes * 600);
 
-  const frames: number[] = [];        // [ボールx, ボールy, 持っている人, 22人の x, y …] を 10cm 単位で
+  const frames: number[] = [];        // [ボールx, ボールy, ボールの高さ, 持っている人, 22人の x, y …] を 10cm 単位で
   const roles: string[] = [];         // コマごとに 22文字（役割の1文字。無ければ "・"）
   const events: ViewerEvent[] = [];
   const t0 = performance.now();
@@ -54,7 +54,8 @@ function main(argv: string[]): number {
 
   for (let i = 0; i < ticks; i++) {
     sim.step();
-    frames.push(Math.round(sim.ball.x * 10), Math.round(sim.ball.y * 10), sim.holder?.id ?? -1);
+    frames.push(Math.round(sim.ball.x * 10), Math.round(sim.ball.y * 10), Math.round(sim.ball.z * 10),
+                sim.holder?.id ?? -1);
     let r = "";
     for (const a of sim.agents) {
       frames.push(Math.round(a.body.x * 10), Math.round(a.body.y * 10));
@@ -66,11 +67,16 @@ function main(argv: string[]): number {
     while (shots < sim.shots.length) {
       const s = sim.shots[shots++]!;
       events.push({ tick: i, team: s.team,
-                    text: `シュート ${s.distance.toFixed(0)}m（見込み ${(s.chance * 100).toFixed(0)}%）→ ${SHOT_NAME[s.result]}` });
+                    text: `${s.header ? "ヘディング" : "シュート"} ${s.distance.toFixed(0)}m（見込み ${(s.chance * 100).toFixed(0)}%）→ ${SHOT_NAME[s.result]}` });
     }
     while (passes < sim.passes.length) {
       const p = sim.passes[passes++]!;
       if (p.result === "OFFSIDE") events.push({ tick: i, team: p.team, text: "オフサイド" });
+      // クロス: 浮かせたパスが相手のペナルティエリアに落ちた
+      const depth = p.team === 0 ? 105 - p.toX : p.toX;
+      if (p.lofted && depth <= 16.5 && Math.abs(p.toY - 34) <= 20.16) {
+        events.push({ tick: i, team: p.team, text: `クロス → ${p.result === "COMPLETED" ? "味方が合わせた" : "相手が触った"}` });
+      }
     }
     const now = sim.restart?.kind ?? null;
     if (now !== null && now !== restart) {
@@ -144,8 +150,8 @@ function html(json: string): string {
       <input id="seek" type="range" min="0" value="0">
     </div>
     <div class="legend">青は右へ、赤は左へ攻める。輪の付いた選手がボールを持っている。
-      文字は役割（寄＝寄せる・埋＝後ろを埋める・受＝パスの出し先候補・走＝裏へ走り込む・蹴＝再開で蹴る）。
-      点線は守っている側のオフサイドライン（後ろから2人目）。</div>
+      文字は役割（寄＝寄せる・埋＝後ろを埋める・受＝パスの出し先候補・走＝裏へ走り込む・箱＝ゴール前へ入る・蹴＝再開で蹴る）。
+      点線は守っている側のオフサイドライン（後ろから2人目）。浮いたボールは影と高さ（m）で表す。</div>
   </section>
   <section class="board">
     <h1>出来事</h1>
@@ -155,7 +161,7 @@ function html(json: string): string {
 </main>
 <script>
 const D = ${json};
-const N = D.teams.length, W = 3 + N * 2;
+const N = D.teams.length, W = 4 + N * 2;
 const cv = document.getElementById("pitch"), g = cv.getContext("2d");
 const S = 10; // 1m = 10px
 let tick = 0, pos = 0, playing = false, last = 0;
@@ -207,13 +213,13 @@ function draw() {
   for (const e of D.events) if (e.tick <= tick && e.text.endsWith("ゴール！")) sc[e.team]++;
   document.getElementById("score").textContent = sc[0] + " - " + sc[1];
   pitch();
-  const holder = D.frames[tick * W + 2];
+  const holder = D.frames[tick * W + 3];
   const ballX = at(tick, 0);
   // 守っている側のオフサイドライン（後ろから2人目）。持っているチームがいなければ出さない
   if (holder >= 0) {
     const atk = D.teams[holder], dir = atk === 0 ? 1 : -1, goal = atk === 0 ? 105 : 0;
     const depth = [];
-    for (let i = 0; i < N; i++) if (D.teams[i] !== atk) depth.push(Math.abs(goal - at(tick, 3 + i * 2)));
+    for (let i = 0; i < N; i++) if (D.teams[i] !== atk) depth.push(Math.abs(goal - at(tick, 4 + i * 2)));
     depth.sort((a, b) => a - b);
     const line = goal - dir * Math.min(depth[1], Math.abs(goal - ballX), 52.5);
     g.setLineDash([8, 8]); g.strokeStyle = "rgba(255,255,0,.8)";
@@ -221,7 +227,7 @@ function draw() {
   }
   const roles = D.roles[tick];
   for (let i = 0; i < N; i++) {
-    const x = at(tick, 3 + i * 2) * S, y = at(tick, 4 + i * 2) * S;
+    const x = at(tick, 4 + i * 2) * S, y = at(tick, 5 + i * 2) * S;
     g.fillStyle = D.teams[i] === 0 ? css("--a") : css("--b");
     g.beginPath(); g.arc(x, y, D.gk[i] ? 11 : 9, 0, Math.PI * 2); g.fill();
     if (D.gk[i]) { g.strokeStyle = "#ffeb3b"; g.lineWidth = 3; g.stroke(); }
@@ -229,8 +235,15 @@ function draw() {
     const m = roles[i];
     if (m !== "・") { g.fillStyle = "#fff"; g.font = "bold 13px system-ui"; g.textAlign = "center"; g.fillText(m, x, y - 14); }
   }
+  // ボール: 浮いていれば地面に影を落とし、高いほど大きく描いて高さを添える
+  const bz = at(tick, 2), bx = ballX * S, by = at(tick, 1) * S;
+  if (bz > 0.05) {
+    g.fillStyle = "rgba(0,0,0,.35)"; g.beginPath(); g.ellipse(bx, by, 6, 3, 0, 0, Math.PI * 2); g.fill();
+  }
+  const r = 5 + Math.min(bz, 10) * 0.8, lift = bz * 3;
   g.fillStyle = "#fff"; g.strokeStyle = "#111"; g.lineWidth = 2;
-  g.beginPath(); g.arc(ballX * S, at(tick, 1) * S, 5, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.beginPath(); g.arc(bx, by - lift, r, 0, Math.PI * 2); g.fill(); g.stroke();
+  if (bz > 0.3) { g.fillStyle = "#fff"; g.font = "12px system-ui"; g.textAlign = "left"; g.fillText(bz.toFixed(1) + "m", bx + r + 3, by - lift); }
 }
 
 function loop(ts) {
