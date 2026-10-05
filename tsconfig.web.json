@@ -26,8 +26,9 @@
   //      lab.ts     … 選手（ブロック3D）
   //      pitch3d.ts … ピッチ・スタジアム・ボール
   //      faces.ts   … 顔（髪20×顔10×色5）
+  //      engine3d.ts … 新しい試合エンジン（src/sim/match/）を3Dで再生
   //    🔴 ここに足し忘れると `web/face.js が足りない` で組み立てが止まる。
   //       入口から辿れないファイルは出ないため。
   "files": ["src/web/main.ts", "src/web/lab.ts", "src/web/pitch3d.ts",
-            "src/web/faces.ts", "src/web/bgcheck.ts"]
+            "src/web/faces.ts", "src/web/bgcheck.ts", "src/web/engine3d.ts"]
 }

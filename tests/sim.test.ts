@@ -73,7 +73,9 @@ function codeLines(path: string): string[] {
 }
 
 const SIM_DIR = join(ROOT, "src", "sim");
-const simFiles = (): string[] => readdirSync(SIM_DIR).filter((f) => f.endsWith(".ts")).sort();
+// 🔑 下のフォルダ（新しいエンジンの `match/`・D-42）も含めて見る
+const simFiles = (): string[] =>
+  readdirSync(SIM_DIR, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts")).sort();
 
 describe("同じシードなら必ず同じ結果（要件定義書 §6）", () => {
   test("同じシードで2回回すと、スコア・スタッツ・課題・経過がすべて同じ", () => {
