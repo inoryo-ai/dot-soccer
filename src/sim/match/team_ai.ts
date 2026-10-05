@@ -22,6 +22,7 @@ import { attackDir } from "./player_ai.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, timeToReach } from "./reach.ts";
 import { keepAway, offsideLineX } from "./laws.ts";
 import type { Pace } from "./pace.ts";
+import { openAt, receiveFactor, xtAt } from "./value.ts";
 import type { Restart } from "./laws.ts";
 
 export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
@@ -31,7 +32,7 @@ export interface Order {
   y: number;
   /** どのペースで向かうか（pace.ts）。JOG は「持ち場の調整」で、遠ければ選手AIがランニングに上げる */
   pace: Pace;
-  role: "BLOCK" | "PRESS" | "CONTAIN" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
+  role: "BLOCK" | "PRESS" | "CONTAIN" | "COVER" | "SHIELD" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
 }
 
 /** 再開を待っているところ（match.ts が持つ）。taker は蹴る人の番号 */
@@ -87,6 +88,27 @@ export const OUTLET_COUNT = 3;
  *    オーナー指摘「プレスが早すぎる」（2026-10-05）。確かめ方: PPDA 8〜12・スプリント回数（`docs/realism-reference.md`）
  */
 export const PRESS_START_M = 60.0;
+/** 寄せ役は正面の選手を優先するが、いちばん早い選手よりこれ以上遅れるなら、いちばん早い選手にする（秒）。設計値 */
+export const CHALLENGE_SLACK_S = 1.0;
+/**
+ * DF ラインの段差（守備時・m）。🔑 設計値（出典なし）。ボール側のサイドバックは前へ出て、
+ * 逆サイドのサイドバックは中へ絞って下がり、逆サイド側の CB は下がってカバーする。
+ * オーナー指摘「DF ラインが綺麗すぎる」（2026-10-05・DF 4人の前後のばらつき 約1m）
+ */
+export const FB_STEP_UP_M = 4.0;
+export const FB_TUCK_IN_M = 6.0;
+export const FB_DROP_M = 2.0;
+export const CB_COVER_DROP_M = 2.0;
+/**
+ * シュートコースを塞ぐ（SHIELD）: 相手のボールが自陣ゴールから SHIELD_ZONE_M 以内なら、寄せ役以外で
+ * ボールより自陣ゴール側の近い SHIELD_COUNT 人が、ボールとゴールの中心を結ぶ線の上（ボールから SHIELD_DISTS_M）に
+ * 左右へ SHIELD_SPREAD_M ずらして立つ。🔑 設計値（出典なし）。
+ * 塞ぐ人がいないと、ゴール前 17m まで運んで空いたコースへ撃ち放題になった（1チーム 約48本・2026-10-05）
+ */
+export const SHIELD_ZONE_M = 25.0;
+export const SHIELD_COUNT = 2;
+export const SHIELD_DISTS_M: readonly number[] = [4.0, 7.0];
+export const SHIELD_SPREAD_M = 1.5;
 /** 構える（CONTAIN）とき、ボールから自陣ゴールの向きにどれだけ離れて立つか（m）。🔑 設計値（出典なし） */
 export const CONTAIN_DIST_M = 8.0;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
@@ -111,7 +133,8 @@ export const BOX_COUNT = 3;
  * @param holder 持っている人（いなければ null）
  */
 export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
-                         holder: Agent | null, restart: RestartState | null = null): TeamPlan {
+                         holder: Agent | null, restart: RestartState | null = null,
+                         lastTeam: 0 | 1 | null = null): TeamPlan {
   // 🔑 再開を待っている間は、再開するチームが「持っている」側、相手が「持たれている」側。
   //    蹴る人を持っている人とみなして、出し先の候補もその人から選ぶ
   if (restart !== null) holder = agents[restart.taker]!;
@@ -122,8 +145,14 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
   const ownGoalX = dir > 0 ? 0.0 : PITCH_LENGTH_M;
 
   // ---- 陣形（LOOSE のあいだは直前の形を保つ代わりに、守備の形で待つ）
-  const shape = SHAPE[phase === "ATTACK" ? "ATTACK" : "DEFEND"];
-  const offset = BLOCK_OFFSET_M[phase === "ATTACK" ? "ATTACK" : "DEFEND"];
+  // 🔑 陣形の形は「攻めているか」で決める。ボールが誰のものでもない間（パスが転がっている間も）は、
+  //    **最後に触ったチームが攻めている**とみなす。
+  //    🔴 以前は転がっている間は両チームとも守備の形で、味方がパスを出すたびにチーム全体が 10m ほど
+  //       下がり、受けるとまた出る往復になった。FW がボールを受けた場所の 8割以上が中盤になり、
+  //       FW どうしの短い横パスが 50分で 449本・FW が1人 約470回ボールを持った（2026-10-05）
+  const attacking = phase === "ATTACK" || (phase === "LOOSE" && lastTeam === team);
+  const shape = SHAPE[attacking ? "ATTACK" : "DEFEND"];
+  const offset = BLOCK_OFFSET_M[attacking ? "ATTACK" : "DEFEND"];
   const ballDepth = Math.abs(ball.x - ownGoalX);            // 自陣ゴールからボールまで
   const center = clamp(BLOCK_FOLLOW * ballDepth + offset,
                        shape.length / 2 + 6.0, PITCH_LENGTH_M - shape.length / 2 - 6.0);
@@ -146,6 +175,26 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       role: "BLOCK",
     });
   });
+  // 🔑 守備時の DF ラインの段差: 持ち場の横の並びで両端をサイドバック、内側を CB とみなす
+  if (!attacking) {
+    const dfs = field.filter((a) => a.role === "DF").sort((p, q) => p.homeY - q.homeY || p.id - q.id);
+    if (dfs.length >= 3) {
+      const ballSideLow = ball.y < PITCH_WIDTH_M / 2;            // ボールが y の小さい側にある
+      const near = ballSideLow ? dfs[0]! : dfs[dfs.length - 1]!;  // ボール側のサイドバック
+      const far = ballSideLow ? dfs[dfs.length - 1]! : dfs[0]!;   // 逆サイドのサイドバック
+      const cbs = dfs.slice(1, -1);
+      const farCb = ballSideLow ? cbs[cbs.length - 1] : cbs[0];   // 逆サイド側の CB
+      const o1 = orders.get(near.id)!;
+      o1.x = clamp(o1.x + dir * FB_STEP_UP_M, 1.0, PITCH_LENGTH_M - 1.0);
+      const o2 = orders.get(far.id)!;
+      o2.y = clamp(o2.y + (PITCH_WIDTH_M / 2 - o2.y > 0 ? 1 : -1) * FB_TUCK_IN_M, 1.0, PITCH_WIDTH_M - 1.0);
+      o2.x = clamp(o2.x - dir * FB_DROP_M, 1.0, PITCH_LENGTH_M - 1.0);
+      if (farCb !== undefined) {
+        const o3 = orders.get(farCb.id)!;
+        o3.x = clamp(o3.x - dir * CB_COVER_DROP_M, 1.0, PITCH_LENGTH_M - 1.0);
+      }
+    }
+  }
   for (const gk of mine.filter((a) => a.role === "GK")) {
     // ゴールの中心からボールへ向かう線の上
     const vx = ball.x - ownGoalX;
@@ -198,12 +247,20 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
   // ---- 役割
   const outlets: number[] = [];
   if (phase === "DEFEND" && restart === null) {
-    // いちばん早く寄せられる1人が寄せ、次の1人がその後ろ（ボールと自陣ゴールの間）を埋める
+    // 寄せる1人と、その後ろ（ボールと自陣ゴールの間）を埋める1人。
+    // 🔑 寄せるのは**ボールより自陣ゴール側にいる（正面から向き合える）選手**を優先する。後ろから追う選手は、
+    //    運んでくる相手を止められない（ゴール前 14m まで誰にも止められずに運ばれ、1試合 25〜39点・2026-10-05）。
+    //    ただし正面の選手が、いちばん早い選手より CHALLENGE_SLACK_S 以上遅れるなら、いちばん早い選手
+    const ballDepthNow = Math.abs(ball.x - ownGoalX);
     const ranked = field
-      .map((a) => ({ a, t: timeToReach(a.body, ball.x, ball.y, REACH_M) }))
+      .map((a) => ({ a, t: timeToReach(a.body, ball.x, ball.y, REACH_M),
+                     front: Math.abs(a.body.x - ownGoalX) <= ballDepthNow + 1.0 }))
       .sort((p, q) => p.t - q.t || p.a.id - q.a.id);
-    const press = ranked[0];
-    const cover = ranked[1];
+    const fastest = ranked[0];
+    const front = ranked.find((r) => r.front);
+    const press = front !== undefined && fastest !== undefined && front.t <= fastest.t + CHALLENGE_SLACK_S
+      ? front : fastest;
+    const cover = ranked.find((r) => r !== press && r.front) ?? ranked.find((r) => r !== press);
     const gx = ownGoalX - ball.x;
     const gy = PITCH_WIDTH_M / 2 - ball.y;
     const g = hypot(gx, gy) || 1.0;
@@ -224,18 +281,32 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         });
       }
     }
+    if (g <= SHIELD_ZONE_M) {
+      // 🔑 シュートコースを塞ぐ: ボールとゴールの中心を結ぶ線の上に、左右へ少しずらして立つ
+      const ux = gx / g;
+      const uy = gy / g;
+      const shields = ranked
+        .filter((r) => r !== press && r.front && orders.get(r.a.id)!.role === "BLOCK")
+        .slice(0, SHIELD_COUNT);
+      shields.forEach((r, i) => {
+        const d = SHIELD_DISTS_M[i] ?? SHIELD_DISTS_M[SHIELD_DISTS_M.length - 1]!;
+        const side = i % 2 === 0 ? 1.0 : -1.0;
+        orders.set(r.a.id, {
+          x: clamp(ball.x + ux * d - uy * side * SHIELD_SPREAD_M, 0.5, PITCH_LENGTH_M - 0.5),
+          y: clamp(ball.y + uy * d + ux * side * SHIELD_SPREAD_M, 0.5, PITCH_WIDTH_M - 0.5),
+          pace: "SPRINT", role: "SHIELD",
+        });
+      });
+    }
   } else if (phase === "ATTACK" && holder !== null) {
-    // 出し先の候補: 相手からの空き ＋ 前への進み、が大きい順に OUTLET_COUNT 人
+    // 出し先の候補: その味方の位置の価値（xT）× 空きによる割引、が大きい順に OUTLET_COUNT 人（value.ts）
     const opponents = agents.filter((a) => a.team !== team);
     const scored = field
       .filter((a) => a.id !== holder.id && orders.get(a.id)!.role !== "TAKER")
       .map((a) => {
         const d = hypot(a.body.x - ball.x, a.body.y - ball.y);
         if (d < 5.0 || d > 45.0) return null;
-        let open = Infinity;
-        for (const o of opponents) open = Math.min(open, hypot(o.body.x - a.body.x, o.body.y - a.body.y));
-        const progress = (a.body.x - ball.x) * dir;
-        return { a, score: Math.min(open, 15.0) + 0.3 * progress };
+        return { a, score: xtAt(team, a.body.x, a.body.y) * receiveFactor(openAt(opponents, a.body.x, a.body.y)) };
       })
       .filter((s): s is { a: Agent; score: number } => s !== null)
       .sort((p, q) => q.score - p.score || p.a.id - q.a.id);

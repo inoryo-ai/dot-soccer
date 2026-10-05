@@ -34,6 +34,7 @@ import type { KickKind } from "./execution.ts";
 import { HOLD_DEADBAND_M, effortOf, positionalPace } from "./pace.ts";
 import type { Pace } from "./pace.ts";
 import { CONTAIN_DIST_M, COVER_BEHIND_M } from "./team_ai.ts";
+import { openAt, receiveFactor, xtAt } from "./value.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
 export interface Agent {
@@ -401,19 +402,20 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
   });
   const nearGoal = Math.abs(goalLineX - me.body.x) <= NO_CARRY_NEAR_GOAL_M;
 
-  if (!pressed && !nearGoal) {
-    // 🔑 寄せられていなくても、裏へ走り込む味方へのスルーパスで大きく進めるなら出す
-    const through = bestPass(v, me, PASS_SPEEDS_MPS, null, true);
-    if (through !== null && through.kind === "PASS" && (through.expect.x - v.ball.x) * dir >= THROUGH_MIN_GAIN_M) {
-      return through;
-    }
-    return { kind: "CARRY", ...inside(me.body.x + dir * 10.0, me.body.y) };
+  // 🔑 物差しは「ボールの位置の価値」（value.ts・試合データから作った xT）。パスは受ける地点の価値
+  //    （張り付かれていれば割り引く）、運ぶのは運んだ先の価値で比べる
+  const best = bestPassValued(v, me);
+  if (!pressed) {
+    // 寄せられていない: いちばん良いパスと、運んだ先とで、価値の高いほう（スルーパスもこの比べ方に入る）
+    const target = nearGoal
+      ? inside(goalLineX - dir * 8.0, PITCH_WIDTH_M / 2 + (me.body.y - PITCH_WIDTH_M / 2) * 0.5)
+      : inside(me.body.x + dir * 10.0, me.body.y);
+    const carry = xtAt(me.team, target.x, target.y);
+    if (best !== null && best.value > carry) return best.plan;
+    return { kind: "CARRY", ...target };
   }
-
-  const pass = bestPass(v, me);
-  if (pass !== null) return pass;
-  // ゴール前で出せる先も撃てるコースも無ければ、ゴールの正面へ運んでコースを探す
-  if (nearGoal) return { kind: "CARRY", ...inside(goalLineX - dir * 11.0, PITCH_WIDTH_M / 2) };
+  // 寄せられている: 出せるパスのうち価値のいちばん高いもの（後ろへ戻すのも、価値が少し下がるだけ）
+  if (best !== null) return best.plan;
 
   // 出せる先が無い: いちばん近い相手から離れる向きへ運ぶ
   let nearest: Agent | null = null;
@@ -472,7 +474,16 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
  */
 function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MPS,
                   restartKind: RestartKind | null = null, runnersOnly = false): HolderPlan | null {
-  const dir = attackDir(me.team);
+  return bestPassValued(v, me, speeds, restartKind, runnersOnly)?.plan ?? null;
+}
+
+/**
+ * 出し先の候補へのパスのうち、「味方が先に触れる」もので、**受ける地点の価値**がいちばん高いもの。
+ * 価値 ＝ その地点のボールの位置の価値（xT）× 受けた瞬間の空きによる割引（value.ts）。
+ */
+function bestPassValued(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MPS,
+                        restartKind: RestartKind | null = null, runnersOnly = false):
+    { plan: HolderPlan; value: number } | null {
   const blocked = new Set<number>([me.id]);
   const keepers = keepersOf(v.agents);
   const oppReact = (i: number): number => (v.agents[i]!.team === me.team ? REACT_S : PASS_OPP_REACT_S);
@@ -482,6 +493,7 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
     : offsidePositions(me.team, v.ball.x, v.agents.map((a) => ({ team: a.team, x: a.body.x })));
   let best: HolderPlan | null = null;
   let bestGain = -Infinity;
+  const opponents = v.agents.filter((a) => a.team !== me.team);
   for (const id of v.plans[me.team].outlets) {
     const mate = v.agents[id]!;
     if (mate.id === me.id || offside.has(mate.id)) continue;
@@ -530,7 +542,8 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
       const box = v.plans[me.team].orders.get(touch.who)?.role === "BOX";
       if (touch.speed > CONTROL_MAX_MPS) continue;
       if (touch.z > (box ? HEAD_MAX_Z_M : CONTROL_MAX_Z_M)) continue;
-      const gain = (touch.x - v.ball.x) * dir;
+      const open = openAt(opponents, touch.x, touch.y, Math.min(touch.t, 1.0));
+      const gain = xtAt(me.team, touch.x, touch.y) * receiveFactor(open);
       if (gain > bestGain) {
         bestGain = gain;
         best = { kind: "PASS", to: touch.who, vx, vy, vz, expect: touch };
@@ -538,7 +551,7 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
     }
     }
   }
-  return best;
+  return best === null ? null : { plan: best, value: bestGain };
 }
 
 /**
@@ -573,6 +586,14 @@ export function decideOffBall(v: View): void {
       continue;
     }
     const order = v.plans[a.team].orders.get(a.id);
+    // 🔑 守備への戻り: 相手が持っていて、自分がボールより相手ゴール側に取り残されていれば全力で戻る。
+    //    相手のボールが自陣ゴールに近ければ、少なくともランニング。持ち場の調整（ジョグ）のままだと、
+    //    パスをカットされるたびにカウンターで簡単に点が入った（1試合 30〜39点・2026-10-05）
+    const urgent = recoveryPace(v, a);
+    if (urgent !== null && order !== undefined && (order.role === "BLOCK" || order.role === "OUTLET")) {
+      moveTo(a, order.x, order.y, urgent);
+      continue;
+    }
     if (order === undefined) {
       moveTo(a, a.homeX, a.homeY, "JOG");
     } else if (order.role === "RUNNER") {
@@ -626,6 +647,21 @@ export function decideOffBall(v: View): void {
       moveTo(a, order.x, order.y, order.pace);
     }
   }
+}
+
+/**
+ * 守備へ戻る急ぎ具合（急がなくてよければ null）。
+ * 🔑 相手がボールを持っていて、自分がボールより自陣ゴールから遠い（取り残された）なら SPRINT。
+ *    相手のボールが自陣ゴールから DANGER_ZONE_M 以内なら RUN。
+ */
+export const DANGER_ZONE_M = 35.0;
+function recoveryPace(v: View, a: Agent): Pace | null {
+  if (v.holder === null || v.holder.team === a.team) return null;
+  const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;
+  const ballDepth = Math.abs(v.ball.x - ownGoalX);
+  if (Math.abs(a.body.x - ownGoalX) > ballDepth + 2.0) return "SPRINT";
+  if (ballDepth <= DANGER_ZONE_M) return "RUN";
+  return null;
 }
 
 /**

@@ -189,16 +189,18 @@ describe("オフサイドライン（走り込みの基準）", () => {
 describe("裏への走り込み", () => {
   test("🔴 味方が蹴れる体勢になるまではラインの手前で待ち、なったら裏へ走り出す", () => {
     const sim = new MatchSim({
+      // 走り込み役には DF が張り付いている（足元へは出せない）。裏へ走り出してから出すしかない
       players: [spawn(0, 60.0, 34.0), spawn(0, 79.0, 34.0, "FW"), spawn(1, 104.0, 34.0, "GK"),
-                spawn(1, 80.0, 18.0, "DF"), spawn(1, 80.0, 50.0, "DF")],
+                spawn(1, 80.0, 18.0, "DF"), spawn(1, 80.0, 50.0, "DF"), spawn(1, 80.5, 33.5, "DF")],
       ball: { x: 60.5, y: 34.0 },
     });
     const runner = sim.agents[1]!;
     let waited = false;
     let ran = false;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 30 && sim.holder !== runner; i++) {
       sim.step();
-      if (sim.plans[0].orders.get(1)?.role !== "RUNNER" || sim.holder?.team !== 0) continue;
+      if (sim.plans[0].orders.get(1)?.role !== "RUNNER") continue;
+      // 🔑 走り出したそのコマにパスが出ることもあるので、持っている人がいるかどうかで絞らない
       if (runner.aimX < 80.0) waited = true;
       if (runner.aimX > 85.0) ran = true;
     }

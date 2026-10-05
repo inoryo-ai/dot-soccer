@@ -43,7 +43,8 @@ describe("走って着く時間の見積もり", () => {
 describe("パスは位置で決まる（サイコロなし）", () => {
   test("空いている味方へのパスは通る", () => {
     const sim = new MatchSim(passSetup(null));
-    sim.run(2.5);   // 受けた直後（そのあとは次のパスを出しにいく）
+    // パスが通った瞬間を見る（そのあとは次のパスを出しにいく）
+    for (let i = 0; i < 60 && sim.passes.length === 0; i++) sim.step();
     assert.equal(sim.passes[0]?.result, "COMPLETED");
     assert.equal(sim.holder?.team, 0);
   });

@@ -214,8 +214,8 @@ export class MatchSim {
     // ⓪ チームAI（持ち主が変わった・外へ出た直後はすぐ）
     if (this.teamEvent || this.tick % TEAM_DECIDE_EVERY_TICKS === 0) {
       this.teamEvent = false;
-      this.plans = [planTeam(0, this.agents, this.ball, this.holder, this.restart),
-                    planTeam(1, this.agents, this.ball, this.holder, this.restart)];
+      this.plans = [planTeam(0, this.agents, this.ball, this.holder, this.restart, this.lastTeam),
+                    planTeam(1, this.agents, this.ball, this.holder, this.restart, this.lastTeam)];
     }
     // ① 選手AI
     if (this.eventHappened || this.tick % DECIDE_EVERY_TICKS === 0) {
