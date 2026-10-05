@@ -57,6 +57,24 @@ export const CONTROL_TICKS = 10;
 export const KICKER_NO_TOUCH_TICKS = 3;
 /** 運んでいるとき、ボールは体のこれだけ前にある（m） */
 export const CARRY_AHEAD_M = 0.5;
+/** 体どうしが近づける距離（体の中心どうし・m）。🔑 設計値（出典なし。肩幅 約0.4m の2人分） */
+export const BODY_GAP_M = 0.8;
+/**
+ * ボールを守る: 相手がこの距離以内なら、ボールを相手から遠い側に、体から SHIELD_BALL_MIN〜MAX_M の所に置く
+ * （技術 100 で MIN、0 で MAX）。🔑 設計値（出典なし）
+ */
+export const SHIELD_TRIGGER_M = 3.0;
+/**
+ * タックル: 相手のボールがこの距離以内に来たら足を伸ばして奪いにいく（同じ選手は TACKLE_COOLDOWN_TICKS に1回）。
+ * 届かなければ TACKLE_RECOVER_TICKS のあいだ体勢を崩して止まる。🔑 設計値（出典なし）
+ * 🔴 ボールを体の陰に置く（carryBall）と、まっすぐ寄せるだけでは体に押し戻されて永遠に届かず、
+ *    奪われる回数が 1チーム 0〜0.5回になった（2026-10-05）
+ */
+export const TACKLE_ATTEMPT_M = 1.3;
+export const TACKLE_COOLDOWN_TICKS = 10;
+export const TACKLE_RECOVER_TICKS = 8;
+export const SHIELD_BALL_MIN_M = 0.3;
+export const SHIELD_BALL_MAX_M = 0.6;
 /**
  * 蹴る人がボールに着いてから蹴るまで（コマ）。
  * 🔑 設計値（出典なし）。確かめ方: 実プレー時間が 54〜59分（`docs/realism-reference.md`）に入るか。
@@ -68,6 +86,8 @@ export const RESTART_PREP_TICKS: Readonly<Record<RestartKind, number>> = {
 export const GK_HOLD_TICKS = 20;
 /** 止められない速さのボールに触れたとき、はね返る強さ（もとの速さに対する割合）。🔑 設計値（出典なし） */
 export const BLOCK_REBOUND = 0.3;
+/** 体をかすめた成分が残る割合（はね返り）。🔑 設計値（出典なし） */
+export const BLOCK_GLANCE = 0.7;
 /** GK が弾いたボールの速さ（もとの速さに対する割合）。横へそらす。🔑 設計値（出典なし） */
 export const PARRY_SPEED = 0.35;
 /**
@@ -98,6 +118,8 @@ export interface Spawn {
   technique?: number;
   /** スタミナ（0〜100）。省略すれば 50。体力の減りにくさ（stamina.ts） */
   stamina?: number;
+  /** フィジカル（0〜100）。省略すれば 50。体がぶつかったとき押されにくい */
+  physical?: number;
 }
 
 export interface Setup {
@@ -189,6 +211,8 @@ export class MatchSim {
   readonly passes: PassRecord[] = [];
   readonly shots: ShotRecord[] = [];
   readonly steals: [number, number] = [0, 0];
+  /** タックルを試みた回数（成功も失敗も） */
+  readonly tackles: [number, number] = [0, 0];
   /** ヘディングした回数 */
   readonly headers: [number, number] = [0, 0];
   plans: [TeamPlan, TeamPlan];
@@ -197,6 +221,9 @@ export class MatchSim {
   private settledAt = 0;
   /** 持っている人が蹴れるようになるコマ */
   private canKickAt = 0;
+  /** 選手ごとの、次にタックルできるコマ・体勢を崩して止まっている終わりのコマ */
+  private readonly tackleReadyAt: number[] = [];
+  private readonly stunnedUntil: number[] = [];
   private plan: HolderPlan | null = null;
   /** plan を決めたコマ */
   private planTick = -1;
@@ -218,12 +245,17 @@ export class MatchSim {
   constructor(setup: Setup) {
     this.agents = setup.players.map((p, id) => ({
       id, team: p.team, role: p.role, body: new Body(p.x, p.y, p.topSpeed), technique: p.technique ?? 50,
+      physical: p.physical ?? 50,
       homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5, stop: true,
     }));
     this.bodies = this.agents.map((a) => a.body);
     this.fatigue = setup.players.map((p) => new Fatigue(staminaEfficiency(p.stamina ?? 50)));
     this.tactics = setup.tactics ?? [STANDARD, STANDARD];
     this.noTouchUntil = this.agents.map(() => 0);
+    for (let i = 0; i < this.agents.length; i++) {
+      this.tackleReadyAt.push(0);
+      this.stunnedUntil.push(0);
+    }
     this.execution = new Execution(setup.seed ?? 1);
     this.ball = new Ball(setup.ball.x, setup.ball.y);
     this.ball.kick(setup.ball.vx ?? 0.0, setup.ball.vy ?? 0.0);
@@ -293,11 +325,14 @@ export class MatchSim {
     }
     // ③ 体（動いたぶん体力が減り、今の最高速に反映する）
     for (const a of this.agents) {
-      a.body.steerTo(a.aimX, a.aimY, a.effort, a.stop);
+      // タックルを外して体勢を崩している間は、その場に止まる
+      if (this.stunnedUntil[a.id]! > this.tick) a.body.steerTo(a.body.x, a.body.y, 0.2, true);
+      else a.body.steerTo(a.aimX, a.aimY, a.effort, a.stop);
       const f = this.fatigue[a.id]!;
       f.update(a.body.speed, 0.1);
       f.applyTo(a.body);
     }
+    this.separateBodies();
     if (this.restart !== null) {
       // 再開を待つ間、ボールは置いたまま
       this.tick += 1;
@@ -426,13 +461,68 @@ export class MatchSim {
     this.teamEvent = true;
   }
 
-  /** 運んでいる間、ボールは体の少し前（進んでいる向き。止まっていれば攻める向き） */
+  /**
+   * 体どうしは BODY_GAP_M より近づけない。重なったら押し戻す（フィジカルが強いほど押されにくい）。
+   * 🔑 これが無いと、ボールを体の陰に置いても、相手は持っている人の体をすり抜けてボールに届く。
+   *    並びの順に1回ずつ押し戻す（決定論）。
+   */
+  private separateBodies(): void {
+    const n = this.agents.length;
+    for (let i = 0; i < n; i++) {
+      const a = this.agents[i]!;
+      for (let j = i + 1; j < n; j++) {
+        const b = this.agents[j]!;
+        let dx = b.body.x - a.body.x;
+        let dy = b.body.y - a.body.y;
+        let d = hypot(dx, dy);
+        if (d >= BODY_GAP_M) continue;
+        if (d === 0.0) {
+          dx = 1.0;
+          dy = 0.0;
+          d = 1.0;
+        }
+        const overlap = BODY_GAP_M - hypot(b.body.x - a.body.x, b.body.y - a.body.y);
+        const pa = 0.5 + a.physical / 100.0;
+        const pb = 0.5 + b.physical / 100.0;
+        const moveA = overlap * pb / (pa + pb);   // 強い相手ほど自分が押される
+        const moveB = overlap * pa / (pa + pb);
+        a.body.x -= dx / d * moveA;
+        a.body.y -= dy / d * moveA;
+        b.body.x += dx / d * moveB;
+        b.body.y += dy / d * moveB;
+      }
+    }
+  }
+
+  /**
+   * 運んでいる間、ボールは体の少し前（進んでいる向き。止まっていれば攻める向き）。
+   * 🔑 ボールを守る: 相手が SHIELD_TRIGGER_M 以内にいれば、その相手から遠い側の足元に置く。
+   *    技術が高いほど体の近くに置ける（相手の足が届きにくい）。体の接触（separateBodies）があるので、
+   *    相手は体を回り込まないとボールに届かない。
+   *    🔴 これが無い頃は 1チーム 116〜147回ボールを奪われた（現実のタックル 約17回・2026-10-05）
+   */
   private carryBall(h: Agent): void {
     const s = h.body.speed;
-    const ux = s > 0.1 ? h.body.vx / s : (h.team === 0 ? 1.0 : -1.0);
-    const uy = s > 0.1 ? h.body.vy / s : 0.0;
-    this.ball.x = h.body.x + ux * CARRY_AHEAD_M;
-    this.ball.y = h.body.y + uy * CARRY_AHEAD_M;
+    let ux = s > 0.1 ? h.body.vx / s : (h.team === 0 ? 1.0 : -1.0);
+    let uy = s > 0.1 ? h.body.vy / s : 0.0;
+    let ahead = CARRY_AHEAD_M;
+    let near: Agent | null = null;
+    let nd = SHIELD_TRIGGER_M;
+    for (const o of this.agents) {
+      if (o.team === h.team) continue;
+      const d = hypot(o.body.x - h.body.x, o.body.y - h.body.y);
+      if (d < nd) {
+        nd = d;
+        near = o;
+      }
+    }
+    if (near !== null && nd > 0.0) {
+      ux = (h.body.x - near.body.x) / nd;
+      uy = (h.body.y - near.body.y) / nd;
+      ahead = SHIELD_BALL_MAX_M - (SHIELD_BALL_MAX_M - SHIELD_BALL_MIN_M) * h.technique / 100.0;
+    }
+    this.ball.x = h.body.x + ux * ahead;
+    this.ball.y = h.body.y + uy * ahead;
     this.ball.z = 0.0;
     this.ball.kick(h.body.vx, h.body.vy);
   }
@@ -464,12 +554,29 @@ export class MatchSim {
       if (this.tick < this.settledAt) return;
       // 🔑 GK が自分のペナルティエリアの中で手で持っているボールには挑めない（第12条）
       if (h.role === "GK" && inOwnPenaltyArea(h.team, this.ball.x, this.ball.y)) return;
-      // 相手の足がボールに届き、しかも持っている人よりボールに近ければ奪う
+      // 相手の足がボールに届き、しかも持っている人よりボールに近ければ奪う（ボールが体の陰に無いとき）
       const mine = hypot(this.ball.x - h.body.x, this.ball.y - h.body.y);
       const thief = this.closestWithin(REACH_M, (a) => a.team !== h.team);
       if (thief !== null && thief.d < mine) {
         this.steals[thief.a.team] += 1;
         this.take(thief.a);
+        return;
+      }
+      // 🔑 タックル: ボールまで TACKLE_ATTEMPT_M 以内の相手が足を伸ばす（伸ばせた分は実行のブレ・execution.ts）。
+      //    届けば奪い、届かなければ体勢を崩して止まる。並びの順に1人ずつ（決定論）
+      for (const a of this.agents) {
+        if (a.team === h.team || a.role === "GK" || this.stunnedUntil[a.id]! > this.tick
+            || this.tackleReadyAt[a.id]! > this.tick) continue;
+        const d = hypot(this.ball.x - a.body.x, this.ball.y - a.body.y);
+        if (d > TACKLE_ATTEMPT_M) continue;
+        this.tackleReadyAt[a.id] = this.tick + TACKLE_COOLDOWN_TICKS;
+        this.tackles[a.team] += 1;
+        if (d <= REACH_M + this.execution.tackleExtension(a.physical)) {
+          this.steals[a.team] += 1;
+          this.take(a);
+          return;
+        }
+        this.stunnedUntil[a.id] = this.tick + TACKLE_RECOVER_TICKS;
       }
       return;
     }
@@ -582,7 +689,25 @@ export class MatchSim {
       const side = this.ball.y >= PITCH_WIDTH_M / 2 ? 1.0 : -1.0;
       this.ball.kick(this.ball.vx * PARRY_SPEED * 0.5, side * v * PARRY_SPEED);
     } else {
-      this.ball.kick(-this.ball.vx * BLOCK_REBOUND, -this.ball.vy * BLOCK_REBOUND);
+      // 🔑 体のどこに当たったかで向きが変わる: 体の中心から当たった点への向き（n）の成分は BLOCK_REBOUND で
+      //    はね返し、体をかすめる成分は BLOCK_GLANCE で残す。真正面なら手前へ戻り、端なら横・斜め後ろへそれる。
+      //    🔴 いつも来た向きへまっすぐ戻すと、ブロックがゴールラインの外へ出ずコーナーキックが 0回だった（2026-10-05）
+      let nx = this.ball.x - a.body.x;
+      let ny = this.ball.y - a.body.y;
+      const nl = hypot(nx, ny);
+      if (nl > 0.0) {
+        nx /= nl;
+        ny /= nl;
+      } else {
+        const sp = hypot(this.ball.vx, this.ball.vy) || 1.0;
+        nx = -this.ball.vx / sp;
+        ny = -this.ball.vy / sp;
+      }
+      const vn = this.ball.vx * nx + this.ball.vy * ny;
+      const tx = this.ball.vx - vn * nx;
+      const ty = this.ball.vy - vn * ny;
+      const back = vn < 0.0 ? -vn * BLOCK_REBOUND : vn;
+      this.ball.kick(tx * BLOCK_GLANCE + nx * back, ty * BLOCK_GLANCE + ny * back, this.ball.vz * 0.5);
     }
     this.holder = null;
     this.plan = null;

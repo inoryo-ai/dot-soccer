@@ -62,6 +62,13 @@ export function bend(vx: number, vy: number, angle: number, scale = 1.0): [numbe
   return [(vx * c - vy * s) * scale, (vx * s + vy * c) * scale];
 }
 
+/**
+ * タックルで足を伸ばした分（m）。フィジカル 50 で平均 TACKLE_EXTEND_M、ブレ（標準偏差）は TACKLE_EXTEND_SD_M。
+ * 🔑 設計値（出典なし）。届くかどうかは、相手がボールを体の陰にどれだけ置いているかとの勝負（match.ts）
+ */
+export const TACKLE_EXTEND_M = 0.4;
+export const TACKLE_EXTEND_SD_M = 0.15;
+
 export class Execution {
   private readonly rng: PyRandom;
 
@@ -72,6 +79,12 @@ export class Execution {
   /** 標準正規分布の近似（一様乱数3つの和を、平均0・分散1にそろえる） */
   private normal(): number {
     return (this.rng.random() + this.rng.random() + this.rng.random() - 1.5) * 2.0;
+  }
+
+  /** タックルで足を伸ばせた分（m・0 以上）。フィジカルが強いほど長い */
+  tackleExtension(physical: number): number {
+    const mean = TACKLE_EXTEND_M * (0.7 + 0.6 * physical / 100.0);
+    return Math.max(0.0, mean + this.normal() * TACKLE_EXTEND_SD_M);
   }
 
   /**

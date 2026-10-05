@@ -44,8 +44,10 @@ export interface Agent {
   readonly team: 0 | 1;
   readonly role: Position;
   readonly body: Body;
-  /** 技術（0〜100）。蹴ったボールのブレの大きさに効く（execution.ts） */
+  /** 技術（0〜100）。蹴ったボールのブレの大きさ、ボールを守る近さに効く */
   readonly technique: number;
+  /** フィジカル（0〜100）。体がぶつかったとき押されにくい（match.ts） */
+  readonly physical: number;
   /** 持ち場（チームAI ができるまでは動かない） */
   readonly homeX: number;
   readonly homeY: number;
@@ -380,11 +382,9 @@ export function decideHeader(v: View, me: Agent): HolderPlan {
 export function decideHolder(v: View, me: Agent): HolderPlan {
   // 🔑 GK が手で持っているときは運ばない。出し先へ配る（第12条: 持てるのは6秒まで）
   if (me.role === "GK") return decideRestartKick(v, me, "FREE_KICK");
-  const shot = decideShot(v, me);
-  if (shot !== null) return shot;
-  const cross = decideCross(v, me);
-  if (cross !== null) return cross;
   const dir = attackDir(me.team);
+  const shot = bestShot(v, me);
+  const cross = decideCross(v, me);
   const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const opponents = v.agents.filter((a) => a.team !== me.team);
   // 寄せられているか: すぐそばにいる、または近くにいてこちらへ詰めてきている
@@ -403,6 +403,19 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
   // 🔑 物差しは「ボールの位置の価値」（value.ts・試合データから作った xT）。パスは受ける地点の価値
   //    （張り付かれていれば割り引く）、運ぶのは運んだ先の価値で比べる
   const best = bestPassValued(v, me);
+  // 🔑 撃つか: 入る見込みが戦術の閾値以上で、しかも**ほかの手（パス・運ぶ）の価値以上**なら撃つ。
+  //    xT は「この先点が入る見込み」なので、入る見込みと同じ単位で比べられる。ほかに良い手が無ければ、
+  //    DF がいても見込みの低いシュートを撃つ（その一部はブロックされる）。
+  //    🔴 「見込みが 8% 以上なら撃つ」だけだと、相手のいないコースが空いたときしか撃たず、
+  //       1本あたりの見込みが 約0.22（現実 約0.10）・ブロックがほぼ 0 になった（2026-10-05）
+  const carryTarget = Math.abs(goalLineX - me.body.x) <= NO_CARRY_NEAR_GOAL_M
+    ? inside(goalLineX - dir * 8.0, PITCH_WIDTH_M / 2 + (me.body.y - PITCH_WIDTH_M / 2) * 0.5)
+    : inside(me.body.x + dir * 10.0, me.body.y);
+  const alternative = Math.max(best?.value ?? 0.0, pressed ? 0.0 : xtAt(me.team, carryTarget.x, carryTarget.y));
+  if (shot !== null && shot.chance >= v.tactics[me.team].shootMinChance && shot.chance >= alternative) {
+    return { kind: "SHOOT", vx: shot.vx, vy: shot.vy, vz: shot.vz, chance: shot.chance };
+  }
+  if (cross !== null) return cross;
   if (!pressed) {
     // 寄せられていない: いちばん良いパスと、運んだ先とで、価値の高いほう（スルーパスもこの比べ方に入る）
     const target = nearGoal

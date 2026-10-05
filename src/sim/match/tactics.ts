@@ -38,7 +38,7 @@ export interface Tactics {
   outletCount: number;
   runnerCount: number;
   boxCount: number;
-  /** シュート・クロスを打つ見込みの閾値（0〜1） */
+  /** シュート・クロスを打つ見込みの閾値（0〜1）。シュートは、ほかの手（パス・運ぶ）の価値より見込みが高いことも要る */
   shootMinChance: number;
   crossMinChance: number;
 }
@@ -63,6 +63,6 @@ export const STANDARD: Tactics = {
   outletCount: 3,
   runnerCount: 2,
   boxCount: 3,
-  shootMinChance: 0.08,
+  shootMinChance: 0.12,
   crossMinChance: 0.2,
 };
