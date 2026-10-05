@@ -34,6 +34,8 @@ import type { Agent, HolderPlan, View } from "./player_ai.ts";
 import { CONTROL_MAX_MPS, CONTROL_MAX_Z_M, GK_ARM_M, GK_CATCH_MAX_MPS, GK_DIVE_M, PITCH_LENGTH_M, PITCH_WIDTH_M,
   REACH_M, canReachHeight, enterAt, gkReach } from "./reach.ts";
 import { TEAM_DECIDE_EVERY_TICKS, planTeam } from "./team_ai.ts";
+import { STANDARD } from "./tactics.ts";
+import type { Tactics } from "./tactics.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
 /** 選手AIが考え直す間隔（コマ＝0.1秒）。D-42: 0.2〜0.3秒ごと */
@@ -85,6 +87,8 @@ export interface Setup {
   kickoff?: 0 | 1;
   /** 実行のブレの種（省略すれば 1）。同じ種なら同じ試合になる */
   seed?: number;
+  /** チームごとの戦術（省略すれば両チームとも標準の型） */
+  tactics?: [Tactics, Tactics];
 }
 
 export interface PassRecord {
@@ -147,6 +151,12 @@ export class MatchSim {
   readonly bodies: Body[];
   /** 選手ごとの体力（agents と同じ並び） */
   readonly fatigue: Fatigue[];
+  /** チームごとの戦術 */
+  readonly tactics: [Tactics, Tactics];
+  /** チームごとの、最後にボールを失ったコマ（失っていなければ -∞） */
+  private readonly lostAt: [number, number] = [-Infinity, -Infinity];
+  /** 持っている人が受けたコマ */
+  private heldSince = 0;
   holder: Agent | null = null;
   /** 再開を待っているなら、その中身 */
   restart: RestartState | null = null;
@@ -189,6 +199,7 @@ export class MatchSim {
     }));
     this.bodies = this.agents.map((a) => a.body);
     this.fatigue = setup.players.map((p) => new Fatigue(staminaEfficiency(p.stamina ?? 50)));
+    this.tactics = setup.tactics ?? [STANDARD, STANDARD];
     this.noTouchUntil = this.agents.map(() => 0);
     this.execution = new Execution(setup.seed ?? 1);
     this.ball = new Ball(setup.ball.x, setup.ball.y);
@@ -220,8 +231,9 @@ export class MatchSim {
     // ⓪ チームAI（持ち主が変わった・外へ出た直後はすぐ）
     if (this.teamEvent || this.tick % TEAM_DECIDE_EVERY_TICKS === 0) {
       this.teamEvent = false;
-      this.plans = [planTeam(0, this.agents, this.ball, this.holder, this.restart, this.lastTeam),
-                    planTeam(1, this.agents, this.ball, this.holder, this.restart, this.lastTeam)];
+      this.plans = [0, 1].map((t) => planTeam(t as 0 | 1, this.agents, this.ball, this.holder, this.restart,
+                                               this.lastTeam, this.tactics[t]!,
+                                               (this.tick - this.lostAt[t]!) * 0.1)) as [TeamPlan, TeamPlan];
     }
     // ① 選手AI
     if (this.eventHappened || this.tick % DECIDE_EVERY_TICKS === 0) {
@@ -294,7 +306,8 @@ export class MatchSim {
     });
     return { agents: this.agents, bodies: this.bodies, ball: this.ball, holder: this.holder, blocked,
              plans: this.plans, restart: this.restart,
-             holderReady: this.holder !== null && this.tick >= this.settledAt };
+             holderReady: this.holder !== null && this.tick >= this.settledAt,
+             holderFor: (this.tick - this.heldSince) * 0.1, tactics: this.tactics };
   }
 
   // ------------------------------------------------------------ 再開
@@ -554,7 +567,10 @@ export class MatchSim {
   }
 
   private take(a: Agent): void {
+    // ボールの持ち主のチームが変わったなら、失った側の「失ったコマ」を記録する（奪い返しに使う）
+    if (this.lastTeam !== null && this.lastTeam !== a.team) this.lostAt[this.lastTeam] = this.tick;
     this.holder = a;
+    this.heldSince = this.tick;
     this.lastTeam = a.team;
     const caught = a.role === "GK" && inOwnPenaltyArea(a.team, this.ball.x, this.ball.y);
     this.settledAt = this.tick + (caught ? GK_HOLD_TICKS : FIRST_TOUCH_TICKS);

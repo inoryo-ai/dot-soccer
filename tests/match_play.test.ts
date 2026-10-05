@@ -13,7 +13,8 @@ import { MatchSim, standardSetup } from "../src/sim/match/match.ts";
 import type { Setup, Spawn } from "../src/sim/match/match.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, enterAt, firstTouch, timeToReach }
   from "../src/sim/match/reach.ts";
-import { OUTLET_COUNT, RUNNER_COUNT, planTeam } from "../src/sim/match/team_ai.ts";
+import { planTeam } from "../src/sim/match/team_ai.ts";
+import { STANDARD } from "../src/sim/match/tactics.ts";
 
 const spawn = (team: 0 | 1, x: number, y: number, role: Spawn["role"] = "MF"): Spawn =>
   ({ team, role, x, y, homeX: x, homeY: y, topSpeed: 8.8 });
@@ -134,7 +135,7 @@ describe("チームAI", () => {
     assert.ok(meanOf(20.0, 34.0)[0] < meanOf(80.0, 34.0)[0], "ボールが自陣に来ても下がらない");
   });
 
-  test("持っているとき、パスの出し先の候補は OUTLET_COUNT 人＋走り込み役まで。持っている人は候補にしか出さない", () => {
+  test("持っているとき、パスの出し先の候補は 決まった人数＋走り込み役・ゴール前へ入る役・戻す先まで", () => {
     const sim = new MatchSim(standardSetup());
     let checked = 0;
     for (let i = 0; i < 600; i++) {
@@ -142,7 +143,7 @@ describe("チームAI", () => {
       const outlets = sim.holder !== null ? [...sim.plans[sim.holder.team].outlets] : [];
       const passer = sim.holder;
       sim.step();
-      assert.ok(outlets.length <= OUTLET_COUNT + RUNNER_COUNT);
+      assert.ok(outlets.length <= STANDARD.outletCount + STANDARD.runnerCount + STANDARD.boxCount + 1);
       if (passer !== null && sim.holder === null && sim.passes.length === before && sim.ball.speed > 0) {
         // 蹴った直後: そのコマで使った候補に、蹴った向きの味方が入っている
         checked += 1;

@@ -35,6 +35,7 @@ import { HOLD_DEADBAND_M, effortOf, positionalPace } from "./pace.ts";
 import type { Pace } from "./pace.ts";
 import { CONTAIN_DIST_M, COVER_BEHIND_M } from "./team_ai.ts";
 import { openAt, receiveFactor, xtAt } from "./value.ts";
+import type { Tactics } from "./tactics.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
 export interface Agent {
@@ -70,6 +71,10 @@ export interface View {
   readonly restart: RestartState | null;
   /** 持っている人がボールを足元に収め、もう蹴れる（走り込みを始める合図） */
   readonly holderReady: boolean;
+  /** 持っている人が受けてからの秒数（受けた瞬間 0） */
+  readonly holderFor: number;
+  /** チームごとの戦術（tactics.ts） */
+  readonly tactics: readonly [Tactics, Tactics];
 }
 
 /** 攻める向き。チーム0 は x が増える向き */
@@ -103,14 +108,8 @@ export const SHOOT_RANGE_M = 30.0;
 export const SHOT_SPEEDS_MPS: readonly number[] = [28.0, 24.0];
 /** 狙う点の、ゴールの中心からの横のずれ（m）。ポストの内側（3.66m − ボールの半径）まで */
 export const SHOT_AIMS_M: readonly number[] = [GOAL_WIDTH_M / 2 - 0.4, 2.0, 0.0];
-/**
- * 入る見込みがこれ以上なら撃つ（0〜1）。
- * 🔑 設計値（出典なし）。オーナー指摘「必ず入る状況はあまりない。確信がなくても撃つ力が欲しい」（2026-10-05）。
- *    確かめ方: シュート数 12〜14本/チーム・決定率 約11%。2026-10-05 に 15%・8%・4% を各3試合で比べ、
- *    シュート数と得点が現実にいちばん近い 8% にした（1チーム 10.5〜13.5本・1〜3点）。
- *    ⚠️ 作る順 5 の特性「エゴイスト」の候補（低いほど撃つ）
- */
-export const SHOOT_MIN_CHANCE = 0.08;
+// 🔑 撃つ・クロスを上げる見込みの閾値は戦術（tactics.shootMinChance / crossMinChance）。オーナー指摘「必ず入る状況は
+//    あまりない。確信がなくても撃つ力が欲しい」（2026-10-05）。標準の型の 8% は 15%・8%・4% を各3試合で比べて決めた
 
 /** 走り込む先: オフサイドラインのこれだけ裏（m）。🔑 設計値（出典なし） */
 export const RUN_BEYOND_M = 12.0;
@@ -118,14 +117,8 @@ export const RUN_BEYOND_M = 12.0;
 export const HOLD_ONSIDE_M = 1.0;
 /** スルーパスで試す「走り込む人が何秒後に着く地点」（秒）。🔑 設計値（出典なし） */
 export const THROUGH_LEADS_S: readonly number[] = [1.5, 2.5, 3.5];
-/**
- * パスが安全かを読むとき、相手はこれだけで反応するとみなす（秒）。
- * 🔑 設計値（出典なし）。相手は反応している間も持ち場へ動き続けていて、それがボールの通り道の向きだと
- *    「反応の間は勢いのまま」より早く着く（2026-10-05、スルーパスをそばの DF にカットされた）。
- *    出し手は用心して、相手はほぼすぐ動けるものとして読む。味方の反応は REACT_S のまま。
- *    ⚠️ 作る順 5 の特性「リスクを取るか」の候補（大胆な出し手ほどこれを長く見る）。
- */
-export const PASS_OPP_REACT_S = 0.05;
+// 🔑 パスが安全かを読むとき、相手はどれだけで反応するとみなすか（tactics.passOppReactS）。相手は反応している間も
+//    持ち場へ動き続けていて、それがボールの通り道の向きだと「反応の間は勢いのまま」より早く着く（2026-10-05）
 /** 寄せられていなくても、スルーパスでこれだけ前へ進めるなら運ぶより出す（m）。🔑 設計値（出典なし） */
 export const THROUGH_MIN_GAIN_M = 10.0;
 
@@ -156,18 +149,10 @@ export type HolderPlan =
   | { kind: "CLEAR"; vx: number; vy: number; vz: number }
   | { kind: "CARRY"; x: number; y: number };
 
-/** 寄せ役は、ボールまでこの距離に入ってから全力で寄せる（それまではランニング・m）。🔑 設計値（出典なし） */
-export const CLOSE_DOWN_M = 10.0;
 /** ボールを取りに行く人が、ボールよりこれだけ早く着けるなら、その地点で止まって待つ（秒）。🔑 設計値（出典なし） */
 export const CHASE_WAIT_MARGIN_S = 0.5;
 /** 浮かせるパスを試す、出し先までの距離の下限（m）。🔑 設計値（出典なし） */
 export const LOFT_MIN_M = 20.0;
-/**
- * クロスが合う見込みがこれ以上なら蹴る（0〜1）。🔑 設計値（出典なし）。
- * 現実のクロスは 4〜5本に1本しか合わない（確かめ方: クロスの成功率 約22%）。確実なときだけ蹴ると、ほぼ蹴らない
- * （2026-10-05: 1試合でエリアに落ちたクロス 2本）。⚠️ 特性「リスクを取るか」の候補
- */
-export const CROSS_MIN_CHANCE = 0.2;
 /** クロスの見込みを出すとき、狙いの左右に試す向きの数と、その幅（ブレの標準偏差の何倍まで） */
 const CROSS_SCAN = 9;
 const CROSS_SCAN_SIGMAS = 2.5;
@@ -291,7 +276,7 @@ export function normalCdf(z: number): number {
  */
 export function decideShot(v: View, me: Agent): HolderPlan | null {
   const shot = bestShot(v, me);
-  return shot !== null && shot.chance >= SHOOT_MIN_CHANCE
+  return shot !== null && shot.chance >= v.tactics[me.team].shootMinChance
     ? { kind: "SHOOT", vx: shot.vx, vy: shot.vy, vz: shot.vz, chance: shot.chance }
     : null;
 }
@@ -341,7 +326,7 @@ export function decideCross(v: View, me: Agent): HolderPlan | null {
       }
     }
   }
-  return best !== null && bestChance >= CROSS_MIN_CHANCE ? best : null;
+  return best !== null && bestChance >= v.tactics[me.team].crossMinChance ? best : null;
 }
 
 /**
@@ -411,7 +396,8 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
       ? inside(goalLineX - dir * 8.0, PITCH_WIDTH_M / 2 + (me.body.y - PITCH_WIDTH_M / 2) * 0.5)
       : inside(me.body.x + dir * 10.0, me.body.y);
     const carry = xtAt(me.team, target.x, target.y);
-    if (best !== null && best.value > carry) return best.plan;
+    // 🔑 戦術の「受けてから出すまでの間」（tactics.holdBeforePassS）: 寄せられていなければ、その間は出さずに運ぶ
+    if (best !== null && best.value > carry && v.holderFor >= v.tactics[me.team].holdBeforePassS) return best.plan;
     return { kind: "CARRY", ...target };
   }
   // 寄せられている: 出せるパスのうち価値のいちばん高いもの（後ろへ戻すのも、価値が少し下がるだけ）
@@ -486,7 +472,8 @@ function bestPassValued(v: View, me: Agent, speeds: readonly number[] = PASS_SPE
     { plan: HolderPlan; value: number } | null {
   const blocked = new Set<number>([me.id]);
   const keepers = keepersOf(v.agents);
-  const oppReact = (i: number): number => (v.agents[i]!.team === me.team ? REACT_S : PASS_OPP_REACT_S);
+  const oppReactS = v.tactics[me.team].passOppReactS;
+  const oppReact = (i: number): number => (v.agents[i]!.team === me.team ? REACT_S : oppReactS);
   // 🔑 オフサイドの位置にいる味方には出さない（出し手には線が見えている）。直接受けてよい再開は別（第11条）
   const offside = exemptFromOffside(restartKind)
     ? new Set<number>()
@@ -613,11 +600,11 @@ export function decideOffBall(v: View): void {
         moveTo(a, line - dir * HOLD_ONSIDE_M, order.y, "JOG");
       }
     } else if (order.role === "PRESS") {
-      // 🔑 遠いうちはランニングで近づき、CLOSE_DOWN_M に入ってから全力で寄せる
+      // 🔑 遠いうちはランニングで近づき、tactics.closeDownM に入ってから全力で寄せる
       a.aimX = v.ball.x;
       a.aimY = v.ball.y;
       const d = hypot(v.ball.x - a.body.x, v.ball.y - a.body.y);
-      a.effort = effortOf(a.body, d > CLOSE_DOWN_M ? "RUN" : order.pace);
+      a.effort = effortOf(a.body, d > v.tactics[a.team].closeDownM ? "RUN" : order.pace);
     } else if (order.role === "CONTAIN") {
       // 構える: ボールと自陣ゴールの間、ボールから CONTAIN_DIST_M（チームAI と同じ）。ボールに合わせて動き直す
       const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;

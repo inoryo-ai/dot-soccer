@@ -12,6 +12,7 @@ import { MatchSim } from "../src/sim/match/match.ts";
 import type { Setup, Spawn } from "../src/sim/match/match.ts";
 import { decideShot } from "../src/sim/match/player_ai.ts";
 import { GK_ARM_M, GK_DIVE_M, REACT_S, gkReach } from "../src/sim/match/reach.ts";
+import { STANDARD } from "../src/sim/match/tactics.ts";
 
 const spawn = (team: 0 | 1, x: number, y: number, role: Spawn["role"] = "MF"): Spawn =>
   ({ team, role, x, y, homeX: x, homeY: y, topSpeed: 8.8 });
@@ -80,7 +81,8 @@ describe("撃つかの判断", () => {
       ball: { x: 93.0, y: 34.0 },
     });
     const plan = decideShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
-                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true }, sim.agents[0]!);
+                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true,
+                              holderFor: 1.0, tactics: [STANDARD, STANDARD] }, sim.agents[0]!);
     assert.equal(plan?.kind, "SHOOT");
     assert.ok(plan!.kind === "SHOOT" && plan.vy > 0.0, "GK のいない側（y が大きい側）へ撃っていない");
   });
@@ -88,7 +90,8 @@ describe("撃つかの判断", () => {
   test("遠すぎれば撃たない", () => {
     const sim = new MatchSim({ players: [spawn(0, 60.0, 34.0, "FW")], ball: { x: 61.0, y: 34.0 } });
     const plan = decideShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
-                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true }, sim.agents[0]!);
+                              blocked: new Set(), plans: sim.plans, restart: null, holderReady: true,
+                              holderFor: 1.0, tactics: [STANDARD, STANDARD] }, sim.agents[0]!);
     assert.equal(plan, null);
   });
 });
@@ -123,7 +126,8 @@ describe("実行のブレと入る見込み（D-42・2026-10-05 オーナー判�
         ball: { x: 92.0, y: 34.0 },
       });
       return bestShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
-                        blocked: new Set(), plans: sim.plans, restart: null, holderReady: true },
+                        blocked: new Set(), plans: sim.plans, restart: null, holderReady: true,
+                              holderFor: 1.0, tactics: [STANDARD, STANDARD] },
                       sim.agents[0]!)?.chance ?? 0.0;
     };
     const centered = chanceWith(34.0);

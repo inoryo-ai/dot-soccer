@@ -24,6 +24,8 @@ import { keepAway, offsideLineX } from "./laws.ts";
 import type { Pace } from "./pace.ts";
 import { openAt, receiveFactor, xtAt } from "./value.ts";
 import type { Restart } from "./laws.ts";
+import { STANDARD } from "./tactics.ts";
+import type { Tactics } from "./tactics.ts";
 
 export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
 
@@ -51,33 +53,28 @@ export interface TeamPlan {
 /** チームAIが考え直す間隔（コマ＝0.1秒）。D-42: 1秒ごと＋節目 */
 export const TEAM_DECIDE_EVERY_TICKS = 10;
 
-/**
- * 陣形の縦の長さ × 横幅（GK を除く10人・m）。
- * 守備: 32.5 × 37.3（Forcher ら 2024、ブンデスリーガ 153試合 TRACAB）
- * 攻撃: 36 × 41（Rico-González ら 2022 の総説の孫引き＝監視のみの値だが、指示値としては使う）
- */
-export const SHAPE: Readonly<Record<"ATTACK" | "DEFEND", { length: number; width: number }>> = {
-  ATTACK: { length: 36.0, width: 41.0 },
-  DEFEND: { length: 32.5, width: 37.3 },
-};
+// 🔑 陣形の縦の長さ・横幅、ラインの位置、寄せ・塞ぐ・走り込む人数などは、チームごとの戦術（tactics.ts）。
+//    標準の型の陣形は現実の実測から: 守備 32.5 × 37.3（Forcher ら 2024、ブンデスリーガ 153試合 TRACAB）、
+//    攻撃 36 × 41（Rico-González ら 2022 の総説の孫引き＝監視のみの値だが、指示値としては使う）
 
 /**
  * 🔑 ゴール前で陣形を詰める（どの戦術でも使う守り方の部品）。守るときの縦の長さと横幅を、ボールが自陣ゴールに
- *    近づくほど縮める。ボールが COMPACT_FROM_M 以上離れていれば SHAPE.DEFEND のまま、COMPACT_TO_M まで来たら
- *    COMPACT_SHAPE、その間は直線でつなぐ。
+ *    近づくほど縮める。ボールが COMPACT_FROM_M 以上離れていれば tactics.defendShape のまま、COMPACT_TO_M まで来たら
+ *    tactics.compactShape、その間は直線でつなぐ。
  *    詰めた形は、出典の実測（守備時 縦 32.5±8.7m × 横 37.3±4.8m・Forcher ら 2024）のばらつきの下側
  *    （平均 − 標準偏差1つ）。🔴 いつも平均の 32.5m のままだと、ゴール前で DF と MF の2列の間が空き、
  *    そこへ運び込まれて 1試合 20〜30点入った（2026-10-05）
  */
 export const COMPACT_FROM_M = 50.0;
 export const COMPACT_TO_M = 15.0;
-export const COMPACT_SHAPE = { length: 24.0, width: 32.0 } as const;
 
-export function compactDefence(ballDepth: number): { length: number; width: number } {
+export function compactDefence(ballDepth: number, tactics: Tactics = STANDARD): { length: number; width: number } {
   const t = clamp((ballDepth - COMPACT_TO_M) / (COMPACT_FROM_M - COMPACT_TO_M), 0.0, 1.0);
+  const far = tactics.defendShape;
+  const near = tactics.compactShape;
   return {
-    length: COMPACT_SHAPE.length + (SHAPE.DEFEND.length - COMPACT_SHAPE.length) * t,
-    width: COMPACT_SHAPE.width + (SHAPE.DEFEND.width - COMPACT_SHAPE.width) * t,
+    length: near.length + (far.length - near.length) * t,
+    width: near.width + (far.width - near.width) * t,
   };
 }
 
@@ -88,7 +85,6 @@ export function compactDefence(ballDepth: number): { length: number; width: numb
  *    守備: ボールが自陣ペナルティエリア（15m）→ 最終ライン 約6m、相手陣深く（85m）→ 約45m。
  */
 export const BLOCK_FOLLOW = 0.6;
-export const BLOCK_OFFSET_M: Readonly<Record<"ATTACK" | "DEFEND", number>> = { ATTACK: 22.0, DEFEND: 10.0 };
 /** 横はボールの側へこれだけ寄る（ボールのずれ × この値）。設計値（出典なし） */
 export const BLOCK_SLIDE = 0.5;
 /** GK が構える自陣ゴールからの距離の上限（旧エンジンの GK_DEPTH_M と同じ） */
@@ -99,15 +95,8 @@ export const GK_DEPTH_M = 5.0;
  *    すべて覆ってしまった（2026-10-05）。確かめ方: 枠内シュートのセーブ率・決定率 約11%
  */
 export const GK_DEPTH_RATIO = 0.12;
-/** パスの出し先の候補の数。設計値（出典なし） */
-export const OUTLET_COUNT = 3;
-/**
- * プレスのスイッチ: 相手のボールが自陣ゴールからこの距離より近ければ寄せる（PRESS）。
- * それより遠ければ（相手が自陣深くで持っている）寄せずに、ボールと自陣ゴールの間で構える（CONTAIN）。
- * 🔑 設計値（出典なし）。チームの戦術（ラインの高さ）にあたる。60m ＝ 相手陣に 7.5m 入ったあたり。
- *    オーナー指摘「プレスが早すぎる」（2026-10-05）。確かめ方: PPDA 8〜12・スプリント回数（`docs/realism-reference.md`）
- */
-export const PRESS_START_M = 60.0;
+// 🔑 プレスのスイッチ（tactics.pressStartM）: 相手のボールが自陣ゴールからこの距離より近ければ寄せる（PRESS）、
+//    遠ければ寄せずにボールと自陣ゴールの間で構える（CONTAIN）。オーナー指摘「プレスが早すぎる」（2026-10-05）
 /** 寄せ役は正面の選手を優先するが、いちばん早い選手よりこれ以上遅れるなら、いちばん早い選手にする（秒）。設計値 */
 export const CHALLENGE_SLACK_S = 1.0;
 /**
@@ -120,21 +109,17 @@ export const FB_TUCK_IN_M = 6.0;
 export const FB_DROP_M = 2.0;
 export const CB_COVER_DROP_M = 2.0;
 /**
- * シュートコースを塞ぐ（SHIELD）: 相手のボールが自陣ゴールから SHIELD_ZONE_M 以内なら、寄せ役以外で
- * ボールより自陣ゴール側の近い SHIELD_COUNT 人が、ボールとゴールの中心を結ぶ線の上（ボールから SHIELD_DISTS_M）に
+ * シュートコースを塞ぐ（SHIELD）: 相手のボールが自陣ゴールから tactics.shieldZoneM 以内なら、寄せ役以外で
+ * ボールより自陣ゴール側の近い tactics.shieldCount 人が、ボールとゴールの中心を結ぶ線の上（ボールから SHIELD_DISTS_M）に
  * 左右へ SHIELD_SPREAD_M ずらして立つ。🔑 設計値（出典なし）。
  * 塞ぐ人がいないと、ゴール前 17m まで運んで空いたコースへ撃ち放題になった（1チーム 約48本・2026-10-05）
  */
-export const SHIELD_ZONE_M = 25.0;
-export const SHIELD_COUNT = 2;
 export const SHIELD_DISTS_M: readonly number[] = [4.0, 7.0];
 export const SHIELD_SPREAD_M = 1.5;
 /** 構える（CONTAIN）とき、ボールから自陣ゴールの向きにどれだけ離れて立つか（m）。🔑 設計値（出典なし） */
 export const CONTAIN_DIST_M = 8.0;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
 export const COVER_BEHIND_M = 6.0;
-/** 裏へ走り込む役の人数（攻撃時）。🔑 設計値（出典なし） */
-export const RUNNER_COUNT = 2;
 /**
  * オフサイドラインからゴールラインまでがこれより狭ければ、裏へは走らない（m）。
  * 🔑 設計値（出典なし）。走り込む先が無い（相手が自陣ゴール前まで下がっている）とき
@@ -142,11 +127,10 @@ export const RUNNER_COUNT = 2;
 export const RUN_SPACE_MIN_M = 12.0;
 /**
  * クロスの場面: ボールが相手ゴールラインからこの距離以内で、かつ中央からこれだけ外（サイド）にあるとき、
- * ゴール前へ入る役（BOX）を BOX_COUNT 人まで出す。🔑 設計値（出典なし）
+ * ゴール前へ入る役（BOX）を tactics.boxCount 人まで出す。🔑 設計値（出典なし）
  */
 export const CROSS_ZONE_DEPTH_M = 30.0;
 export const CROSS_ZONE_WIDE_M = 12.0;
-export const BOX_COUNT = 3;
 
 /**
  * チームの計画を立てる。
@@ -154,7 +138,8 @@ export const BOX_COUNT = 3;
  */
 export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
                          holder: Agent | null, restart: RestartState | null = null,
-                         lastTeam: 0 | 1 | null = null): TeamPlan {
+                         lastTeam: 0 | 1 | null = null, tactics: Tactics = STANDARD,
+                         sinceLossS = Infinity): TeamPlan {
   // 🔑 再開を待っている間は、再開するチームが「持っている」側、相手が「持たれている」側。
   //    蹴る人を持っている人とみなして、出し先の候補もその人から選ぶ
   if (restart !== null) holder = agents[restart.taker]!;
@@ -171,9 +156,9 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
   //       下がり、受けるとまた出る往復になった。FW がボールを受けた場所の 8割以上が中盤になり、
   //       FW どうしの短い横パスが 50分で 449本・FW が1人 約470回ボールを持った（2026-10-05）
   const attacking = phase === "ATTACK" || (phase === "LOOSE" && lastTeam === team);
-  const offset = BLOCK_OFFSET_M[attacking ? "ATTACK" : "DEFEND"];
+  const offset = attacking ? tactics.attackOffsetM : tactics.defendOffsetM;
   const ballDepth = Math.abs(ball.x - ownGoalX);            // 自陣ゴールからボールまで
-  const shape = attacking ? SHAPE.ATTACK : compactDefence(ballDepth);
+  const shape = attacking ? tactics.attackShape : compactDefence(ballDepth, tactics);
   const center = clamp(BLOCK_FOLLOW * ballDepth + offset,
                        shape.length / 2 + 6.0, PITCH_LENGTH_M - shape.length / 2 - 6.0);
   const centerY = PITCH_WIDTH_M / 2 + (ball.y - PITCH_WIDTH_M / 2) * BLOCK_SLIDE;
@@ -284,7 +269,9 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     const gx = ownGoalX - ball.x;
     const gy = PITCH_WIDTH_M / 2 - ball.y;
     const g = hypot(gx, gy) || 1.0;
-    if (g > PRESS_START_M) {
+    // 🔑 ボールを失った直後の奪い返し（tactics.counterPressS 秒の間）はプレス開始位置に関係なく寄せる
+    const counterPress = sinceLossS < tactics.counterPressS;
+    if (g > tactics.pressStartM && !counterPress) {
       // 🔑 プレスのスイッチが入っていない: いちばん近い1人がボールと自陣ゴールの間に立ってコースを切る
       if (press !== undefined) {
         orders.set(press.a.id, { x: ball.x + gx / g * CONTAIN_DIST_M, y: ball.y + gy / g * CONTAIN_DIST_M,
@@ -301,13 +288,19 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         });
       }
     }
-    if (g <= SHIELD_ZONE_M) {
+    // 奪い返し: 寄せ役のほかに、次に早く着ける人も寄せる（合わせて tactics.counterPressPlayers 人）
+    if (counterPress) {
+      for (const r of ranked.filter((r) => r !== press).slice(0, Math.max(0, tactics.counterPressPlayers - 1))) {
+        orders.set(r.a.id, { x: ball.x, y: ball.y, pace: "SPRINT", role: "PRESS" });
+      }
+    }
+    if (g <= tactics.shieldZoneM) {
       // 🔑 シュートコースを塞ぐ: ボールとゴールの中心を結ぶ線の上に、左右へ少しずらして立つ
       const ux = gx / g;
       const uy = gy / g;
       const shields = ranked
         .filter((r) => r !== press && r.front && orders.get(r.a.id)!.role === "BLOCK")
-        .slice(0, SHIELD_COUNT);
+        .slice(0, tactics.shieldCount);
       shields.forEach((r, i) => {
         const d = SHIELD_DISTS_M[i] ?? SHIELD_DISTS_M[SHIELD_DISTS_M.length - 1]!;
         const side = i % 2 === 0 ? 1.0 : -1.0;
@@ -319,7 +312,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       });
     }
   } else if (phase === "ATTACK" && holder !== null) {
-    // 出し先の候補: その味方の位置の価値（xT）× 空きによる割引、が大きい順に OUTLET_COUNT 人（value.ts）
+    // 出し先の候補: その味方の位置の価値（xT）× 空きによる割引、が大きい順に tactics.outletCount 人（value.ts）
     const opponents = agents.filter((a) => a.team !== team);
     const scored = field
       .filter((a) => a.id !== holder.id && orders.get(a.id)!.role !== "TAKER")
@@ -330,11 +323,11 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       })
       .filter((s): s is { a: Agent; score: number } => s !== null)
       .sort((p, q) => q.score - p.score || p.a.id - q.a.id);
-    for (const s of scored.slice(0, OUTLET_COUNT)) {
+    for (const s of scored.slice(0, tactics.outletCount)) {
       outlets.push(s.a.id);
       orders.get(s.a.id)!.role = "OUTLET";
     }
-    // 🔑 裏へ走り込む役: 相手ゴールにいちばん近い前線の選手から RUNNER_COUNT 人。
+    // 🔑 裏へ走り込む役: 相手ゴールにいちばん近い前線の選手から tactics.runnerCount 人。
     //    裏にスペースがあるときだけ。行き先（ラインの裏）は選手AIが 0.2秒ごとにラインを見て出し直す
     if (restart === null) {
       const line = offsideLineX(team, ball.x, agents.map((a) => ({ team: a.team, x: a.body.x })));
@@ -345,7 +338,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         const pick = (role: Agent["role"]): Agent[] =>
           field.filter((a) => a.id !== holder.id && a.role === role).sort(nearer);
         const attackers = [...pick("FW"), ...pick("MF")];
-        for (const a of attackers.slice(0, RUNNER_COUNT)) {
+        for (const a of attackers.slice(0, tactics.runnerCount)) {
           const o = orders.get(a.id)!;
           o.role = "RUNNER";
           o.pace = "SPRINT";
@@ -368,7 +361,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       const taker = restart?.taker;
       const pick = (role: Agent["role"]): Agent[] =>
         field.filter((a) => a.id !== holder.id && a.id !== taker && a.role === role).sort(nearer);
-      const attackers = [...pick("FW"), ...pick("MF")].slice(0, BOX_COUNT);
+      const attackers = [...pick("FW"), ...pick("MF")].slice(0, tactics.boxCount);
       attackers.forEach((a, i) => {
         const o = orders.get(a.id)!;
         [o.x, o.y] = spots[i]!;
