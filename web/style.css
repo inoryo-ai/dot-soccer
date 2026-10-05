@@ -264,6 +264,8 @@ body {
 }
 
 .note { margin: calc(var(--px) * 2) 0; color: var(--ink-dim); font-size: .8rem; line-height: 1.7; }
+/* D-51: 新しい試合エンジンでまだ効かない設定の知らせ（オーナー判断「準備中と出す」）。注意書きと区別できるよう枠を付ける */
+.engine-note { padding: calc(var(--px) * 2) calc(var(--px) * 4); border-left: calc(var(--px) * 2) solid var(--ui-edge); background: var(--panel); color: var(--ink); }
 .warn { color: var(--danger-dark); font-weight: 700; }
 
 /* ------------------------------------------------------------- 押すもの */

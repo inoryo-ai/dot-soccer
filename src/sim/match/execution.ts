@@ -16,7 +16,7 @@
 
 import { PyRandom } from "../pyrandom.ts";
 import { PI, cos, sin } from "../detmath.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 
 /**
  * 全力のシュート（28 m/s）を、技術 50 の選手が寄せられずに蹴ったときの向きのブレ（標準偏差・度）。

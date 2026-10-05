@@ -12,7 +12,8 @@
  * 書いたうえで、ここで作り直す（D-18）。
  *
  * 🔑 乱数・数学・プリセット・特訓（random / math / presets / training）は規則と関係ないので
- *    作り直さない。こちらは今も Python 版との照合のまま。
+ *    作り直さない。こちらは今も Python 版との照合のまま。ただし特訓の正解データの**課題の判定**は
+ *    規則（課題の線・D-51）なので作り直す（`genTrainingIssues`）。
  * 🔑 試合の組み合わせ・シード・入力は、いまの正解データにあるものをそのまま使い、結果だけを
  *    書き直す（テストと同じ条件で作るため）。
  */
@@ -26,11 +27,13 @@ import { cmdMatch, cmdTrain, cmdTrainAll } from "../src/cli/main.ts";
 import { playGame } from "../src/cli/ui.ts";
 import { formatTable, runBatchSerial } from "../src/sim/batch.ts";
 import { Career } from "../src/sim/career.ts";
-import { play } from "../src/sim/engine.ts";
+// 🔑 D-51: ゲームの試合は新エンジン。正解データも新エンジンで固定する（旧エンジンは tests/sim.test.ts などが固定）
+import { playNew as play } from "../src/sim/match/game.ts";
 import { formatStandings } from "../src/sim/league.ts";
 import { Team } from "../src/sim/model.ts";
 import { buildPreset } from "../src/sim/presets.ts";
 import { cmpStr } from "../src/sim/pymath.ts";
+import { findIssues } from "../src/sim/training.ts";
 import { ROOT, golden, maskSaveDir } from "../tests/helpers.ts";
 
 const OUT = join(ROOT, "tests", "golden");
@@ -145,7 +148,19 @@ function genCli(): void {
   dump("cli", out);
 }
 
+/**
+ * 特訓の正解データのうち**課題の判定だけ**を、今の線で書き直す（入力のスタッツはそのまま）。
+ * 🔑 特訓の効き・タイプ判定は Python 版との照合のまま触らない。課題の線は D-51 で新エンジンに合わせて変えた規則なので、
+ *    規則を変えたら作り直すものに入れる
+ */
+function genTrainingIssues(): void {
+  const g = golden<any>("training");
+  g.issues = g.issues.map((i: any) => ({ stats: i.stats, issues: findIssues(i.stats) }));
+  dump("training", g);
+}
+
 console.log("正解データを書き直します:");
+genTrainingIssues();
 genMatches();
 genBatch();
 genCareer();

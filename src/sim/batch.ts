@@ -8,7 +8,9 @@
  */
 
 import * as C from "./constants.ts";
-import { play, seedFor } from "./engine.ts";
+import { seedFor } from "./engine.ts";
+// 🔑 D-51: 新エンジン（0.1秒・サイコロなし）
+import { playNew as play } from "./match/game.ts";
 import type { Team } from "./model.ts";
 import { PRESET_ORDER, buildPreset } from "./presets.ts";
 import { center, fmtF, fmtPct, ljust, rjust } from "./pymath.ts";

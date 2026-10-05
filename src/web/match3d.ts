@@ -33,7 +33,7 @@
  */
 
 import * as C from "../sim/constants.ts";
-import type { MatchEvent, Replay } from "../sim/engine.ts";
+import type { MatchEvent, Replay, ReplayAct } from "../sim/engine.ts";
 import * as Field from "./field3d.ts";
 import * as Stadium from "./stadium3d.ts";
 import * as Voxel from "./voxel.ts";
@@ -43,19 +43,10 @@ import type { Pose } from "./voxel.ts";
  * 再生データに**足してもよい**見た目の情報（新しい試合エンジン `src/sim/match/` が出す・D-42）。
  * 🔑 どちらも省略できる。旧エンジンのリプレイには無いので、無ければ今までどおり
  *    （ボールは地面・姿勢は速さとボールだけで選ぶ）。
+ * 🔑 D-51: 型は `Replay`（`src/sim/engine.ts`）が持つ。ゲームの試合（`src/sim/match/game.ts`）もここを通る
  */
-export interface ReplayExtras {
-  /** コマごとのボールの高さ（地面からの高さ × coord_scale） */
-  ballZ?: number[];
-  /** 誰が何コマ目に何をしたか。`who` は roster の番号 */
-  acts?: ReplayAct[];
-}
-
-export interface ReplayAct {
-  frame: number;
-  who: number;
-  act: "kick" | "header" | "tackle" | "down";
-}
+export type ReplayExtras = Pick<Replay, "ballZ" | "acts">;
+export type { ReplayAct };
 
 /**
  * 動作の見せ方（秒）。lead = 当たる瞬間より何秒前から動き出すか、len = 動作の長さ。

@@ -158,6 +158,15 @@ function call<T>(fn: () => T): T | null {
   }
 }
 
+/** `call` の待つ版（別スレッドで計算するもの）。失敗の出し方は `call` と同じ */
+async function callAsync<T>(fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    return call(() => { throw e; });
+  }
+}
+
 function minuteText(tick: number): string {
   const m = Math.floor(tick / 60);
   const s = tick % 60;
@@ -692,8 +701,18 @@ function startMatch(): void {
     return;
   }
 
-  const out = call(() => api.playNext());
-  if (!out) return;
+  /* 🔑 D-51: 試合は新エンジン（0.1秒・サイコロなし）。1節の4試合を別スレッドで並べて回すので、
+        数秒待つ。待っている間は「計算しています」を出し、二度押しを受け付けない */
+  if (!$("busyBox").hidden) return;
+  $("busyBox").hidden = false;
+  void callAsync(() => api.playNextAsync()).then((out) => {
+    $("busyBox").hidden = true;
+    if (out) beginMatch(out);
+  });
+}
+
+/** 計算が終わった試合を、試合の画面で始める */
+function beginMatch(out: PlayNextResult): void {
   matchData = out;
   view = out.view;
   saveGame(true);

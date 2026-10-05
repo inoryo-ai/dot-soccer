@@ -16,7 +16,7 @@
  */
 
 import { PI } from "../detmath.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 
 /** 1コマの長さ（秒）。1秒刻みではトラップ・寄せ・パスの途中といった1秒未満の出来事を表せない（D-42） */
 export const DT = 0.1;

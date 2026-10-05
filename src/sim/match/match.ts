@@ -20,7 +20,7 @@
  */
 
 import { FORMATIONS } from "../model.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { Ball } from "./ball.ts";
 import { Body, topSpeed } from "./body.ts";
 import { Execution } from "./execution.ts";
@@ -130,6 +130,8 @@ export interface Spawn {
   stamina?: number;
   /** フィジカル（0〜100）。省略すれば 50。体がぶつかったとき押されにくい */
   physical?: number;
+  /** キック（0〜100）。省略すれば 50。シュートの速さ */
+  kick?: number;
 }
 
 export interface Setup {
@@ -160,6 +162,10 @@ export interface PassRecord {
   lofted: boolean;
   /** ヘディングでのパスか */
   header: boolean;
+  /** 蹴った人（agents の番号） */
+  by: number;
+  /** 結果が決まったコマ */
+  tick: number;
 }
 
 export interface ShotRecord {
@@ -173,6 +179,10 @@ export interface ShotRecord {
   result: "GOAL" | "SAVED" | "BLOCKED" | "OFF_TARGET";
   /** ヘディングシュートか */
   header: boolean;
+  /** 撃った人（agents の番号） */
+  by: number;
+  /** 結果が決まったコマ */
+  tick: number;
 }
 
 interface InFlight {
@@ -269,7 +279,7 @@ export class MatchSim {
   constructor(setup: Setup) {
     this.agents = setup.players.map((p, id) => ({
       id, team: p.team, role: p.role, body: new Body(p.x, p.y, p.topSpeed), technique: p.technique ?? 50,
-      physical: p.physical ?? 50,
+      physical: p.physical ?? 50, kick: p.kick ?? 50,
       homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5, stop: true,
     }));
     this.bodies = this.agents.map((a) => a.body);
@@ -800,14 +810,15 @@ export class MatchSim {
     const f = this.inFlight!;
     const gx = f.team === 0 ? PITCH_LENGTH_M : 0.0;
     this.shots.push({ team: f.team, x: f.x, y: f.y, distance: hypot(gx - f.x, PITCH_WIDTH_M / 2 - f.y),
-                      chance: f.chance, result, header: f.header });
+                      chance: f.chance, result, header: f.header, by: f.from.id, tick: this.tick });
     this.inFlight = null;
   }
 
   private closePass(result: PassRecord["result"], x: number, y: number): void {
     const f = this.inFlight!;
     this.passes.push({ team: f.team, fromX: f.x, fromY: f.y, toX: x, toY: y, result,
-                       expectedTeam: f.expectedTeam, restart: f.restart, lofted: f.lofted, header: f.header });
+                       expectedTeam: f.expectedTeam, restart: f.restart, lofted: f.lofted, header: f.header,
+                       by: f.from.id, tick: this.tick });
     this.inFlight = null;
   }
 }

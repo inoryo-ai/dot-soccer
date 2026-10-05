@@ -15,7 +15,8 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
 import * as C from "../sim/constants.ts";
-import { play } from "../sim/engine.ts";
+// 🔑 D-51: 新エンジン（0.1秒・サイコロなし）
+import { playNew as play } from "../sim/match/game.ts";
 import type { MatchStatsOut } from "../sim/engine.ts";
 import { formatTable } from "../sim/batch.ts";
 import { Player } from "../sim/model.ts";
@@ -38,7 +39,7 @@ function fmtStats(name: string, s: MatchStatsOut): string {
     + ` (${f(s.pass_success_pct)}%)\n`
     + `    ボール奪取 ${s.tackles_won}  奪い合い ${s.duels}回中 ${s.duels_lost}敗`
     + `  裏を取られた ${s.beaten_behind}\n`
-    + `    走行距離 ${f(s.distance_km)}km  スタミナ20%未満になった選手 `
+    + `    走行距離 ${f(s.distance_km)}km  持久力が大きく落ちた選手 `
     + `${s.stamina_low_players}人`);
 }
 

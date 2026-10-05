@@ -104,14 +104,18 @@ export const TRAINING_MAX_CARDS_PER_MATCH = 8;
 
 // ------------------------------------------------- 課題の「多い・少ない」基準値
 // すべて1試合（チーム単位）の集計に対する閾値。
-export const ISSUE_STAMINA_LOW_RATIO = 0.20;      // ランニング: 現在スタミナが最大の20%未満になった選手がいた
-export const ISSUE_DUEL_LOSS_RATE = 0.50;         // マンツーマン: 奪い合いの敗率がこれ以上
+export const ISSUE_STAMINA_LOW_RATIO = 0.20;      // ランニング: 現在スタミナが最大の20%未満になった選手がいた（旧エンジン）
+// 🔑 D-51: 新エンジンの「課題」の線。旧エンジンの線のままだと ランニング・マンツーマン・ダッシュ・パス の4枚が
+//    **一度も出なかった**（育成の手段が消える）。新エンジンの分布（プリセット総当たり2シード）で、
+//    それぞれおよそ2〜4割の試合で出る線に合わせ直した。旧エンジンだけが使う線は旧エンジンの値のまま
+export const ISSUE_ENDURANCE_LOW = 0.54;          // ランニング（新エンジン）: 持久力がこれを切った選手がいた（90分後 0.52〜0.82・スタミナが低いほど下がる）
+export const ISSUE_DUEL_LOSS_RATE = 0.10;         // マンツーマン: 奪い合いの敗率がこれ以上（D-51: 0.50 → 0.10。新エンジンは 0.04〜0.17）
 export const ISSUE_DUEL_MIN_SAMPLES = 10;         // 敗率を見るのに必要な最低試行数（少数で判定しない）
-export const ISSUE_TACKLES_WON_MIN = 12;          // プレス: ボール奪取がこれ未満
-export const ISSUE_PASS_SUCCESS_RATE = 0.70;      // パス: 成功率がこれ未満
+export const ISSUE_TACKLES_WON_MIN = 14;          // プレス: ボール奪取がこれ未満（D-51: 12 → 14）
+export const ISSUE_PASS_SUCCESS_RATE = 0.79;      // パス: 成功率がこれ未満（D-51: 0.70 → 0.79。新エンジンは 78〜82%・現実 78〜81%）
 export const ISSUE_PASS_MIN_SAMPLES = 20;
-export const ISSUE_BEATEN_BEHIND_MAX = 6;         // ダッシュ: 裏を取られた・スピード負けがこれを超えた
-export const ISSUE_SHOT_CONVERSION = 0.10;        // シュート: 決定率がこれ未満
+export const ISSUE_BEATEN_BEHIND_MAX = 1;         // ダッシュ: 裏を取られた・スピード負けがこれを超えた（D-51: 6 → 1。新エンジンは 0〜2）
+export const ISSUE_SHOT_CONVERSION = 0.07;        // シュート: 決定率がこれ未満（D-51: 0.10 → 0.07）
 export const ISSUE_SHOT_MIN_SAMPLES = 6;
 export const ISSUE_SHOTS_AGAINST_MAX = 14;        // ゾーン: 被シュートがこれを超えた
 

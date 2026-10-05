@@ -54,10 +54,10 @@ export const EXPECTED_JS = [
   "sim/match/aerial.js", "sim/match/ball.js", "sim/match/body.js", "sim/match/execution.js",
   "sim/match/laws.js", "sim/match/match.js", "sim/match/pace.js", "sim/match/player_ai.js",
   "sim/match/reach.js", "sim/match/stamina.js", "sim/match/tactics.js", "sim/match/team_ai.js",
-  "sim/match/value.js", "sim/match/xt_grid.js",
+  "sim/match/game.js", "sim/match/num.js", "sim/match/value.js", "sim/match/xt_grid.js",
   "web/api.js", "web/bg.js", "web/bgcheck.js", "web/board.js", "web/ceremony.js",
   "web/face.js",
-  "web/faces.js", "web/fx.js", "web/lab.js", "web/main.js",
+  "web/faces.js", "web/fx.js", "web/lab.js", "web/main.js", "web/match_pool.js", "web/match_worker.js",
   "web/engine3d.js", "web/field3d.js", "web/match3d.js", "web/pitch3d.js",
   "web/stadium3d.js",
   "web/voxel.js",
@@ -177,7 +177,11 @@ export function build(log: (line: string) => void = (l) => console.log(l)): numb
             しかも画面は普通に立ち上がるので、差し替えたつもりで気づけない
             （`model.py` だけ古い写しが読まれた 2026-09-30 と同じ踏み方）。 */
       .replace(/"(bg\/[\w./-]+\.(?:png|jpg|jpeg|webp|avif))"/g,
-               (_m, path: string) => `"${path}?v=${stamp}"`);
+               (_m, path: string) => `"${path}?v=${stamp}"`)
+      /* 🔴 試合を回す別スレッド（`new Worker(new URL("./match_worker.js", import.meta.url))`・D-51）にも付ける。
+            付けないと、エンジンを直したのに**古いエンジンの写しで試合を回し続ける** */
+      .replace(/(\bnew URL\(\s*)"(\.{1,2}\/[\w./-]+\.js)"/g,
+               (_m, head: string, path: string) => `${head}"${path}?v=${stamp}"`);
     writeFileSync(p, src, "utf8");
   }
   writeFileSync(join(DIST, "manifest.json"),

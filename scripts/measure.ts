@@ -23,7 +23,8 @@ import { fileURLToPath } from "node:url";
 
 import { combinations } from "../src/sim/batch.ts";
 import * as C from "../src/sim/constants.ts";
-import { play } from "../src/sim/engine.ts";
+// 🔑 D-51: ゲームの試合（新エンジン）を測る
+import { playNew as play } from "../src/sim/match/game.ts";
 import type { MatchResult, MatchStatsOut } from "../src/sim/engine.ts";
 import { PRESET_ORDER, buildPreset } from "../src/sim/presets.ts";
 import { fmtF, hypot, ljust, mean, pyFloatStr, rjust } from "../src/sim/pymath.ts";

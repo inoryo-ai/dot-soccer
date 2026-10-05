@@ -200,6 +200,9 @@
         <h2 class="panel-title">特訓 — <span id="trainWho">—</span></h2>
         <div id="trainCards" class="chip-row"></div>
         <p id="trainHint" class="note"></p>
+        <p class="note engine-note">🛠 新しい試合エンジンで試合に効くのは<strong>能力（キック・スピード・スタミナ・テクニック・フィジカル）</strong>です。
+          隠しパラメーター（プレス・サポート・オーバーラップ・裏抜け・ゴール前・マンツーマン）は<strong>準備中</strong>
+          （上がった値は残り、対応したら効くようになります）。</p>
         <div class="actions">
           <button id="trainBtn" class="btn btn-primary">特訓する</button>
           <button id="trainCancel" class="btn">やめる</button>
@@ -212,6 +215,8 @@
     <div class="tab-page" data-page="tactics">
       <div class="panel">
         <h2 class="panel-title">基本戦術</h2>
+        <p class="note engine-note">🛠 新しい試合エンジン（0.1秒）で効くのは<strong>フォーメーションと配置</strong>です。
+          姿勢・ラインの高さ・守備の幅は<strong>準備中</strong>（設定は保存され、対応したら効くようになります）。</p>
         <div class="field-row">
           <div class="field">
             <label for="tFormation">フォーメーション</label>
@@ -247,10 +252,12 @@
 
       <div class="panel">
         <h2 class="panel-title">監督の性格</h2>
+        <p class="note engine-note">🛠 新しい試合エンジンでは<strong>準備中</strong>です（交代もまだありません）。設定は保存されます。</p>
         <div id="managerRows"></div>
       </div>
       <div class="panel">
         <h2 class="panel-title">チーム方針</h2>
+        <p class="note engine-note">🛠 新しい試合エンジンでは<strong>準備中</strong>です。方針は保存され、対応したら試合で発動します。</p>
         <p class="note">上から順に判定し、<strong>最初に当てはまった1つだけ</strong>実行します（最大<span id="policyMax">5</span>個）。</p>
         <div id="policyRows"></div>
         <div class="actions">
@@ -360,6 +367,12 @@
   <strong id="errorTitle">うまくいきませんでした</strong>
   <p id="errorMsg"></p>
   <button id="errorClose" class="btn">閉じる</button>
+</div>
+
+<!-- 試合の計算を待つあいだ（D-51: 新エンジンは1節に数秒かかる）。閉じるボタンは無い（終われば消える） -->
+<div id="busyBox" class="error-box" role="status" aria-live="polite" hidden>
+  <strong>試合を計算しています…</strong>
+  <p>0.1秒ごとに22人とボールを動かしています。数秒お待ちください。</p>
 </div>
 
 <!-- 飛ぶ数字・知らせの帯・散る粒を置く層。`src/web/fx.ts` が中身を作る。

@@ -19,7 +19,7 @@
 
 import { PI, atan2, cos, exp, sin } from "../detmath.ts";
 import type { Position } from "../model.ts";
-import { hypot } from "../pymath.ts";
+import { hypot } from "./num.ts";
 import { Ball } from "./ball.ts";
 import { ACCEL_TAU_S } from "./body.ts";
 import type { Body } from "./body.ts";
@@ -48,6 +48,8 @@ export interface Agent {
   readonly technique: number;
   /** フィジカル（0〜100）。体がぶつかったとき押されにくい（match.ts） */
   readonly physical: number;
+  /** キック（0〜100）。シュートの速さに効く（50 で `SHOT_SPEEDS_MPS` そのもの・ゲームにつなぐとき足した） */
+  readonly kick: number;
   /** 持ち場（チームAI ができるまでは動かない） */
   readonly homeX: number;
   readonly homeY: number;
@@ -113,6 +115,13 @@ export const CARRY_PACE: Pace = "RUN";
 export const SHOOT_RANGE_M = 30.0;
 /** シュートの速さ（m/s）。全力のインステップキック 28.0 m/s（Nunome ら 2002）と、少し抑えた速さ */
 export const SHOT_SPEEDS_MPS: readonly number[] = [28.0, 24.0];
+/** キック 0〜100 で、シュートの速さが ±この割合だけ変わる（キック 50 で変わらない） */
+export const KICK_SPEED_SPREAD = 0.15;
+/** その人が撃てるシュートの速さ（キックで変わる） */
+export function shotSpeedsFor(me: Agent): number[] {
+  const f = 1.0 + KICK_SPEED_SPREAD * (me.kick - 50.0) / 50.0;
+  return SHOT_SPEEDS_MPS.map((s) => s * f);
+}
 /** 狙う点の、ゴールの中心からの横のずれ（m）。ポストの内側（3.66m − ボールの半径）まで */
 export const SHOT_AIMS_M: readonly number[] = [GOAL_WIDTH_M / 2 - 0.4, 2.0, 0.0];
 // 🔑 撃つ・クロスを上げる見込みの閾値は戦術（tactics.shootMinChance / crossMinChance）。オーナー指摘「必ず入る状況は
@@ -213,7 +222,7 @@ export interface ShotChoice {
  *    正規分布の重みをかけて足したもの。乱数は引かない（同じ盤面なら同じ見込み）。
  * 🔑 同じ見込みなら、先に試した（速い・番号の小さい向き）もの（決定論）。
  */
-export function bestShot(v: View, me: Agent, speeds: readonly number[] = SHOT_SPEEDS_MPS,
+export function bestShot(v: View, me: Agent, speeds: readonly number[] = shotSpeedsFor(me),
                          kind: KickKind = "SHOT", vz = 0.0, range = SHOOT_RANGE_M): ShotChoice | null {
   const dir = attackDir(me.team);
   const gx = dir > 0 ? PITCH_LENGTH_M : 0.0;

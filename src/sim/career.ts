@@ -12,8 +12,10 @@
 
 import { RuntimeError, ValueError } from "./errors.ts";
 import * as C from "./constants.ts";
-import { play, seedFor } from "./engine.ts";
+import { seedFor } from "./engine.ts";
 import type { MatchResult } from "./engine.ts";
+// 🔑 D-51: 試合は新エンジン（0.1秒・サイコロなし）。旧エンジン（engine.ts の play）はゲームから外した
+import { playNew as play } from "./match/game.ts";
 import { buildSchedule, standings } from "./league.ts";
 import type { Fixture, StandingsRow, StoredMatchResult } from "./league.ts";
 import { Team } from "./model.ts";
@@ -49,6 +51,15 @@ export interface MyMatch {
   record: StoredMatchResult;
   my_index: number;
   awarded: string[];
+}
+
+/** 1節の試合1つぶんの仕事（画面はこれを別スレッドで並べて回す・D-51） */
+export interface RoundJob {
+  home: string;
+  away: string;
+  seed: number;
+  /** 自チームの試合（出来事とリプレイを残す） */
+  mine: boolean;
 }
 
 export interface RoundOutcome {
@@ -180,14 +191,34 @@ export class Career {
    * 🔴 記録の有無で試合結果は変わらない（`tests/replay.test.ts`）。
    */
   playRound(withReplay = false): RoundOutcome {
+    const jobs = this.roundJobs();
+    return this.applyRound(jobs.map((j) =>
+      play(this.team(j.home), this.team(j.away), j.seed, j.mine, withReplay && j.mine)));
+  }
+
+  /**
+   * 次の節の試合の並び（まだ回さない）。🔑 新エンジンは1試合に数秒かかるので、画面はこれを
+   * 別スレッドで並べて回し、結果を `applyRound` に渡す（D-51）。並びと種は `playRound` と同じ
+   */
+  roundJobs(): RoundJob[] {
     if (this.seasonFinished) throw new RuntimeError("シーズンは終わっている（finishSeason を呼ぶ）");
-    const fixtures = this.nextFixtures();
+    return this.nextFixtures().map(([home, away], i) => ({
+      home, away, seed: this.matchSeed(this.round_index, i),
+      mine: home === this.user_team || away === this.user_team,
+    }));
+  }
+
+  /** `roundJobs` の順に並んだ結果で、節を進める（結果・カード・順位） */
+  applyRound(results: readonly MatchResult[]): RoundOutcome {
+    const jobs = this.roundJobs();
+    if (results.length !== jobs.length) throw new ValueError(`結果の数が試合の数と違う: ${results.length} / ${jobs.length}`);
     let myResult: MyMatch | null = null;
     const others: StoredMatchResult[] = [];
-    for (const [i, [home, away]] of fixtures.entries()) {
-      const seed = this.matchSeed(this.round_index, i);
-      const mine = home === this.user_team || away === this.user_team;
-      const res = play(this.team(home), this.team(away), seed, mine, withReplay && mine);
+    for (const [i, { home, away, mine }] of jobs.entries()) {
+      const res = results[i]!;
+      if (res.teams[0] !== home || res.teams[1] !== away) {
+        throw new ValueError(`${i}番目の結果が別の試合: ${res.teams.join(" - ")}（予定 ${home} - ${away}）`);
+      }
       const record: StoredMatchResult = {
         home, away, home_goals: res.score[0], away_goals: res.score[1],
         round: this.round_index + 1,
