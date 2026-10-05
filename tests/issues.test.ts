@@ -15,6 +15,11 @@ import { playNew } from "../src/sim/match/game.ts";
 import { PRESET_ORDER, buildPreset } from "../src/sim/presets.ts";
 import { CARDS, findIssues } from "../src/sim/training.ts";
 
+/** 課題から出るカード（`training.ts` の `findIssues` が見る7つ） */
+const ISSUE_KEYS: Record<string, true> = {
+  running: true, man_mark: true, press: true, pass: true, dash: true, shoot: true, zone: true,
+};
+
 describe("🔴 育成の課題はどれも出る（エンジンを替えたら線が古くなる・D-51）", () => {
   const counts = new Map<string, number>();
   let n = 0;
@@ -26,7 +31,7 @@ describe("🔴 育成の課題はどれも出る（エンジンを替えたら�
     }
   }
   // 課題から出るカード＝findIssues が返しうる鍵（特訓カードのうち課題に結びつくもの）
-  const keys = Object.keys(CARDS).filter((k) => counts.has(k) || k in ISSUE_KEYS);
+  const keys = Object.keys(ISSUE_KEYS);
 
   test("どの課題も少なくとも1回は出る", () => {
     for (const k of Object.keys(ISSUE_KEYS)) {
@@ -47,7 +52,3 @@ describe("🔴 育成の課題はどれも出る（エンジンを替えたら�
   });
 });
 
-/** 課題から出るカード（`training.ts` の `findIssues` が見る7つ） */
-const ISSUE_KEYS: Record<string, true> = {
-  running: true, man_mark: true, press: true, pass: true, dash: true, shoot: true, zone: true,
-};
