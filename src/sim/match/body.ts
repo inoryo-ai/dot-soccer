@@ -71,8 +71,10 @@ export class Body {
    *
    * 🔑 **止まれる速さより速くは走らない**（残りの距離 d で止まりきれる速さ √(2 × 最大減速 × d)）。
    *    これで目標を行き過ぎず、その場でぴたりと止まる。
+   * 🔑 stop=false は「走り抜ける」。転がるボールを取りに行くときは、着く手前で緩めると
+   *    reach.ts の見積もり（全力で走り込む）より遅れて、取れるはずのボールを取り損ねる。
    */
-  steerTo(tx: number, ty: number, effort = 1.0): void {
+  steerTo(tx: number, ty: number, effort = 1.0, stop = true): void {
     const dx = tx - this.x;
     const dy = ty - this.y;
     const dist = hypot(dx, dy);
@@ -88,7 +90,19 @@ export class Body {
     const aDt = MAX_DECEL_MPS2 * DT;
     const room = Math.max(0.0, dist - this.speed * DT / 2.0);
     const stoppable = Math.sqrt(aDt * aDt + 2.0 * MAX_DECEL_MPS2 * room) - aDt;
-    const want = Math.min(this.topSpeed * effort, stoppable);
+    let want = stop ? Math.min(this.topSpeed * effort, stoppable) : this.topSpeed * effort;
+    // 🔴 **曲がりきれる速さまで落とす。** 全速 9 m/s で曲がれる半径は 9²÷6 ≒ 13.5m。
+    //    それより内側の目標へは、速さを落とさないと**目標の周りを回り続けて**永遠に届かない
+    //    （真横 5m の目標に 19秒かかった・2026-10-05）。いまの向きと目標の向きの角を θ として、
+    //    目標を通る円の半径 d ÷ (2 sin θ) で曲がれる速さ √(最大減速 × d ÷ (2 sin θ)) を上限にする。
+    //    目標が後ろ（θ > 90°）なら、いちばんきつい sin θ = 1 として扱う。
+    const s = this.speed;
+    if (s > 0.5) {
+      const cross = Math.abs(this.vx * dy - this.vy * dx) / (s * dist);
+      const dot = (this.vx * dx + this.vy * dy) / (s * dist);
+      const sinT = dot < 0.0 ? 1.0 : cross;
+      if (sinT > 1e-6) want = Math.min(want, Math.sqrt(MAX_DECEL_MPS2 * dist / (2.0 * sinT)));
+    }
     this.moveToward(dx / dist * want, dy / dist * want);
   }
 

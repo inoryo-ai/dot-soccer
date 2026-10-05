@@ -1,14 +1,14 @@
 /**
  * 新しい試合の進行（D-42・作る順 2 の段階）。
  *
- * 0.1秒ごとに: ① 選手AI（0.2秒ごと＋出来事の直後） → ② 蹴る → ③ 体を動かす
+ * 0.1秒ごとに: ⓪ チームAI（1秒ごと＋出来事の直後） → ① 選手AI（0.2秒ごと＋出来事の直後）
+ *              → ② 蹴る → ③ 体を動かす
  *              → ④ ボールを動かす → ⑤ 外へ出たか → ⑥ 誰かの足が届いたか
  *
  * 🔑 パスが通るか・奪われるかは ⑥ だけで決まる。**足が届いた選手が触る**。
  *    同時に届いたら、ボールにより近い選手（同じなら並びが前の選手）。
  *
  * まだ無いもの（作る順どおり）:
- *   チームAI（陣形・局面）＝作る順 3。いまは全員が持ち場に戻るだけ。
  *   スローイン・CK・GK・オフサイド・シュート＝作る順 4〜5。
  *   いまはボールが外へ出たら、出た地点の内側に止めて、最後に触ったチームは
  *   2秒触れない（相手が拾いに行く）だけにしている。
@@ -22,7 +22,9 @@ import { Ball } from "./ball.ts";
 import { Body, topSpeed } from "./body.ts";
 import { CARRY_EFFORT, decideHolder, decideOffBall } from "./player_ai.ts";
 import type { Agent, HolderPlan, View } from "./player_ai.ts";
-import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M } from "./reach.ts";
+import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, enterAt } from "./reach.ts";
+import { TEAM_DECIDE_EVERY_TICKS, planTeam } from "./team_ai.ts";
+import type { TeamPlan } from "./team_ai.ts";
 
 /** 選手AIが考え直す間隔（コマ＝0.1秒）。D-42: 0.2〜0.3秒ごと */
 export const DECIDE_EVERY_TICKS = 2;
@@ -62,6 +64,8 @@ export interface PassRecord {
   toY: number;
   /** 味方が受けた／相手が触った／外へ出た／蹴った本人が拾い直した */
   result: "COMPLETED" | "INTERCEPTED" | "OUT" | "SELF";
+  /** 蹴る前に reach.ts が「先に触る」と読んだチーム（読まずに蹴ったなら null） */
+  expectedTeam: 0 | 1 | null;
 }
 
 export class MatchSim {
@@ -75,8 +79,12 @@ export class MatchSim {
   private plan: HolderPlan | null = null;
   private lastTeam: 0 | 1 | null = null;
   private readonly noTouchUntil: number[];
-  private inFlight: { team: 0 | 1; from: Agent; x: number; y: number } | null = null;
+  private inFlight: { team: 0 | 1; from: Agent; x: number; y: number; expectedTeam: 0 | 1 | null } | null = null;
   private eventHappened = true;
+  private teamEvent = true;
+  private prevX = 0.0;
+  private prevY = 0.0;
+  plans: [TeamPlan, TeamPlan];
   readonly passes: PassRecord[] = [];
   readonly steals: [number, number] = [0, 0];
   outs = 0;
@@ -84,16 +92,17 @@ export class MatchSim {
   constructor(setup: Setup) {
     this.agents = setup.players.map((p, id) => ({
       id, team: p.team, role: p.role, body: new Body(p.x, p.y, p.topSpeed),
-      homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5,
+      homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5, stop: true,
     }));
     this.bodies = this.agents.map((a) => a.body);
     this.noTouchUntil = this.agents.map(() => 0);
     this.ball = new Ball(setup.ball.x, setup.ball.y);
     this.ball.kick(setup.ball.vx ?? 0.0, setup.ball.vy ?? 0.0);
+    this.plans = [planTeam(0, this.agents, this.ball, null), planTeam(1, this.agents, this.ball, null)];
     const by = setup.ball.kickedBy;
     if (by !== undefined) {
       const from = this.agents[by]!;
-      this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y };
+      this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y, expectedTeam: null };
       this.lastTeam = from.team;
       this.noTouchUntil[by] = KICKER_NO_TOUCH_TICKS;
     }
@@ -101,6 +110,12 @@ export class MatchSim {
 
   /** 1コマ（0.1秒）進める */
   step(): void {
+    // ⓪ チームAI（持ち主が変わった・外へ出た直後はすぐ）
+    if (this.teamEvent || this.tick % TEAM_DECIDE_EVERY_TICKS === 0) {
+      this.teamEvent = false;
+      this.plans = [planTeam(0, this.agents, this.ball, this.holder),
+                    planTeam(1, this.agents, this.ball, this.holder)];
+    }
     // ① 選手AI
     if (this.eventHappened || this.tick % DECIDE_EVERY_TICKS === 0) {
       this.eventHappened = false;
@@ -112,7 +127,7 @@ export class MatchSim {
     const h = this.holder;
     if (h !== null && this.plan !== null && this.tick >= this.settledAt) {
       if (this.plan.kind === "PASS") {
-        this.kick(h, this.plan.vx, this.plan.vy);
+        this.kick(h, this.plan.vx, this.plan.vy, this.agents[this.plan.to]!.team);
       } else {
         h.aimX = this.plan.x;
         h.aimY = this.plan.y;
@@ -120,8 +135,10 @@ export class MatchSim {
       }
     }
     // ③ 体
-    for (const a of this.agents) a.body.steerTo(a.aimX, a.aimY, a.effort);
-    // ④ ボール
+    for (const a of this.agents) a.body.steerTo(a.aimX, a.aimY, a.effort, a.stop);
+    // ④ ボール（触れたかの判定のため、動く前の位置を覚えておく）
+    this.prevX = this.ball.x;
+    this.prevY = this.ball.y;
     if (this.holder !== null) this.carryBall(this.holder);
     else this.ball.step();
     // ⑤ 外へ出たか
@@ -141,17 +158,19 @@ export class MatchSim {
     this.agents.forEach((a, i) => {
       if (this.noTouchUntil[i]! > this.tick) blocked.add(a.id);
     });
-    return { agents: this.agents, bodies: this.bodies, ball: this.ball, holder: this.holder, blocked };
+    return { agents: this.agents, bodies: this.bodies, ball: this.ball, holder: this.holder, blocked,
+             plans: this.plans };
   }
 
-  private kick(from: Agent, vx: number, vy: number): void {
-    this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y };
+  private kick(from: Agent, vx: number, vy: number, expectedTeam: 0 | 1 | null): void {
+    this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y, expectedTeam };
     this.ball.kick(vx, vy);
     this.holder = null;
     this.plan = null;
     this.lastTeam = from.team;
     this.noTouchUntil[from.id] = this.tick + KICKER_NO_TOUCH_TICKS;
     this.eventHappened = true;
+    this.teamEvent = true;
   }
 
   /** 運んでいる間、ボールは体の少し前（進んでいる向き。止まっていれば攻める向き） */
@@ -183,6 +202,7 @@ export class MatchSim {
       }
     }
     this.eventHappened = true;
+    this.teamEvent = true;
   }
 
   private resolveTouches(): void {
@@ -199,8 +219,20 @@ export class MatchSim {
       return;
     }
     if (this.ball.speed > CONTROL_MAX_MPS) return;
-    const got = this.closestWithin(REACH_M, (a) => this.noTouchUntil[a.id]! <= this.tick);
+    // 🔴 このコマにボールが通った線で見る（終わりの位置だけで見ると、速いボールが足をすり抜ける）。
+    //    線の手前で届いた選手が先。同じならボールの終わりの位置に近い選手、それも同じなら並びが前
+    let got: { a: Agent; s: number; d: number } | null = null;
+    for (const a of this.agents) {
+      if (this.noTouchUntil[a.id]! > this.tick) continue;
+      const s = enterAt(this.prevX, this.prevY, this.ball.x, this.ball.y, a.body.x, a.body.y, REACH_M);
+      if (s < 0.0) continue;
+      const d = hypot(this.ball.x - a.body.x, this.ball.y - a.body.y);
+      if (got === null || s < got.s || (s === got.s && d < got.d)) got = { a, s, d };
+    }
     if (got === null) return;
+    // 触ったのは線の途中。ボールはそこで止められている
+    this.ball.x = this.prevX + (this.ball.x - this.prevX) * got.s;
+    this.ball.y = this.prevY + (this.ball.y - this.prevY) * got.s;
     const f = this.inFlight;
     if (f !== null) {
       const result = got.a === f.from ? "SELF" : got.a.team === f.team ? "COMPLETED" : "INTERCEPTED";
@@ -227,11 +259,13 @@ export class MatchSim {
     // 🔑 止めたボールは体と同じ動きになる（足元に収める）
     this.ball.kick(a.body.vx, a.body.vy);
     this.eventHappened = true;
+    this.teamEvent = true;
   }
 
   private closePass(result: PassRecord["result"], x: number, y: number): void {
     const f = this.inFlight!;
-    this.passes.push({ team: f.team, fromX: f.x, fromY: f.y, toX: x, toY: y, result });
+    this.passes.push({ team: f.team, fromX: f.x, fromY: f.y, toX: x, toY: y, result,
+                       expectedTeam: f.expectedTeam });
     this.inFlight = null;
   }
 }

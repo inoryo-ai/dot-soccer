@@ -83,6 +83,17 @@ describe("選手の体（ステアリング）", () => {
     assert.ok(t >= ideal && t <= ideal + 2 * DT, `止まるまで ${t.toFixed(2)}秒（理論 ${ideal.toFixed(2)}秒）`);
   });
 
+  test("🔴 走り抜けるモードでも、近くの真横の目標の周りを回り続けない（曲がるときは減速する）", () => {
+    const b = new Body(0.0, 0.0, 9.0);
+    b.vy = 8.0;                                // 全速で横へ走っているところ
+    let t = 0.0;
+    while (Math.hypot(b.x - 5.0, b.y) > 0.7 && t < 10.0) {
+      b.steerTo(5.0, 0.0, 1.0, false);
+      t += DT;
+    }
+    assert.ok(t < 4.0, `真横 5m の目標に ${t.toFixed(1)}秒かかった（回り続けている）`);
+  });
+
   test("速いほど大回りになる（同じ真横への切り返しで、速い方が元の向きへ流される）", () => {
     const drift = (v: number): number => {
       const b = new Body(0.0, 0.0, 9.0);

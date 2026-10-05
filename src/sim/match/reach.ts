@@ -38,42 +38,103 @@ export const CONTROL_MAX_MPS = 30.0;
 const LOOKAHEAD_S = 15.0;
 
 /**
- * いまの動きから、(x, y) まで走って着く時間（秒・反応の遅れは含まない）。
+ * t 秒後に (x, y) へ足が届くか。届くなら余裕（m・0 以上）、届かなければ負。
  *
- * 🔑 body.ts と同じ「指数の加速」。そちらへ向かう速さ v0 を持っていれば、その分早い。
- *    逆向きに走っていれば、まず止まる時間（v0 ÷ 最大減速）がかかる。
- * 🔴 簡略化: 横向きの速さ（曲がる手間）は見ていない。全速で横切っている選手は実際より早く見積もる。
+ * 🔑 body.ts と同じ「指数の加速」を、いまの速度ベクトルごと解いた式。
+ *    速度 v で動いている体が、ある向き u へ全力で走ると t 秒後には
+ *      いた場所 ＋ v × g(t) ＋ u × 最高速 × (t − g(t))、 g(t) = τ × (1 − e^(−t/τ))
+ *    にいる。u を自由に選べるので、届く範囲は「中心 いた場所 ＋ v × g(t)、半径 最高速 × (t − g(t))」の円。
+ *    横向き・逆向きの勢いも、この中心のずれとして自然に入る。
+ * 🔑 反応するまで（react 秒）は、いまの勢いのまま流れる（止まって待ってはいない）。
+ *    これを見ずに「その場から」測ると、ボールのすぐ横を横切っている選手が「すぐ触れる」ことになり、
+ *    実際には流れて届かない（2026-10-05 に 47% のパスで予測が外れた）。
  */
-export function timeToReach(body: Body, x: number, y: number, reach = REACH_M): number {
-  const dx = x - body.x;
-  const dy = y - body.y;
-  const d = hypot(dx, dy) - reach;
-  if (d <= 0.0) return 0.0;
-  const v = (body.vx * dx + body.vy * dy) / (d + reach);   // そちらへ向かう速さ
-  let lead = 0.0;
-  let more = d;
-  let v0 = v;
-  if (v < 0.0) {
-    lead = -v / MAX_DECEL_MPS2;               // まず止まる
-    more = d + v * v / (2.0 * MAX_DECEL_MPS2); // 止まるまでに離れた分も戻る
-    v0 = 0.0;
+export function reachSlack(body: Body, x: number, y: number, t: number,
+                           reach = REACH_M, react = REACT_S): number {
+  const run = t - react;
+  if (run < 0.0) return -Infinity;
+  // 反応するまでは、いまの勢いのまま
+  const rx = body.x + body.vx * react;
+  const ry = body.y + body.vy * react;
+  const dx = x - rx;
+  const dy = y - ry;
+  const d = hypot(dx, dy);
+  // 🔑 目標と逆向きの勢いは、足の踏ん張り（最大減速）でまず止めてからでないと走り出せない。
+  //    指数の式だけだとブレーキと加速を同時にでき、反転を最大 1.1秒 甘く見積もった（2026-10-05）
+  const away = d > 0.0 ? Math.max(0.0, -(body.vx * dx + body.vy * dy) / d) : 0.0;
+  const brake = away / MAX_DECEL_MPS2;
+  if (run < brake) {
+    // 止まりきる前: 勢いのまま流れた先から、足が届くか
+    const k = run - MAX_DECEL_MPS2 / (2.0 * away) * run * run;
+    return reach - hypot(x - (rx + body.vx * k), y - (ry + body.vy * k));
   }
-  return lead + runTime(more, v0, body.topSpeed);
+  const kb = brake / 2.0;                       // 止まるまでに流れる分（等減速＝平均の速さ × 時間）
+  const ox = rx + body.vx * kb;
+  const oy = ry + body.vy * kb;
+  // 止めたあと: 残りの勢い（横の分）ごと、指数の加速で走る
+  const ax = body.vx + (away > 0.0 ? away * dx / d : 0.0);
+  const ay = body.vy + (away > 0.0 ? away * dy / d : 0.0);
+  const r2 = run - brake;
+  const g = ACCEL_TAU_S * (1.0 - exp(-r2 / ACCEL_TAU_S));
+  const cx = ox + ax * g;
+  const cy = oy + ay * g;
+  return body.topSpeed * (r2 - g) - (hypot(x - cx, y - cy) - reach);
 }
 
-/** 速さ v0 から全力で走って距離 d を進む時間。d(t) = 最高速×t − (最高速 − v0)×τ×(1 − e^(−t/τ)) を二分法で解く */
-export function runTime(d: number, v0: number, top: number): number {
-  if (d <= 0.0) return 0.0;
-  const covered = (t: number): number =>
-    top * t - (top - v0) * ACCEL_TAU_S * (1.0 - exp(-t / ACCEL_TAU_S));
-  let lo = 0.0;
-  let hi = d / top + ACCEL_TAU_S + 1.0;
-  for (let i = 0; i < 30; i++) {
+/**
+ * (x, y) へ足が届くまでの時間（反応を含む）。
+ * 🔑 reachSlack が 0 以上になる最初の時刻。届く範囲は勢いの向きによっては
+ *    いったん遠ざかるので、二分法ではなく 0.05 秒刻みで探してから、その間を詰める。
+ */
+export function timeToReach(body: Body, x: number, y: number, reach = REACH_M, react = 0.0): number {
+  if (hypot(x - body.x, y - body.y) <= reach) return 0.0;
+  const STEP = 0.05;
+  let t = react;
+  while (reachSlack(body, x, y, t, reach, react) < 0.0) {
+    t += STEP;
+    if (t > 30.0) return Infinity;
+  }
+  let lo = Math.max(react, t - STEP);
+  let hi = t;
+  for (let i = 0; i < 12; i++) {
     const mid = (lo + hi) / 2.0;
-    if (covered(mid) < d) lo = mid;
-    else hi = mid;
+    if (reachSlack(body, x, y, mid, reach, react) >= 0.0) hi = mid;
+    else lo = mid;
   }
   return hi;
+}
+
+/**
+ * ボールが (ax, ay) から (bx, by) へ動くあいだに、点 (px, py) から r 以内に**最初に入る**割合（0〜1）。
+ * 入らなければ -1。
+ *
+ * 🔴 コマの終わりの位置だけで「届いたか」を見てはいけない。20 m/s のボールは 0.1秒で 2m 進み、
+ *    足の届く範囲（直径 1.4m）を**飛び越える**。コースのど真ん中に立っていても触れなくなる。
+ */
+export function enterAt(ax: number, ay: number, bx: number, by: number,
+                        px: number, py: number, r: number): number {
+  const fx = ax - px;
+  const fy = ay - py;
+  const c = fx * fx + fy * fy - r * r;
+  if (c <= 0.0) return 0.0;                       // 最初から届いている
+  const dx = bx - ax;
+  const dy = by - ay;
+  const a = dx * dx + dy * dy;
+  if (a === 0.0) return -1.0;
+  const b = 2.0 * (fx * dx + fy * dy);
+  const disc = b * b - 4.0 * a * c;
+  if (disc < 0.0) return -1.0;
+  const s = (-b - Math.sqrt(disc)) / (2.0 * a);
+  return s >= 0.0 && s <= 1.0 ? s : -1.0;
+}
+
+/** 線分 (ax, ay)-(bx, by) の上で、点 (px, py) にいちばん近い点の割合（0〜1） */
+export function closestOn(ax: number, ay: number, bx: number, by: number, px: number, py: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const a = dx * dx + dy * dy;
+  if (a === 0.0) return 0.0;
+  return Math.max(0.0, Math.min(1.0, ((px - ax) * dx + (py - ay) * dy) / a));
 }
 
 export interface Touch {
@@ -99,21 +160,49 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
   b.kick(ball.vx, ball.vy);
   const steps = Math.round(LOOKAHEAD_S / DT);
   for (let k = 1; k <= steps; k++) {
+    const ax = b.x;
+    const ay = b.y;
     b.step();
     if (b.x < 0.0 || b.x > PITCH_LENGTH_M || b.y < 0.0 || b.y > PITCH_WIDTH_M) return null;
     const t = k * DT;
     if (b.speed > CONTROL_MAX_MPS) continue;
+    // 🔑 このコマにボールが通る線の上で、各選手がいちばん近づける点まで間に合うか。
+    //    間に合う選手のうち、線の手前で触れる選手が先（同じなら早く着ける選手、それも同じなら並びが前）
     let best: Touch | null = null;
+    let bestS = Infinity;
     let bestNeed = Infinity;
     bodies.forEach((body, i) => {
       if (blocked.has(i)) return;
-      // 🔑 足が届く距離の外で、最高速で走っても間に合わない選手は計算しない（速くするため）
-      const far = hypot(b.x - body.x, b.y - body.y) - REACH_M;
-      if (REACT_S + far / body.topSpeed > t) return;
-      const need = REACT_S + timeToReach(body, b.x, b.y);
-      if (need <= t && need < bestNeed) {
+      // 🔑 反応しなくても当たる: いまの動きのまま進んだ体が、このコマのボールの線にかかる。
+      //    持っている人に張り付いて寄せている相手は、蹴った瞬間のボールに反応なしで足が出る。
+      //    これを見ないと、目の前の相手にぶつけるパスを「通る」と読む（2026-10-05）
+      const px = body.x + body.vx * t;
+      const py = body.y + body.vy * t;
+      const sPass = enterAt(ax, ay, b.x, b.y, px, py, REACH_M);
+      if (sPass >= 0.0) {
+        if (sPass < bestS || (sPass === bestS && -Infinity < bestNeed)) {
+          bestS = sPass;
+          bestNeed = -Infinity;
+          best = { who: i, t: t - DT + sPass * DT, x: ax + (b.x - ax) * sPass, y: ay + (b.y - ay) * sPass };
+        }
+        return;
+      }
+      // 走って届くか: 勢いで流れた先にいちばん近い、線の上の点で見る
+      if (t < REACT_S) return;
+      const ox = body.x + body.vx * REACT_S;
+      const oy = body.y + body.vy * REACT_S;
+      const s = closestOn(ax, ay, b.x, b.y, ox, oy);
+      const cx = ax + (b.x - ax) * s;
+      const cy = ay + (b.y - ay) * s;
+      if (hypot(cx - ox, cy - oy) - REACH_M > body.topSpeed * (t - REACT_S)) return;  // 速くするため
+      const slack = reachSlack(body, cx, cy, t);
+      if (slack < 0.0) return;
+      // 線の手前で触れる選手が先。同じなら余裕の大きい（＝早く着ける）選手、それも同じなら並びが前
+      const need = -slack;
+      if (s < bestS || (s === bestS && need < bestNeed)) {
+        bestS = s;
         bestNeed = need;
-        best = { who: i, t, x: b.x, y: b.y };
+        best = { who: i, t: t - DT + s * DT, x: cx, y: cy };
       }
     });
     if (best !== null) return best;
@@ -124,7 +213,7 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
   let need = Infinity;
   bodies.forEach((body, i) => {
     if (blocked.has(i)) return;
-    const n = REACT_S + timeToReach(body, b.x, b.y);
+    const n = timeToReach(body, b.x, b.y, REACH_M, REACT_S);
     if (n < need) {
       need = n;
       who = i;

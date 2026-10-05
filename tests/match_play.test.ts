@@ -11,8 +11,9 @@ import { describe, test } from "node:test";
 import { Body } from "../src/sim/match/body.ts";
 import { MatchSim, standardSetup } from "../src/sim/match/match.ts";
 import type { Setup, Spawn } from "../src/sim/match/match.ts";
-import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, firstTouch, timeToReach }
+import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, enterAt, firstTouch, timeToReach }
   from "../src/sim/match/reach.ts";
+import { OUTLET_COUNT, planTeam } from "../src/sim/match/team_ai.ts";
 
 const spawn = (team: 0 | 1, x: number, y: number, role: Spawn["role"] = "MF"): Spawn =>
   ({ team, role, x, y, homeX: x, homeY: y, topSpeed: 8.8 });
@@ -70,6 +71,78 @@ describe("パスは位置で決まる（サイコロなし）", () => {
       const team = sim.agents[predicted!.who]!.team;
       assert.equal(pass.result === "COMPLETED" ? 0 : 1, team, `相手 ${opp}: 予測と実際が違う`);
     }
+  });
+});
+
+describe("触れたかの判定", () => {
+  test("🔴 速いボールでも、コースのど真ん中に立つ選手をすり抜けない（コマの間に通った線で見る）", () => {
+    // 25 m/s は 0.1秒で 2.1〜2.4m 進み、足の届く範囲（直径 1.4m）より長い。
+    // ボールはコマの終わりに 39.31m と 41.45m にいるので、その間（40.38m）に立つ選手は
+    // 終わりの位置だけで見るとどちらのコマでも 1.07m 離れていて触れない
+    assert.ok(enterAt(39.313, 34.0, 41.447, 34.0, 40.38, 34.0, REACH_M) >= 0.0);
+    assert.ok(Math.abs(39.313 - 40.38) > REACH_M && Math.abs(41.447 - 40.38) > REACH_M);
+    const sim = new MatchSim({
+      players: [spawn(0, 29.0, 34.0), spawn(1, 40.38, 34.0)],
+      ball: { x: 30.0, y: 34.0, vx: 25.0, vy: 0.0, kickedBy: 0 },
+    });
+    sim.run(1);
+    assert.equal(sim.passes[0]?.result, "INTERCEPTED");
+  });
+
+  test("🔴 出し手に張り付いた相手には、反応の時間なしでパスが当たる（先読みもそう読む）", () => {
+    const setup: Setup = {
+      players: [spawn(0, 29.0, 34.0), spawn(0, 50.0, 34.0), spawn(1, 31.0, 34.3)],
+      ball: { x: 30.0, y: 34.0, vx: 15.0, vy: 0.0, kickedBy: 0 },
+    };
+    const sim = new MatchSim(setup);
+    const predicted = firstTouch(sim.ball, sim.bodies, new Set([0]));
+    assert.equal(predicted?.who, 2);
+    sim.run(1);
+    assert.equal(sim.passes[0]?.result, "INTERCEPTED");
+  });
+});
+
+describe("チームAI", () => {
+  test("相手が持っているとき、寄せる（PRESS）のは1人、後ろを埋める（COVER）のも1人", () => {
+    const sim = new MatchSim(standardSetup());
+    sim.run(20);
+    const holder = sim.holder ?? sim.agents[0]!;
+    const plan = planTeam((1 - holder.team) as 0 | 1, sim.agents, sim.ball, holder);
+    const roles = [...plan.orders.values()].map((o) => o.role);
+    assert.equal(roles.filter((r) => r === "PRESS").length, 1);
+    assert.equal(roles.filter((r) => r === "COVER").length, 1);
+  });
+
+  test("陣形はボールの側へ寄り、ボールが自陣ゴールに近いほど下がる", () => {
+    const sim = new MatchSim(standardSetup());
+    const holder = sim.agents.find((a) => a.team === 1 && a.role === "FW")!;
+    const meanOf = (bx: number, by: number): [number, number] => {
+      sim.ball.x = bx;
+      sim.ball.y = by;
+      const plan = planTeam(0, sim.agents, sim.ball, holder);
+      const block = [...plan.orders.values()].filter((o) => o.role === "BLOCK");
+      return [block.reduce((a, o) => a + o.x, 0) / block.length, block.reduce((a, o) => a + o.y, 0) / block.length];
+    };
+    assert.ok(meanOf(52.5, 60.0)[1] > meanOf(52.5, 8.0)[1], "ボールの側へ寄っていない");
+    assert.ok(meanOf(20.0, 34.0)[0] < meanOf(80.0, 34.0)[0], "ボールが自陣に来ても下がらない");
+  });
+
+  test("持っているとき、パスの出し先の候補は OUTLET_COUNT 人まで。持っている人は候補にしか出さない", () => {
+    const sim = new MatchSim(standardSetup());
+    let checked = 0;
+    for (let i = 0; i < 600; i++) {
+      const before = sim.passes.length;
+      const outlets = sim.holder !== null ? [...sim.plans[sim.holder.team].outlets] : [];
+      const passer = sim.holder;
+      sim.step();
+      assert.ok(outlets.length <= OUTLET_COUNT);
+      if (passer !== null && sim.holder === null && sim.passes.length === before && sim.ball.speed > 0) {
+        // 蹴った直後: そのコマで使った候補に、蹴った向きの味方が入っている
+        checked += 1;
+        assert.ok(outlets.length > 0, "候補が無いのに蹴った");
+      }
+    }
+    assert.ok(checked > 0, "60秒で1本も蹴っていない");
   });
 });
 
