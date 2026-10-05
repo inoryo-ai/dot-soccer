@@ -27,7 +27,8 @@ import { Execution } from "./execution.ts";
 import type { KickKind } from "./execution.ts";
 import { exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut } from "./laws.ts";
 import type { Restart, RestartKind } from "./laws.ts";
-import { CARRY_EFFORT, decideHeader, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
+import { effortOf } from "./pace.ts";
+import { CARRY_PACE, decideHeader, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
 import type { Agent, HolderPlan, View } from "./player_ai.ts";
 import { CONTROL_MAX_MPS, CONTROL_MAX_Z_M, GK_ARM_M, GK_CATCH_MAX_MPS, GK_DIVE_M, PITCH_LENGTH_M, PITCH_WIDTH_M,
   REACH_M, canReachHeight, enterAt, gkReach } from "./reach.ts";
@@ -245,7 +246,7 @@ export class MatchSim {
         } else {
           h.aimX = this.plan.x;
           h.aimY = this.plan.y;
-          h.effort = CARRY_EFFORT;
+          h.effort = effortOf(h.body, CARRY_PACE);
         }
       }
     }

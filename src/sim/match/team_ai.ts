@@ -21,6 +21,7 @@ import type { Agent } from "./player_ai.ts";
 import { attackDir } from "./player_ai.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, timeToReach } from "./reach.ts";
 import { keepAway, offsideLineX } from "./laws.ts";
+import type { Pace } from "./pace.ts";
 import type { Restart } from "./laws.ts";
 
 export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
@@ -28,7 +29,8 @@ export type Phase = "ATTACK" | "DEFEND" | "LOOSE";
 export interface Order {
   x: number;
   y: number;
-  effort: number;
+  /** どのペースで向かうか（pace.ts）。JOG は「持ち場の調整」で、遠ければ選手AIがランニングに上げる */
+  pace: Pace;
   role: "BLOCK" | "PRESS" | "COVER" | "OUTLET" | "GK" | "TAKER" | "RUNNER" | "BOX";
 }
 
@@ -94,8 +96,6 @@ export const RUN_SPACE_MIN_M = 12.0;
 export const CROSS_ZONE_DEPTH_M = 30.0;
 export const CROSS_ZONE_WIDE_M = 12.0;
 export const BOX_COUNT = 3;
-/** 隊形へ戻るときの本気度。設計値（出典なし） */
-export const BLOCK_EFFORT = 0.7;
 
 /**
  * チームの計画を立てる。
@@ -133,7 +133,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     orders.set(a.id, {
       x: clamp(ownGoalX + dir * depth, 1.0, PITCH_LENGTH_M - 1.0),
       y: clamp(centerY - shape.width / 2 + w * shape.width, 1.0, PITCH_WIDTH_M - 1.0),
-      effort: BLOCK_EFFORT,
+      pace: "JOG",
       role: "BLOCK",
     });
   });
@@ -146,7 +146,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     orders.set(gk.id, {
       x: ownGoalX + vx / dist * depth,
       y: PITCH_WIDTH_M / 2 + vy / dist * depth,
-      effort: BLOCK_EFFORT,
+      pace: "JOG",
       role: "GK",
     });
   }
@@ -167,7 +167,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       const t = orders.get(restart.taker)!;
       t.x = restart.x;
       t.y = restart.y;
-      t.effort = 0.8;
+      t.pace = "JOG";
       t.role = "TAKER";
     } else {
       // 相手は決められた距離より外へ（ボールから外向きに押し出す）。キックオフはセンターサークルの外
@@ -196,7 +196,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     const press = ranked[0];
     const cover = ranked[1];
     if (press !== undefined) {
-      orders.set(press.a.id, { x: ball.x, y: ball.y, effort: 1.0, role: "PRESS" });
+      orders.set(press.a.id, { x: ball.x, y: ball.y, pace: "SPRINT", role: "PRESS" });
     }
     if (cover !== undefined) {
       const gx = ownGoalX - ball.x;
@@ -204,7 +204,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
       const g = hypot(gx, gy) || 1.0;
       orders.set(cover.a.id, {
         x: ball.x + gx / g * COVER_BEHIND_M, y: ball.y + gy / g * COVER_BEHIND_M,
-        effort: 0.9, role: "COVER",
+        pace: "RUN", role: "COVER",
       });
     }
   } else if (phase === "ATTACK" && holder !== null) {
@@ -240,7 +240,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         for (const a of attackers.slice(0, RUNNER_COUNT)) {
           const o = orders.get(a.id)!;
           o.role = "RUNNER";
-          o.effort = 1.0;
+          o.pace = "SPRINT";
           if (!outlets.includes(a.id)) outlets.push(a.id);
         }
       }
@@ -265,7 +265,7 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         const o = orders.get(a.id)!;
         [o.x, o.y] = spots[i]!;
         o.role = "BOX";
-        o.effort = 1.0;
+        o.pace = "RUN";
         if (!outlets.includes(a.id)) outlets.push(a.id);
       });
     }

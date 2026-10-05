@@ -31,6 +31,8 @@ import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsideLineX, offsidePosit
 import type { RestartKind } from "./laws.ts";
 import { directionSigma } from "./execution.ts";
 import type { KickKind } from "./execution.ts";
+import { HOLD_DEADBAND_M, effortOf, positionalPace } from "./pace.ts";
+import type { Pace } from "./pace.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
@@ -88,8 +90,8 @@ export const PASS_MAX_M = 45.0;
 export const PRESSED_M = 8.0;
 /** 🔑 設計値（出典なし）。相手ゴールラインまでこの距離を切ったら運ばずに出す（シュートは作る順 5 以降） */
 export const NO_CARRY_NEAR_GOAL_M = 20.0;
-/** 運ぶときの本気度。ボールを持っていると全力では走れない（設計値・出典なし） */
-export const CARRY_EFFORT = 0.75;
+/** ボールを運ぶときのペース。ボールを持っていると全力では走れない（設計値・出典なし） */
+export const CARRY_PACE: Pace = "RUN";
 
 /**
  * 撃つかを考える、相手ゴールの中心からの距離（m）。🔑 設計値（出典なし）。
@@ -558,7 +560,7 @@ export function decideOffBall(v: View): void {
     if (mine !== null && mine.who === a.id) {
       a.aimX = mine.x;
       a.aimY = mine.y;
-      a.effort = 1.0;
+      a.effort = effortOf(a.body, "SPRINT");
       // 🔑 ボールより十分早く着けるなら、その地点で止まって待つ。ぎりぎりなら走り抜ける。
       //    いつも走り抜けると、浮き球の落ち際へ早く着きすぎて通り過ぎ、行ったり来たりしているうちに
       //    頭上を越えられた（2026-10-05）
@@ -567,9 +569,7 @@ export function decideOffBall(v: View): void {
     }
     const order = v.plans[a.team].orders.get(a.id);
     if (order === undefined) {
-      a.aimX = a.homeX;
-      a.aimY = a.homeY;
-      a.effort = 0.5;
+      moveTo(a, a.homeX, a.homeY, "JOG");
     } else if (order.role === "RUNNER") {
       // 🔑 走り込み: 味方が蹴れる体勢になったら、オンサイドの位置から裏へ全力で走る。
       //    それまではラインの手前で待つ。オフサイドの位置に出てしまったら手前へ戻る
@@ -581,31 +581,49 @@ export function decideOffBall(v: View): void {
         const t = runTarget(v, a, order.y);
         a.aimX = t.x;
         a.aimY = t.y;
-        a.effort = 1.0;
+        a.effort = effortOf(a.body, "SPRINT");
         a.stop = false;
       } else {
-        a.aimX = line - dir * HOLD_ONSIDE_M;
-        a.aimY = order.y;
-        a.effort = 0.9;
+        moveTo(a, line - dir * HOLD_ONSIDE_M, order.y, "JOG");
       }
     } else if (order.role === "PRESS") {
       a.aimX = v.ball.x;
       a.aimY = v.ball.y;
-      a.effort = order.effort;
+      a.effort = effortOf(a.body, order.pace);
     } else if (order.role === "COVER") {
       const ownGoalX = attackDir(a.team) > 0 ? 0.0 : PITCH_LENGTH_M;
       const gx = ownGoalX - v.ball.x;
       const gy = PITCH_WIDTH_M / 2 - v.ball.y;
       const g = hypot(gx, gy) || 1.0;
-      a.aimX = v.ball.x + gx / g * COVER_BEHIND_M;
-      a.aimY = v.ball.y + gy / g * COVER_BEHIND_M;
-      a.effort = order.effort;
-    } else {
+      moveTo(a, v.ball.x + gx / g * COVER_BEHIND_M, v.ball.y + gy / g * COVER_BEHIND_M, order.pace);
+    } else if (order.role === "TAKER") {
+      // 🔴 蹴る人はボールの位置まで行く（動き直さない幅を当てると、1.5m 手前で止まって足が届かず、
+      //    再開されないまま試合が止まった・2026-10-05）
       a.aimX = order.x;
       a.aimY = order.y;
-      a.effort = order.effort;
+      a.effort = effortOf(a.body, order.pace);
+    } else {
+      moveTo(a, order.x, order.y, order.pace);
     }
   }
+}
+
+/**
+ * 持ち場などへ向かう。
+ * 🔑 近ければ（HOLD_DEADBAND_M）動き直さずその場に止まる。JOG の指示は「持ち場の調整」なので、
+ *    遠く離れていればランニングに上げる（戻り遅れを取り返す）。それ以外の指示はそのペースのまま。
+ */
+function moveTo(a: Agent, x: number, y: number, pace: Pace): void {
+  const d = hypot(x - a.body.x, y - a.body.y);
+  if (d < HOLD_DEADBAND_M) {
+    a.aimX = a.body.x;
+    a.aimY = a.body.y;
+    a.effort = effortOf(a.body, "WALK");
+    return;
+  }
+  a.aimX = x;
+  a.aimY = y;
+  a.effort = effortOf(a.body, pace === "JOG" ? positionalPace(d) : pace);
 }
 
 function inside(x: number, y: number): { x: number; y: number } {

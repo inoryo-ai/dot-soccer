@@ -167,3 +167,29 @@ describe("22人で回す", () => {
     assert.ok(sim.passes.length > 0, "1分間に1本もパスが出ていない");
   });
 });
+
+describe("走るペース（2026-10-05 オーナー指摘）", () => {
+  test("🔴 持ち場の調整はジョグ。全員がいつも高強度で走ってはいない（1分の平均の速さが時速14.4km 未満）", async () => {
+    const { PACE_MPS } = await import("../src/sim/match/pace.ts");
+    const sim = new MatchSim(standardSetup());
+    const start = sim.bodies.map((b) => [b.x, b.y]);
+    let moved = 0.0;
+    const prev = start.map((p) => [...p]);
+    for (let i = 0; i < 600; i++) {
+      sim.step();
+      sim.bodies.forEach((b, j) => {
+        moved += Math.hypot(b.x - prev[j]![0]!, b.y - prev[j]![1]!);
+        prev[j] = [b.x, b.y];
+      });
+    }
+    const meanSpeed = moved / sim.bodies.length / 60.0;
+    assert.ok(meanSpeed < 14.4 / 3.6, `1人の平均の速さ ${(meanSpeed * 3.6).toFixed(1)}km/h`);
+    assert.ok(PACE_MPS.JOG * 3.6 >= 7.0 && PACE_MPS.JOG * 3.6 < 14.4, "ジョグがジョグの速度区分に入っていない");
+  });
+
+  test("🔴 再開で蹴る人は、動き直さない幅で止まらずにボールまで行く（止まると試合が再開されない）", () => {
+    const sim = new MatchSim(standardSetup());
+    sim.run(60);
+    assert.equal(sim.restart, null, "キックオフから1分たっても再開を待っている");
+  });
+});
