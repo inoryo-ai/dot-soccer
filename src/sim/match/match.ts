@@ -147,6 +147,8 @@ export class MatchSim {
   /** 持っている人が蹴れる・奪われるようになるコマ */
   private settledAt = 0;
   private plan: HolderPlan | null = null;
+  /** plan を決めたコマ */
+  private planTick = -1;
   private lastTeam: 0 | 1 | null = null;
   private readonly noTouchUntil: number[];
   /** 再開で蹴った人。ほかの誰かが触るまで2度は触れない（第13〜17条） */
@@ -205,7 +207,10 @@ export class MatchSim {
       this.eventHappened = false;
       const view = this.view();
       decideOffBall(view);
-      if (this.holder !== null) this.plan = decideHolder(view, this.holder);
+      if (this.holder !== null) {
+        this.plan = decideHolder(view, this.holder);
+        this.planTick = this.tick;
+      }
     }
     // ② 蹴る
     if (this.restart !== null) {
@@ -214,7 +219,8 @@ export class MatchSim {
       const h = this.holder;
       if (h !== null && this.plan !== null && this.tick >= this.settledAt) {
         // 🔑 蹴るなら、蹴る瞬間の盤面で決め直す（0.1〜0.2秒前の判断のまま蹴ると、その間に動いた相手に読み負ける）
-        if (this.plan.kind !== "CARRY") this.plan = decideHolder(this.view(), h);
+        // （同じコマの ① で決めたばかりなら盤面は同じなので、決め直さない）
+        if (this.plan.kind !== "CARRY" && this.planTick !== this.tick) this.plan = decideHolder(this.view(), h);
         if (this.plan.kind === "PASS") {
           this.kick(h, this.plan.vx, this.plan.vy, this.agents[this.plan.to]!.team, null);
         } else if (this.plan.kind === "SHOOT") {

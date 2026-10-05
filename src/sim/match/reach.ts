@@ -57,6 +57,8 @@ export const GK_DIVE_MPS = 2.84;
 export function gkReach(since: number): number {
   return GK_ARM_M + Math.min(GK_DIVE_M, GK_DIVE_MPS * Math.max(0.0, since - REACT_S));
 }
+/** 速くするための足切りに持たせる余裕（m）。境目の選手を外さないため。結果には効かない */
+const FILTER_MARGIN_M = 0.01;
 /** 先読みする長さ（秒）。ボールは 30m/s で蹴っても 13 秒ほどで止まる */
 const LOOKAHEAD_S = 15.0;
 
@@ -110,10 +112,14 @@ export function reachSlack(body: Body, x: number, y: number, t: number,
  *    いったん遠ざかるので、二分法ではなく 0.05 秒刻みで探してから、その間を詰める。
  */
 export function timeToReach(body: Body, x: number, y: number, reach = REACH_M, react = 0.0): number {
-  if (hypot(x - body.x, y - body.y) <= reach) return 0.0;
+  const d = hypot(x - body.x, y - body.y);
+  if (d <= reach) return 0.0;
   const STEP = 0.05;
+  // 🔑 速くするため（結果は変えない）: t 秒で体を動かせるのは最大（いまの速さ ＋ 最高速）× t。
+  //    それでも届かない時刻までは reachSlack を計算しない。刻みの時刻は今までどおり足し算で進める
+  const rate = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.topSpeed;
   let t = react;
-  while (reachSlack(body, x, y, t, reach, react) < 0.0) {
+  while ((rate * t + reach + FILTER_MARGIN_M < d) || reachSlack(body, x, y, t, reach, react) < 0.0) {
     t += STEP;
     if (t > 30.0) return Infinity;
   }
@@ -201,6 +207,17 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
   const b = new Ball(ball.x, ball.y);
   b.kick(ball.vx, ball.vy);
   const steps = Math.round(LOOKAHEAD_S / DT);
+  // 🔑 速くするための下ごしらえ（結果は変えない）: 各選手が t 秒で体を動かせる距離の上限は
+  //    （いまの速さ ＋ 最高速）× t、手足が届くのはそこから最大 maxReach。これより遠い選手は細かく計算しない。
+  //    張り付き・走って届く・GK の飛び込みのどれよりも広く取ってあるので、届く選手を外すことはない。
+  const n = bodies.length;
+  const moveRate = new Float64Array(n);
+  const maxReach = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const body = bodies[i]!;
+    moveRate[i] = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.topSpeed;
+    maxReach[i] = (keepers.has(i) ? GK_ARM_M + GK_DIVE_M : REACH_M) + FILTER_MARGIN_M;
+  }
   for (let k = 1; k <= steps; k++) {
     const ax = b.x;
     const ay = b.y;
@@ -212,8 +229,25 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
     let best: Touch | null = null;
     let bestS = Infinity;
     let bestNeed = Infinity;
-    bodies.forEach((body, i) => {
-      if (blocked.has(i)) return;
+    const sx = b.x - ax;
+    const sy = b.y - ay;
+    const segLen2 = sx * sx + sy * sy;
+    for (let i = 0; i < n; i++) {
+      if (blocked.has(i)) continue;
+      const body = bodies[i]!;
+      // 速くするための足切り（線までの距離の2乗で比べる。平方根を使わない）
+      let u = segLen2 > 0.0 ? ((body.x - ax) * sx + (body.y - ay) * sy) / segLen2 : 0.0;
+      u = u < 0.0 ? 0.0 : u > 1.0 ? 1.0 : u;
+      const fx = ax + sx * u - body.x;
+      const fy = ay + sy * u - body.y;
+      const budget = moveRate[i]! * t + maxReach[i]!;
+      if (fx * fx + fy * fy > budget * budget) continue;
+      touchBy(i, body);
+    }
+    if (best !== null) return best;
+    if (b.vx === 0.0 && b.vy === 0.0) break;   // 止まった（速さ 0 と同じ意味。距離の計算を省く）
+
+    function touchBy(i: number, body: Body): void {
       // 🔑 GK は自分のペナルティエリアの中なら手が使える。届き方は2つのどちらか（match.ts と同じ）:
       //    ① いま立っている所から飛び込む … 立っていた所から 手＋飛び込み（gkReach）
       //    ② 走ってから手を伸ばす       … 走った体から 手（GK_ARM_M）
@@ -257,7 +291,10 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
       const s = closestOn(ax, ay, b.x, b.y, ox, oy);
       const cx = ax + (b.x - ax) * s;
       const cy = ay + (b.y - ay) * s;
-      if (hypot(cx - ox, cy - oy) - reach > body.topSpeed * (t - react)) return;  // 速くするため
+      // 速くするための足切り（平方根で測り、境目は余裕をもって残す＝結果は変えない）
+      const ddx = cx - ox;
+      const ddy = cy - oy;
+      if (Math.sqrt(ddx * ddx + ddy * ddy) - reach > body.topSpeed * (t - react) + FILTER_MARGIN_M) return;
       const slack = reachSlack(body, cx, cy, t, reach, react);
       if (slack < 0.0) return;
       // 線の手前で触れる選手が先。同じなら余裕の大きい（＝早く着ける）選手、それも同じなら並びが前
@@ -267,9 +304,7 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
         bestNeed = need;
         best = { who: i, speed: b.speed, t: t - DT + s * DT, x: cx, y: cy };
       }
-    });
-    if (best !== null) return best;
-    if (b.speed === 0.0) break;
+    }
   }
   // 止まったボール: いちばん早く着く選手
   let who = -1;
