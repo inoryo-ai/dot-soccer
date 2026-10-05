@@ -197,6 +197,17 @@ interface InFlight {
   offside: Set<number>;
 }
 
+/**
+ * 見た目のための記録: 誰がいつ何をしたか（3D の姿勢に使う・web/engine3d.ts）。
+ * 🔑 書き残すだけで、試合の進み方には一切効かない。
+ */
+export interface ActionRecord {
+  tick: number;
+  who: number;
+  /** 蹴る・頭で当てる・足を伸ばす（タックル）・GK が弾く・反則で倒された */
+  kind: "KICK" | "HEADER" | "TACKLE" | "SAVE" | "FOULED";
+}
+
 export class MatchSim {
   tick = 0;
   readonly ball: Ball;
@@ -222,6 +233,7 @@ export class MatchSim {
   readonly offsides: [number, number] = [0, 0];
   readonly passes: PassRecord[] = [];
   readonly shots: ShotRecord[] = [];
+  readonly actions: ActionRecord[] = [];
   readonly steals: [number, number] = [0, 0];
   /** タックルを試みた回数（成功も失敗も） */
   readonly tackles: [number, number] = [0, 0];
@@ -485,6 +497,7 @@ export class MatchSim {
     const kind: KickKind = header ? "HEADER" : shot ? "SHOT" : "PASS";
     [vx, vy, vz] = this.execution.kick(kind, vx, vy, from.technique, near, vz);
     this.ball.kick(vx, vy, vz);
+    this.actions.push({ tick: this.tick, who: from.id, kind: header ? "HEADER" : "KICK" });
     this.holder = null;
     this.plan = null;
     this.lastTeam = from.team;
@@ -605,6 +618,7 @@ export class MatchSim {
         if (inOwnPenaltyArea(a.team, h.body.x, h.body.y) && d > BOX_TACKLE_M) continue;
         this.tackleReadyAt[a.id] = this.tick + TACKLE_COOLDOWN_TICKS;
         this.tackles[a.team] += 1;
+        this.actions.push({ tick: this.tick, who: a.id, kind: "TACKLE" });
         const reach = REACH_M + this.execution.tackleExtension(a.physical);
         if (d <= reach) {
           this.steals[a.team] += 1;
@@ -615,6 +629,7 @@ export class MatchSim {
         //    伸ばすと起きる。自陣のペナルティエリアの中なら PK（第12・14条）
         if (hypot(h.body.x - a.body.x, h.body.y - a.body.y) - FOUL_BODY_M <= reach) {
           this.fouls[a.team] += 1;
+          this.actions.push({ tick: this.tick, who: h.id, kind: "FOULED" });
           const pk = inOwnPenaltyArea(a.team, h.body.x, h.body.y);
           const goalX = h.team === 0 ? PITCH_LENGTH_M : 0.0;
           this.closeAnyFlight();
@@ -735,6 +750,7 @@ export class MatchSim {
       // ゴールラインへ向かう勢いは少し残し、ゴールの外側へそらす
       const side = this.ball.y >= PITCH_WIDTH_M / 2 ? 1.0 : -1.0;
       this.ball.kick(this.ball.vx * PARRY_SPEED * 0.5, side * v * PARRY_SPEED);
+      this.actions.push({ tick: this.tick, who: a.id, kind: "SAVE" });
     } else {
       // 🔑 体のどこに当たったかで向きが変わる: 体の中心から当たった点への向き（n）の成分は BLOCK_REBOUND で
       //    はね返し、体をかすめる成分は BLOCK_GLANCE で残す。真正面なら手前へ戻り、端なら横・斜め後ろへそれる。

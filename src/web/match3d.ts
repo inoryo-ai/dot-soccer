@@ -39,6 +39,39 @@ import * as Stadium from "./stadium3d.ts";
 import * as Voxel from "./voxel.ts";
 import type { Pose } from "./voxel.ts";
 
+/**
+ * 再生データに**足してもよい**見た目の情報（新しい試合エンジン `src/sim/match/` が出す・D-42）。
+ * 🔑 どちらも省略できる。旧エンジンのリプレイには無いので、無ければ今までどおり
+ *    （ボールは地面・姿勢は速さとボールだけで選ぶ）。
+ */
+export interface ReplayExtras {
+  /** コマごとのボールの高さ（地面からの高さ × coord_scale） */
+  ballZ?: number[];
+  /** 誰が何コマ目に何をしたか。`who` は roster の番号 */
+  acts?: ReplayAct[];
+}
+
+export interface ReplayAct {
+  frame: number;
+  who: number;
+  act: "kick" | "header" | "tackle" | "down";
+}
+
+/**
+ * 動作の見せ方（秒）。lead = 当たる瞬間より何秒前から動き出すか、len = 動作の長さ。
+ * 🔑 再生データは先まで全部あるので、**当たる瞬間に足（頭）が届くように手前から**動かせる。
+ *    lead は voxel.ts の各動作で「当てる」位置（kick 0.44・header 0.45・tackle 0.40）× 周期から出した。
+ * 🔑 タックルの周期 1.9秒は、新エンジンの「足を伸ばして、外せば 0.8秒崩れる」に対して長すぎるので、
+ *    rate 倍の速さで流して約1秒で終える（滑ったまま 5m/s で走って見えるのを防ぐ）。
+ * 🔑 倒れる（反則を受けた）は、再開の準備のあいだ 2秒だけ倒れておく。
+ */
+const ACT_TIMING: Record<ReplayAct["act"], { lead: number; len: number; rate: number }> = {
+  kick:   { lead: 0.44 * 1.15, len: 1.15, rate: 1.0 },
+  header: { lead: 0.45 * 1.55, len: 1.55, rate: 1.0 },
+  tackle: { lead: 0.40, len: 1.0, rate: 1.9 },   // 当てる位置 0.40 × 周期 1.9秒 ÷ 速さ 1.9
+  down:   { lead: 0.0, len: 2.0, rate: 1.0 },
+};
+
 export interface PitchState {
   tick: number;
   home: number;
@@ -150,7 +183,9 @@ let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
 let mini: HTMLCanvasElement | null = null;
 
-let replay: Replay | null = null;
+let replay: (Replay & ReplayExtras) | null = null;
+/** 選手ごとの動作（時刻の順）。dir は蹴った・当てたボールの向き（無ければ null） */
+let actsOf: { start: number; act: ReplayAct["act"]; dir: number | null }[][] = [];
 let events: MatchEvent[] = [];
 let goalEvents: MatchEvent[] = [];
 let homeName = "";
@@ -189,6 +224,16 @@ const phases: number[] = [];
 
 /* カメラの注視点。ボールへ滑らかに寄る */
 const look = { x: C.PITCH_X / 2, y: C.PITCH_Y / 2 };
+
+/**
+ * 注視点の高さ（m）。浮いたボールの高さの LOOK_Z_FRAC 倍へ、LOOK_Z_FOLLOW の速さで寄る。
+ * 🔴 見下ろし40°・引き20m だと、注視点の真上 7m 付近で画面の上端に届く。ロングボールは 10m を超えるので、
+ *    地面だけを見ているとボールが画面の上へ消える（2026-10-05 に新エンジンで確認）。
+ * 🔑 半分だけ追う。全部追うと、ボールが上がるたびに芝ごと画面が上下して酔う。
+ */
+let lookZ = 0;
+const LOOK_Z_FRAC = 0.5;
+const LOOK_Z_FOLLOW = 2.0;
 
 /* いまの引き。目標（場面で決まる値）へ滑らかに寄る。**生の目標値を直接使わない** */
 let camDist = CAM.dist;
@@ -242,9 +287,23 @@ export function fit(): void {
 
 /* ------------------------------------------------------------ 読み込み */
 
-export function load(data: Replay, matchEvents: MatchEvent[], homeTeamName: string,
+export function load(data: Replay & ReplayExtras, matchEvents: MatchEvent[], homeTeamName: string,
                      callbacks: PitchCallbacks): void {
   replay = data;
+  actsOf = data.roster.map(() => []);
+  for (const a of data.acts ?? []) {
+    /* 🔑 蹴ったボールの向きへ体を向ける（走ってきた向きのまま蹴ると、横へ蹴っても前を向いて見える） */
+    const f0 = data.frames[a.frame];
+    const f1 = data.frames[Math.min(data.frames.length - 1, a.frame + 2)];
+    let dir: number | null = null;
+    if (a.act !== "down" && f0 !== undefined && f1 !== undefined) {
+      const dx = f1[0]! - f0[0]!;
+      const dy = f1[1]! - f0[1]!;
+      if (Math.hypot(dx, dy) > 0.5 * data.coord_scale) dir = Math.atan2(dy, dx);
+    }
+    actsOf[a.who]?.push({ start: a.frame * data.sample_ticks - ACT_TIMING[a.act].lead, act: a.act, dir });
+  }
+  for (const list of actsOf) list.sort((m, n) => m.start - n.start);
   homeName = homeTeamName;
   events = matchEvents.slice().sort((a, b) => a.tick - b.tick);
   goalEvents = events.filter((e) => e.type === "ゴール");
@@ -265,6 +324,7 @@ export function load(data: Replay, matchEvents: MatchEvent[], homeTeamName: stri
         キックオフの直後に理由のない寄り（または引き）が1秒ほど走る */
   camDist = distFor(look.x);
   ballPrev = null;
+  lookZ = 0;
   ballSpin = 0;
   ballDir = 0;
 
@@ -455,11 +515,14 @@ function draw(dt: number): void {
   }
 
   aim(dt, bx, by, list);
+  /* 🔑 高さがあれば浮かせる（浮き球・クロス・シュート）。無ければ地面に置く（旧エンジン） */
+  const bz = rp.ballZ !== undefined ? Math.max(0, ballLerp(rp.ballZ, a, bIdx, t) / k) : 0;
+  lookZ += (bz * LOOK_Z_FRAC - lookZ) * (1 - Math.exp(-LOOK_Z_FOLLOW * dt));
 
   const cam: Voxel.Cam = {
     yaw: CAM.yaw, pitch: CAM.pitch, dist: camDist,
     focal: focalFor(cv),
-    target: { x: look.x, y: look.y, z: 0 },
+    target: { x: look.x, y: look.y, z: lookZ },
     cx: cv.width / 2,
     cy: cv.height * 0.56,
   };
@@ -491,10 +554,17 @@ function draw(dt: number): void {
           `voxel.ts` / `match3d.ts` / `pitch3d.ts` の3か所に散り、
           確認台で境目を詰めても試合画面が1ドットも変わらなかった。
           境目は `voxel.ts` の `pickPose` の1か所だけに置く。 */
-    const pose: Pose = Voxel.pickPose({ speed: sp, hasBall: i === owner });
+    /* 🔑 動作の途中なら、その動作の姿勢と「動作が始まってからの秒数」で描く */
+    const now = frameIndex * rp.sample_ticks;
+    const act = actAt(i, now);
+    const pose: Pose = Voxel.pickPose({ speed: sp, hasBall: i === owner,
+                                        act: act === null || act.act === "down" ? null : act.act,
+                                        down: act?.act === "down" });
+    if (act !== null && act.dir !== null) facings[i] = act.dir;
+    const tt = act === null ? phases[i]! : (now - act.start) * ACT_TIMING[act.act].rate;
     const at = { x, y, z: 0 };
-    Voxel.drawShadow(c, cam, at);
-    Voxel.drawPlayer(c, cam, { at, facing: facings[i]!, pose, t: phases[i]!, kit });
+    Voxel.drawShadow(c, cam, at, pose === "down" || pose === "tackle" ? { pose, facing: facings[i]! } : undefined);
+    Voxel.drawPlayer(c, cam, { at, facing: facings[i]!, pose, t: tt, kit });
   }
 
   /* 🔑 転がり量＝進んだ距離 ÷ 半径。止まれば回転も止まる */
@@ -508,9 +578,28 @@ function draw(dt: number): void {
     }
   }
   ballPrev = { x: bx, y: by };
-  Field.drawBall(c, cam, { x: bx, y: by, z: 0.30 }, ballSpin, ballDir);
+  Field.drawBall(c, cam, { x: bx, y: by, z: Field.BALL_R + bz }, ballSpin, ballDir);
 
   drawMinimap(rp, fa, fb, t, k);
+}
+
+/** コマ a と b のあいだのボールの高さ（coord_scale のまま） */
+function ballLerp(z: number[], a: number, b: number, t: number): number {
+  const za = z[a] ?? 0;
+  const zb = z[b] ?? za;
+  return za + (zb - za) * t;
+}
+
+/** 選手 i が時刻 now（秒）にしている動作。無ければ null。重なったら後に始まった方 */
+function actAt(i: number, now: number): { start: number; act: ReplayAct["act"]; dir: number | null } | null {
+  const list = actsOf[i];
+  if (list === undefined) return null;
+  let found: { start: number; act: ReplayAct["act"]; dir: number | null } | null = null;
+  for (const a of list) {
+    if (a.start > now) break;
+    if (now < a.start + ACT_TIMING[a.act].len) found = a;
+  }
+  return found;
 }
 
 /**
@@ -575,6 +664,13 @@ export function pause(): void {
 export function resume(): void {
   playing = true;
   lastStamp = 0;      // 止めていたあいだの時間を一気に進めない
+}
+
+/** 試合の sec 秒目へ飛ぶ（確認台で場面を見に行く用）。🔑 カメラは次のコマから指数で追いつく */
+export function seek(sec: number): void {
+  const rp = need(replay, "再生データ");
+  frameIndex = Math.max(0, Math.min(rp.frames.length - 1, sec / rp.sample_ticks));
+  ballPrev = null;
 }
 
 export function setSpeed(v: number): number {
