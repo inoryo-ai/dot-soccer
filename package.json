@@ -15,7 +15,8 @@
     "build:web": "node scripts/build_web.ts",
     "dev": "node scripts/dev_server.ts",
     "check": "node scripts/check_project.ts",
-    "measure": "node scripts/measure.ts"
+    "measure": "node scripts/measure.ts",
+    "viewer": "node scripts/match_viewer.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
