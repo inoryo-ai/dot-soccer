@@ -41,10 +41,18 @@ import type { RestartState, TeamPlan } from "./team_ai.ts";
 /** 選手AIが考え直す間隔（コマ＝0.1秒）。D-42: 0.2〜0.3秒ごと */
 export const DECIDE_EVERY_TICKS = 2;
 /**
- * 受けてから次に蹴れるまで・奪われないまで（コマ）。
- * 🔑 設計値（出典なし）。ボールを止めて足元に置く時間として 0.3 秒。無いと受けた瞬間に奪い返されて往復する
+ * 受けてから奪われないまで（コマ）。ボールを止めて足元に置く瞬間だけ。
+ * 🔑 設計値（出典なし）。無いと受けた瞬間に奪い返されて往復する
  */
 export const FIRST_TOUCH_TICKS = 3;
+/**
+ * 受けてから次に蹴れるまで（コマ）。
+ * 🔑 選手1人が1回ボールを持つ時間の平均は 約1.1〜1.2秒、いちばん短いセンターフォワードで 0.9±0.6秒
+ *    （Link & Hoernig 2017, PLOS ONE・ブンデスリーガ 60試合 TRACAB）。
+ *    🔴 奪われない時間と同じ 0.3秒にしていた頃は、手放すまでの中央値が 0.2〜0.5秒で、パスが現実の約2倍だった。
+ *    受けてすぐ寄せられた選手は、蹴れるようになる前に奪われることがある（現実のセンターフォワードと同じ）
+ */
+export const CONTROL_TICKS = 10;
 /** 蹴った本人が自分の蹴ったボールに触れない時間（コマ）。無いと蹴った瞬間に自分で止める */
 export const KICKER_NO_TOUCH_TICKS = 3;
 /** 運んでいるとき、ボールは体のこれだけ前にある（m） */
@@ -187,6 +195,8 @@ export class MatchSim {
 
   /** 持っている人が蹴れる・奪われるようになるコマ */
   private settledAt = 0;
+  /** 持っている人が蹴れるようになるコマ */
+  private canKickAt = 0;
   private plan: HolderPlan | null = null;
   /** plan を決めたコマ */
   private planTick = -1;
@@ -263,7 +273,7 @@ export class MatchSim {
       this.stepRestart();
     } else {
       const h = this.holder;
-      if (h !== null && this.plan !== null && this.tick >= this.settledAt) {
+      if (h !== null && this.plan !== null && this.tick >= this.canKickAt) {
         // 🔑 蹴るなら、蹴る瞬間の盤面で決め直す（0.1〜0.2秒前の判断のまま蹴ると、その間に動いた相手に読み負ける）
         // （同じコマの ① で決めたばかりなら盤面は同じなので、決め直さない）
         if (this.plan.kind !== "CARRY" && this.planTick !== this.tick) this.plan = decideHolder(this.view(), h);
@@ -319,7 +329,7 @@ export class MatchSim {
     });
     return { agents: this.agents, bodies: this.bodies, ball: this.ball, holder: this.holder, blocked,
              plans: this.plans, restart: this.restart,
-             holderReady: this.holder !== null && this.tick >= this.settledAt,
+             holderReady: this.holder !== null && this.tick >= this.canKickAt,
              holderFor: (this.tick - this.heldSince) * 0.1, tactics: this.tactics };
   }
 
@@ -590,6 +600,7 @@ export class MatchSim {
     this.lastTeam = a.team;
     const caught = a.role === "GK" && inOwnPenaltyArea(a.team, this.ball.x, this.ball.y);
     this.settledAt = this.tick + (caught ? GK_HOLD_TICKS : FIRST_TOUCH_TICKS);
+    this.canKickAt = this.tick + (caught ? GK_HOLD_TICKS : CONTROL_TICKS);
     this.plan = null;
     // 🔑 止めたボールは体と同じ動きになる（足元に収める）
     this.ball.kick(a.body.vx, a.body.vy);
