@@ -16,6 +16,7 @@ import { exp } from "../detmath.ts";
 import { hypot } from "../pymath.ts";
 import { Ball, DT } from "./ball.ts";
 import { ACCEL_TAU_S, Body, MAX_DECEL_MPS2 } from "./body.ts";
+import { inOwnPenaltyArea } from "./laws.ts";
 
 /** ピッチの大きさ（m）。旧エンジンと同じ 105 × 68 */
 export const PITCH_LENGTH_M = 105.0;
@@ -32,8 +33,30 @@ export const REACH_M = 0.7;
  * 🔑 設計値（出典なし）。人が見たものに反応する時間として一般に言われる 0.2〜0.3 秒の中ほど。
  */
 export const REACT_S = 0.25;
-/** これより速いボールは止められない（m/s）。いまは全力のシュートでも止められる値にしてある */
-export const CONTROL_MAX_MPS = 30.0;
+/**
+ * フィールドの選手がこれより速いボールに触れると、止められずに**はね返る**（m/s）。
+ * 🔑 設計値（出典なし）。全力のシュート（28 m/s・Nunome ら 2002）は止められず、ブロックになる速さとして置いた。
+ */
+export const CONTROL_MAX_MPS = 20.0;
+/**
+ * GK がキャッチできる速さ（m/s）。これより速ければ弾く（横へそらす）。🔑 設計値（出典なし）
+ */
+export const GK_CATCH_MAX_MPS = 24.0;
+/**
+ * GK の手が届く距離（体の中心から・m）と、飛び込みで体が横へ動く距離と速さ。
+ * PK の飛び込みの動作解析（Scientific Reports 2022, PMC9630263）: 狙われたボールはゴール中心から 3.5m 横、
+ * 体の中心が横へ動いた距離 1.36〜1.54m、その平均の速さ 2.84〜3.18 m/s。
+ * 体が 1.5m 動いて 3.5m 先に届くので、手は体の中心から約 2.0m（自前の逆算）。
+ * 🔑 GK が手を使えるのは自分のペナルティエリアの中だけ（第12条・laws.ts）。
+ */
+export const GK_ARM_M = 2.0;
+export const GK_DIVE_M = 1.5;
+export const GK_DIVE_MPS = 2.84;
+
+/** 蹴られてから since 秒たったボールに、GK の手が届く距離（反応してから飛び込む） */
+export function gkReach(since: number): number {
+  return GK_ARM_M + Math.min(GK_DIVE_M, GK_DIVE_MPS * Math.max(0.0, since - REACT_S));
+}
 /** 先読みする長さ（秒）。ボールは 30m/s で蹴っても 13 秒ほどで止まる */
 const LOOKAHEAD_S = 15.0;
 
@@ -137,9 +160,26 @@ export function closestOn(ax: number, ay: number, bx: number, by: number, px: nu
   return Math.max(0.0, Math.min(1.0, ((px - ax) * dx + (py - ay) * dy) / a));
 }
 
+/**
+ * 誰にも触られなければ、ボールはどこでピッチの外へ出るか（出なければ null）。
+ * 🔑 シュートの先読みで「ゴールポストの間を越えるか」を見るのに使う。
+ */
+export function exitPoint(ball: Ball): { x: number; y: number } | null {
+  const b = new Ball(ball.x, ball.y);
+  b.kick(ball.vx, ball.vy);
+  for (let k = 0; k < Math.round(LOOKAHEAD_S / DT); k++) {
+    b.step();
+    if (b.x < 0.0 || b.x > PITCH_LENGTH_M || b.y < 0.0 || b.y > PITCH_WIDTH_M) return { x: b.x, y: b.y };
+    if (b.speed === 0.0) return null;
+  }
+  return null;
+}
+
 export interface Touch {
   /** 触る選手の番号（`bodies` の並び） */
   who: number;
+  /** 触ったときのボールの速さ（CONTROL_MAX_MPS を超えていれば止められずにはね返る） */
+  speed: number;
   /** 蹴ってから触るまでの秒 */
   t: number;
   x: number;
@@ -155,7 +195,8 @@ export interface Touch {
  * 🔴 ピッチの外へ出るコマまでで打ち切る（外へ出たら誰も触れない＝`null`）。
  */
 export function firstTouch(ball: Ball, bodies: readonly Body[],
-                           blocked: ReadonlySet<number> = new Set()): Touch | null {
+                           blocked: ReadonlySet<number> = new Set(),
+                           keepers: ReadonlyMap<number, 0 | 1> = new Map()): Touch | null {
   const b = new Ball(ball.x, ball.y);
   b.kick(ball.vx, ball.vy);
   const steps = Math.round(LOOKAHEAD_S / DT);
@@ -165,7 +206,6 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
     b.step();
     if (b.x < 0.0 || b.x > PITCH_LENGTH_M || b.y < 0.0 || b.y > PITCH_WIDTH_M) return null;
     const t = k * DT;
-    if (b.speed > CONTROL_MAX_MPS) continue;
     // 🔑 このコマにボールが通る線の上で、各選手がいちばん近づける点まで間に合うか。
     //    間に合う選手のうち、線の手前で触れる選手が先（同じなら早く着ける選手、それも同じなら並びが前）
     let best: Touch | null = null;
@@ -173,17 +213,21 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
     let bestNeed = Infinity;
     bodies.forEach((body, i) => {
       if (blocked.has(i)) return;
+      // 🔑 GK は自分のペナルティエリアの中なら、手と飛び込みのぶん遠くまで届く
+      const gkTeam = keepers.get(i);
+      const reach = gkTeam !== undefined && inOwnPenaltyArea(gkTeam, b.x, b.y) ? gkReach(t) : REACH_M;
       // 🔑 反応しなくても当たる: いまの動きのまま進んだ体が、このコマのボールの線にかかる。
       //    持っている人に張り付いて寄せている相手は、蹴った瞬間のボールに反応なしで足が出る。
       //    これを見ないと、目の前の相手にぶつけるパスを「通る」と読む（2026-10-05）
       const px = body.x + body.vx * t;
       const py = body.y + body.vy * t;
-      const sPass = enterAt(ax, ay, b.x, b.y, px, py, REACH_M);
+      const sPass = enterAt(ax, ay, b.x, b.y, px, py, reach);
       if (sPass >= 0.0) {
         if (sPass < bestS || (sPass === bestS && -Infinity < bestNeed)) {
           bestS = sPass;
           bestNeed = -Infinity;
-          best = { who: i, t: t - DT + sPass * DT, x: ax + (b.x - ax) * sPass, y: ay + (b.y - ay) * sPass };
+          best = { who: i, speed: b.speed, t: t - DT + sPass * DT,
+                   x: ax + (b.x - ax) * sPass, y: ay + (b.y - ay) * sPass };
         }
         return;
       }
@@ -194,15 +238,15 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
       const s = closestOn(ax, ay, b.x, b.y, ox, oy);
       const cx = ax + (b.x - ax) * s;
       const cy = ay + (b.y - ay) * s;
-      if (hypot(cx - ox, cy - oy) - REACH_M > body.topSpeed * (t - REACT_S)) return;  // 速くするため
-      const slack = reachSlack(body, cx, cy, t);
+      if (hypot(cx - ox, cy - oy) - reach > body.topSpeed * (t - REACT_S)) return;  // 速くするため
+      const slack = reachSlack(body, cx, cy, t, reach);
       if (slack < 0.0) return;
       // 線の手前で触れる選手が先。同じなら余裕の大きい（＝早く着ける）選手、それも同じなら並びが前
       const need = -slack;
       if (s < bestS || (s === bestS && need < bestNeed)) {
         bestS = s;
         bestNeed = need;
-        best = { who: i, t: t - DT + s * DT, x: cx, y: cy };
+        best = { who: i, speed: b.speed, t: t - DT + s * DT, x: cx, y: cy };
       }
     });
     if (best !== null) return best;
@@ -219,5 +263,5 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
       who = i;
     }
   });
-  return who < 0 ? null : { who, t: need, x: b.x, y: b.y };
+  return who < 0 ? null : { who, speed: 0.0, t: need, x: b.x, y: b.y };
 }

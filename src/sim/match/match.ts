@@ -10,7 +10,10 @@
  * 🔑 ボールが外へ出たら、競技規則どおりの再開（laws.ts）。再開を待つ間はボールが止まっていて、
  *    **実プレー時間に数えない**。蹴る人（チームAIの TAKER）が着いて、準備の時間がたったら蹴る。
  *
- * まだ無いもの（作る順どおり）: シュート・ファウル・GK のキャッチ・浮き球＝作る順 5 以降。
+ * 🔑 シュートも「通り道に足や手が届くか」で決まる。触ったときのボールの速さで、
+ *    止める（その人のボールになる）か、はね返る（フィールドの選手）／弾く（GK）かが決まる。
+ *
+ * まだ無いもの（作る順どおり）: ファウル・浮き球（クロス・ヘディング）・裏への走り込み。
  *   前後半の入れ替え（エンドの交代）もまだ。
  *
  * 🔴 乱数は一切使わない（D-42）。
@@ -20,11 +23,12 @@ import { FORMATIONS } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
 import { Body, topSpeed } from "./body.ts";
-import { exemptFromOffside, goalScored, offsidePositions, restartAfterOut } from "./laws.ts";
+import { exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut } from "./laws.ts";
 import type { Restart, RestartKind } from "./laws.ts";
 import { CARRY_EFFORT, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
 import type { Agent, HolderPlan, View } from "./player_ai.ts";
-import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, enterAt } from "./reach.ts";
+import { CONTROL_MAX_MPS, GK_ARM_M, GK_CATCH_MAX_MPS, GK_DIVE_M, PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M,
+  enterAt, gkReach } from "./reach.ts";
 import { TEAM_DECIDE_EVERY_TICKS, planTeam } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
@@ -46,6 +50,12 @@ export const CARRY_AHEAD_M = 0.5;
 export const RESTART_PREP_TICKS: Readonly<Record<RestartKind, number>> = {
   KICKOFF: 20, THROW_IN: 30, GOAL_KICK: 50, CORNER: 50, FREE_KICK: 40,
 };
+/** GK がキャッチしてから配るまで（コマ）。🔑 設計値（出典なし）。競技規則の上限は6秒（第12条） */
+export const GK_HOLD_TICKS = 20;
+/** 止められない速さのボールに触れたとき、はね返る強さ（もとの速さに対する割合）。🔑 設計値（出典なし） */
+export const BLOCK_REBOUND = 0.3;
+/** GK が弾いたボールの速さ（もとの速さに対する割合）。横へそらす。🔑 設計値（出典なし） */
+export const PARRY_SPEED = 0.35;
 /** キックオフは全員が自陣に戻るまで待つ。ただしこれ以上は待たない（コマ） */
 export const KICKOFF_WAIT_MAX_TICKS = 200;
 
@@ -61,8 +71,8 @@ export interface Spawn {
 
 export interface Setup {
   players: Spawn[];
-  /** kickedBy: いま転がっているボールを蹴った選手の番号（パスとして数える） */
-  ball: { x: number; y: number; vx?: number; vy?: number; kickedBy?: number };
+  /** kickedBy: いま転がっているボールを蹴った選手の番号（shot なら シュート、そうでなければパスとして数える） */
+  ball: { x: number; y: number; vx?: number; vy?: number; kickedBy?: number; shot?: boolean };
   /** このチームのキックオフで始める（省略すればボールはそのまま動いている） */
   kickoff?: 0 | 1;
 }
@@ -81,7 +91,20 @@ export interface PassRecord {
   restart: RestartKind | null;
 }
 
+export interface ShotRecord {
+  team: 0 | 1;
+  x: number;
+  y: number;
+  /** 相手ゴールの中心からの距離（m） */
+  distance: number;
+  result: "GOAL" | "SAVED" | "BLOCKED" | "OFF_TARGET";
+}
+
 interface InFlight {
+  /** パスかシュートか */
+  shot: boolean;
+  /** 蹴ったコマ */
+  at: number;
   team: 0 | 1;
   from: Agent;
   x: number;
@@ -106,6 +129,7 @@ export class MatchSim {
   readonly restarts: Record<RestartKind, number> = { KICKOFF: 0, THROW_IN: 0, GOAL_KICK: 0, CORNER: 0, FREE_KICK: 0 };
   readonly offsides: [number, number] = [0, 0];
   readonly passes: PassRecord[] = [];
+  readonly shots: ShotRecord[] = [];
   readonly steals: [number, number] = [0, 0];
   plans: [TeamPlan, TeamPlan];
 
@@ -138,8 +162,8 @@ export class MatchSim {
     const by = setup.ball.kickedBy;
     if (by !== undefined) {
       const from = this.agents[by]!;
-      this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y, expectedTeam: null,
-                        restart: null,
+      this.inFlight = { shot: setup.ball.shot ?? false, at: 0, team: from.team, from, x: this.ball.x, y: this.ball.y,
+                        expectedTeam: null, restart: null,
                         offside: offsidePositions(from.team, this.ball.x,
                                                   this.agents.map((a) => ({ team: a.team, x: a.body.x }))) };
       this.lastTeam = from.team;
@@ -178,6 +202,11 @@ export class MatchSim {
       if (h !== null && this.plan !== null && this.tick >= this.settledAt) {
         if (this.plan.kind === "PASS") {
           this.kick(h, this.plan.vx, this.plan.vy, this.agents[this.plan.to]!.team, null);
+        } else if (this.plan.kind === "SHOOT") {
+          this.kick(h, this.plan.vx, this.plan.vy, h.team, null, true);
+        } else if (this.plan.kind === "CLEAR") {
+          this.kick(h, this.plan.vx, this.plan.vy, null, null);
+          this.inFlight = null;
         } else {
           h.aimX = this.plan.x;
           h.aimY = this.plan.y;
@@ -233,11 +262,13 @@ export class MatchSim {
     this.ball.y = r.y;
     this.ball.kick(0.0, 0.0);
     const team = this.agents.filter((a) => a.team === r.team);
-    let taker = team.find((a) => a.role === "GK")!;
-    if (r.kind !== "GOAL_KICK") {
+    if (team.length === 0) throw new Error(`再開するチーム ${r.team} に選手がいない`);
+    let taker: Agent | undefined = r.kind === "GOAL_KICK" ? team.find((a) => a.role === "GK") : undefined;
+    if (taker === undefined) {
+      // フィールドの選手でいちばん近い人（フィールドの選手がいなければ GK）
+      const pool = team.some((a) => a.role !== "GK") ? team.filter((a) => a.role !== "GK") : team;
       let best = Infinity;
-      for (const a of team) {
-        if (a.role === "GK") continue;
+      for (const a of pool) {
         const d = hypot(a.body.x - r.x, a.body.y - r.y);
         if (d < best) {
           best = d;
@@ -245,7 +276,7 @@ export class MatchSim {
         }
       }
     }
-    this.restart = { ...r, taker: taker.id };
+    this.restart = { ...r, taker: taker!.id };
     this.restartReadyAt = null;
     this.restartBegan = this.tick;
     this.eventHappened = true;
@@ -265,9 +296,10 @@ export class MatchSim {
     if (r.kind === "KICKOFF" && !this.everyoneInOwnHalf()
         && this.tick - this.restartBegan < KICKOFF_WAIT_MAX_TICKS) return;
     const plan = decideRestartKick(this.view(), taker, r.kind);
-    if (plan.kind !== "PASS") return;
+    if (plan.kind !== "PASS" && plan.kind !== "CLEAR") return;
     this.restart = null;
-    this.kick(taker, plan.vx, plan.vy, this.agents[plan.to]!.team, r.kind);
+    this.kick(taker, plan.vx, plan.vy, plan.kind === "PASS" ? this.agents[plan.to]!.team : null, r.kind);
+    if (plan.kind === "CLEAR") this.inFlight = null;
     this.doubleTouchBan = taker.id;
   }
 
@@ -281,11 +313,12 @@ export class MatchSim {
   // ------------------------------------------------------------ ボール
 
   private kick(from: Agent, vx: number, vy: number, expectedTeam: 0 | 1 | null,
-               restart: RestartKind | null): void {
+               restart: RestartKind | null, shot = false): void {
     const offside = exemptFromOffside(restart)
       ? new Set<number>()
       : offsidePositions(from.team, this.ball.x, this.agents.map((a) => ({ team: a.team, x: a.body.x })));
-    this.inFlight = { team: from.team, from, x: this.ball.x, y: this.ball.y, expectedTeam, restart, offside };
+    this.inFlight = { shot, at: this.tick, team: from.team, from, x: this.ball.x, y: this.ball.y,
+                      expectedTeam, restart, offside };
     this.ball.kick(vx, vy);
     this.holder = null;
     this.plan = null;
@@ -314,7 +347,9 @@ export class MatchSim {
   /** ゴールなら得点してキックオフ、そうでなければ競技規則どおりの再開（laws.ts） */
   private ballOut(): void {
     const scorer = goalScored(this.ball.x, this.ball.y);
-    if (this.inFlight !== null) this.closePass("OUT", this.ball.x, this.ball.y);
+    const f = this.inFlight;
+    if (f !== null && f.shot) this.closeShot(scorer === f.team ? "GOAL" : "OFF_TARGET");
+    else if (f !== null) this.closePass("OUT", this.ball.x, this.ball.y);
     this.doubleTouchBan = null;
     if (scorer !== null) {
       this.score[scorer] += 1;
@@ -329,6 +364,8 @@ export class MatchSim {
     const h = this.holder;
     if (h !== null) {
       if (this.tick < this.settledAt) return;
+      // 🔑 GK が自分のペナルティエリアの中で手で持っているボールには挑めない（第12条）
+      if (h.role === "GK" && inOwnPenaltyArea(h.team, this.ball.x, this.ball.y)) return;
       // 相手の足がボールに届き、しかも持っている人よりボールに近ければ奪う
       const mine = hypot(this.ball.x - h.body.x, this.ball.y - h.body.y);
       const thief = this.closestWithin(REACH_M, (a) => a.team !== h.team);
@@ -338,13 +375,12 @@ export class MatchSim {
       }
       return;
     }
-    if (this.ball.speed > CONTROL_MAX_MPS) return;
     // 🔴 このコマにボールが通った線で見る（終わりの位置だけで見ると、速いボールが足をすり抜ける）。
     //    線の手前で届いた選手が先。同じならボールの終わりの位置に近い選手、それも同じなら並びが前
     let got: { a: Agent; s: number; d: number } | null = null;
     for (const a of this.agents) {
       if (this.noTouchUntil[a.id]! > this.tick || this.doubleTouchBan === a.id) continue;
-      const s = enterAt(this.prevX, this.prevY, this.ball.x, this.ball.y, a.body.x, a.body.y, REACH_M);
+      const s = enterAt(this.prevX, this.prevY, this.ball.x, this.ball.y, a.body.x, a.body.y, this.reachOf(a));
       if (s < 0.0) continue;
       const d = hypot(this.ball.x - a.body.x, this.ball.y - a.body.y);
       if (got === null || s < got.s || (s === got.s && d < got.d)) got = { a, s, d };
@@ -355,7 +391,18 @@ export class MatchSim {
     this.ball.y = this.prevY + (this.ball.y - this.prevY) * got.s;
     this.doubleTouchBan = null;
     const f = this.inFlight;
-    if (f !== null) {
+    const speed = this.ball.speed;
+    const keeper = got.a.role === "GK" && inOwnPenaltyArea(got.a.team, this.ball.x, this.ball.y);
+    if (f !== null && f.shot) {
+      this.closeShot(got.a.team === f.team ? "BLOCKED" : keeper ? "SAVED" : "BLOCKED");
+    }
+    // 🔑 止められない速さなら、触った人のボールにはならない（フィールドの選手ははね返し、GK は横へ弾く）
+    if (keeper ? speed > GK_CATCH_MAX_MPS : speed > CONTROL_MAX_MPS) {
+      if (this.inFlight !== null) this.closePass("INTERCEPTED", this.ball.x, this.ball.y);
+      this.deflect(got.a, keeper);
+      return;
+    }
+    if (f !== null && !f.shot) {
       // 🔑 オフサイド（第11条）: 蹴った瞬間にオフサイドの位置にいた味方が、そのボールに触った
       if (got.a.team === f.team && got.a !== f.from && f.offside.has(got.a.id)) {
         this.closePass("OFFSIDE", this.ball.x, this.ball.y);
@@ -379,15 +426,51 @@ export class MatchSim {
     return best;
   }
 
+  /**
+   * 足（GK は手と飛び込み）が届く距離。
+   * 🔑 GK が自分のペナルティエリアの中にいれば、蹴られてからの時間に応じて飛び込める（reach.ts と同じ式）
+   */
+  private reachOf(a: Agent): number {
+    if (a.role !== "GK" || !inOwnPenaltyArea(a.team, this.ball.x, this.ball.y)) return REACH_M;
+    const f = this.inFlight;
+    return f === null ? GK_ARM_M + GK_DIVE_M : gkReach((this.tick - f.at) * 0.1);
+  }
+
+  /** 止められずに触れた: フィールドの選手ははね返し、GK は横へ弾く。誰のボールでもなくなる */
+  private deflect(a: Agent, keeper: boolean): void {
+    const v = this.ball.speed;
+    if (keeper) {
+      // ゴールラインへ向かう勢いは少し残し、ゴールの外側へそらす
+      const side = this.ball.y >= PITCH_WIDTH_M / 2 ? 1.0 : -1.0;
+      this.ball.kick(this.ball.vx * PARRY_SPEED * 0.5, side * v * PARRY_SPEED);
+    } else {
+      this.ball.kick(-this.ball.vx * BLOCK_REBOUND, -this.ball.vy * BLOCK_REBOUND);
+    }
+    this.holder = null;
+    this.plan = null;
+    this.lastTeam = a.team;
+    this.noTouchUntil[a.id] = this.tick + KICKER_NO_TOUCH_TICKS;
+    this.eventHappened = true;
+    this.teamEvent = true;
+  }
+
   private take(a: Agent): void {
     this.holder = a;
     this.lastTeam = a.team;
-    this.settledAt = this.tick + FIRST_TOUCH_TICKS;
+    const caught = a.role === "GK" && inOwnPenaltyArea(a.team, this.ball.x, this.ball.y);
+    this.settledAt = this.tick + (caught ? GK_HOLD_TICKS : FIRST_TOUCH_TICKS);
     this.plan = null;
     // 🔑 止めたボールは体と同じ動きになる（足元に収める）
     this.ball.kick(a.body.vx, a.body.vy);
     this.eventHappened = true;
     this.teamEvent = true;
+  }
+
+  private closeShot(result: ShotRecord["result"]): void {
+    const f = this.inFlight!;
+    const gx = f.team === 0 ? PITCH_LENGTH_M : 0.0;
+    this.shots.push({ team: f.team, x: f.x, y: f.y, distance: hypot(gx - f.x, PITCH_WIDTH_M / 2 - f.y), result });
+    this.inFlight = null;
   }
 
   private closePass(result: PassRecord["result"], x: number, y: number): void {

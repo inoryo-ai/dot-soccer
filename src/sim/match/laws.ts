@@ -3,7 +3,7 @@
  *
  * 🔑 ここは「サッカーとはこういうもの」の層。数字はすべて競技規則の値で、合わせ込む係数は置かない。
  *    第1条（競技のフィールド）・第8条（プレーの開始と再開）・第9条（ボールのインプレーとアウトオブプレー）・
- *    第11条（オフサイド）・第13条（フリーキック）・第15条（スローイン）・第16条（ゴールキック）・
+ *    第11条（オフサイド）・第12条（GK が手を使える場所）・第13条（フリーキック）・第15条（スローイン）・第16条（ゴールキック）・
  *    第17条（コーナーキック）。
  * 🔑 いまはボールが地面を転がるだけなので、「ラインを越えた」はボール全体が越えた時点
  *    （第9条）＝中心がラインの外へ出た時点として扱う。
@@ -17,6 +17,17 @@ import { PITCH_LENGTH_M, PITCH_WIDTH_M } from "./reach.ts";
 export const GOAL_WIDTH_M = 7.32;
 /** ゴールエリアの奥行きと、ゴールポストから横へ出る長さ（第1条: 5.5m） */
 export const GOAL_AREA_DEPTH_M = 5.5;
+/** ペナルティエリアの奥行きと、ゴールの中心から横の端まで（第1条: 16.5m、ゴールポストから 16.5m ＋ ゴール幅の半分） */
+export const PENALTY_AREA_DEPTH_M = 16.5;
+export const PENALTY_AREA_HALF_WIDTH_M = 16.5 + 7.32 / 2;
+
+/** チーム team の GK が手を使える場所（自分のペナルティエリアの中・第12条） */
+export function inOwnPenaltyArea(team: 0 | 1, x: number, y: number): boolean {
+  const fromLine = team === 0 ? x : PITCH_LENGTH_M - x;
+  return fromLine >= -0.5 && fromLine <= PENALTY_AREA_DEPTH_M
+    && Math.abs(y - PITCH_WIDTH_M / 2) <= PENALTY_AREA_HALF_WIDTH_M;
+}
+
 /** フリーキック・コーナーキック・キックオフで相手が離れる距離（第8・13・17条: 9.15m） */
 export const KEEP_AWAY_M = 9.15;
 /** スローインで相手が離れる距離（第15条: 2m） */

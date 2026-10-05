@@ -80,6 +80,7 @@
 | 静止からの 10/20/30/40 m のタイム | 2.01 / 3.24 / 4.39 / 5.51 秒 | [HA19] ノルウェー代表のテスト |
 | 最高速度に達するまで | 約 4 秒の加速（直前は約 10 km/h） | [SI25] |
 | キックの球速 | インサイド 23.4 m/s ／ インステップ 28.0 m/s（全力キックは 18〜35 m/s） | [NU02] 実験室、[KK07] |
+| GK の飛び込み | 体の中心が横へ 1.36〜1.54m、その平均の速さ 2.84〜3.18 m/s（ゴール中心から 3.5m 横のボールへ） | [SR22] PK の動作解析 |
 | ボールの空気抵抗の係数 | 遅いとき 約0.43 ／ 速いとき（22〜30 m/s）約0.25。境目は 15〜21 m/s | [AS07] 風洞実験 |
 | 芝の上での転がり | 高さ 1m の台から放して 4.0〜8.0m（FIFA Quality PRO の合格範囲） | [FIFA] 検索結果の要約で確認。PDF 本文は未読 |
 
@@ -116,6 +117,7 @@
 - [SI25] Silva ら 2025, Biol Sport. https://pmc.ncbi.nlm.nih.gov/articles/PMC11694206/
 - [NU02] Nunome ら 2002, MSSE. https://pubmed.ncbi.nlm.nih.gov/12471312/
 - [KK07] Kellis & Katis 2007, JSSM. https://pubmed.ncbi.nlm.nih.gov/24149324/
+- [SR22] Penalty feet positioning rule modification and laterality effect on soccer goalkeepers' diving kinematics, Scientific Reports 2022. https://pmc.ncbi.nlm.nih.gov/articles/PMC9630263/
 - [AS07] Asai ら 2007, Sports Engineering 10:101-110. https://people.stfx.ca/smackenz/courses/HK474/Labs/Jump%20Float%20Lab/Asai%202007%20Fundamental%20aerodynamics%20of%20the%20soccer%20ball.pdf
 - [FIFA] FIFA Quality Programme for Football Turf, Test Manual II. https://digitalhub.fifa.com/m/7e03cf23203765a2/original/FIFA-quality-programme-for-football-turf-Test-Manual-II-Test-Requirements-2015v-3-4.pdf
 - Wyscout 公開データ: Pappalardo ら 2019, Sci Data. https://www.nature.com/articles/s41597-019-0247-7 ／ https://doi.org/10.6084/m9.figshare.c.4415000.v5（CC BY 4.0）

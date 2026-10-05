@@ -21,9 +21,9 @@ import type { Position } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
 import type { Body } from "./body.ts";
-import { PITCH_LENGTH_M, PITCH_WIDTH_M, firstTouch } from "./reach.ts";
+import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, exitPoint, firstTouch } from "./reach.ts";
 import type { Touch } from "./reach.ts";
-import { exemptFromOffside, offsidePositions } from "./laws.ts";
+import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsidePositions } from "./laws.ts";
 import type { RestartKind } from "./laws.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
@@ -81,12 +81,73 @@ export const NO_CARRY_NEAR_GOAL_M = 20.0;
 /** 運ぶときの本気度。ボールを持っていると全力では走れない（設計値・出典なし） */
 export const CARRY_EFFORT = 0.75;
 
+/**
+ * 撃つかを考える、相手ゴールの中心からの距離（m）。🔑 設計値（出典なし）。
+ * 確かめ方: 平均シュート距離 約15m・ボックス外からの割合 32〜44%（`docs/realism-reference.md`）
+ */
+export const SHOOT_RANGE_M = 30.0;
+/** シュートの速さ（m/s）。全力のインステップキック 28.0 m/s（Nunome ら 2002）と、少し抑えた速さ */
+export const SHOT_SPEEDS_MPS: readonly number[] = [28.0, 24.0];
+/** 狙う点の、ゴールの中心からの横のずれ（m）。ポストの内側（3.66m − ボールの半径）まで */
+export const SHOT_AIMS_M: readonly number[] = [GOAL_WIDTH_M / 2 - 0.4, 2.0, 0.0];
+
 export type HolderPlan =
   | { kind: "PASS"; to: number; vx: number; vy: number; expect: Touch }
+  | { kind: "SHOOT"; vx: number; vy: number }
+  /** 出し先を決めずに蹴り出す（パスにもシュートにも数えない） */
+  | { kind: "CLEAR"; vx: number; vy: number }
   | { kind: "CARRY"; x: number; y: number };
+
+/** GK の番号 → チーム（reach.ts の先読みで、GK だけ手と飛び込みのぶん遠くまで届く） */
+export function keepersOf(agents: readonly Agent[]): Map<number, 0 | 1> {
+  const m = new Map<number, 0 | 1>();
+  for (const a of agents) if (a.role === "GK") m.set(a.id, a.team);
+  return m;
+}
+
+/**
+ * 撃つ。ゴールの幅の何か所かを、速さを変えて先読みし、**誰にも触られずにゴールポストの間を越える**ものを探す。
+ * 🔑 GK から遠い側から試し、最初に見つかったものを撃つ（決定論）。見つからなければ撃たない。
+ * 🔴 いまは乱数ゼロ（D-42）なので、蹴ったボールは狙いどおりに飛ぶ。外れるのは先読みが外れたときだけ。
+ */
+export function decideShot(v: View, me: Agent): HolderPlan | null {
+  const dir = attackDir(me.team);
+  const gx = dir > 0 ? PITCH_LENGTH_M : 0.0;
+  const gy = PITCH_WIDTH_M / 2;
+  if (hypot(gx - v.ball.x, gy - v.ball.y) > SHOOT_RANGE_M) return null;
+  const gk = v.agents.find((a) => a.team !== me.team && a.role === "GK");
+  const gkY = gk?.body.y ?? gy;
+  const aims: number[] = [];
+  for (const off of SHOT_AIMS_M) {
+    if (off === 0.0) aims.push(gy);
+    else aims.push(gy + off, gy - off);
+  }
+  aims.sort((p, q) => Math.abs(q - gkY) - Math.abs(p - gkY) || p - q);
+  const keepers = keepersOf(v.agents);
+  const blocked = new Set<number>([me.id]);
+  for (const aimY of aims) {
+    const dx = gx - v.ball.x;
+    const dy = aimY - v.ball.y;
+    const d = hypot(dx, dy);
+    for (const speed of SHOT_SPEEDS_MPS) {
+      const probe = new Ball(v.ball.x, v.ball.y);
+      probe.kick(dx / d * speed, dy / d * speed);
+      if (firstTouch(probe, v.bodies, blocked, keepers) !== null) continue;
+      const out = exitPoint(probe);
+      if (out !== null && goalScored(out.x, out.y) === me.team) {
+        return { kind: "SHOOT", vx: probe.vx, vy: probe.vy };
+      }
+    }
+  }
+  return null;
+}
 
 /** 持っている人の判断 */
 export function decideHolder(v: View, me: Agent): HolderPlan {
+  // 🔑 GK が手で持っているときは運ばない。出し先へ配る（第12条: 持てるのは6秒まで）
+  if (me.role === "GK") return decideRestartKick(v, me, "FREE_KICK");
+  const shot = decideShot(v, me);
+  if (shot !== null) return shot;
   const dir = attackDir(me.team);
   const goalLineX = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const opponents = v.agents.filter((a) => a.team !== me.team);
@@ -103,6 +164,8 @@ export function decideHolder(v: View, me: Agent): HolderPlan {
 
   const pass = bestPass(v, me);
   if (pass !== null) return pass;
+  // ゴール前で出せる先も撃てるコースも無ければ、ゴールの正面へ運んでコースを探す
+  if (nearGoal) return { kind: "CARRY", ...inside(goalLineX - dir * 11.0, PITCH_WIDTH_M / 2) };
 
   // 出せる先が無い: いちばん近い相手から離れる向きへ運ぶ
   let nearest: Agent | null = null;
@@ -130,6 +193,14 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
   if (safe !== null) return safe;
   const outlets = v.plans[me.team].outlets.map((id) => v.agents[id]!);
   const pool = outlets.length > 0 ? outlets : v.agents.filter((a) => a.team === me.team && a.id !== me.id);
+  const speed = speeds[1]!;
+  if (pool.length === 0) {
+    // 味方がいない: センターへ向けて蹴り出す
+    const dx = PITCH_LENGTH_M / 2 - v.ball.x;
+    const dy = PITCH_WIDTH_M / 2 - v.ball.y;
+    const d = hypot(dx, dy) || 1.0;
+    return { kind: "CLEAR", vx: dx / d * speed, vy: dy / d * speed };
+  }
   let to = pool[0]!;
   let best = Infinity;
   for (const a of pool) {
@@ -139,12 +210,11 @@ export function decideRestartKick(v: View, me: Agent, kind: RestartKind): Holder
       to = a;
     }
   }
-  const speed = speeds[1]!;
   const dx = to.body.x - v.ball.x;
   const dy = to.body.y - v.ball.y;
   const d = hypot(dx, dy) || 1.0;
   return { kind: "PASS", to: to.id, vx: dx / d * speed, vy: dy / d * speed,
-           expect: { who: to.id, t: 0.0, x: to.body.x, y: to.body.y } };
+           expect: { who: to.id, speed, t: 0.0, x: to.body.x, y: to.body.y } };
 }
 
 /**
@@ -156,6 +226,7 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
                   restartKind: RestartKind | null = null): HolderPlan | null {
   const dir = attackDir(me.team);
   const blocked = new Set<number>([me.id]);
+  const keepers = keepersOf(v.agents);
   // 🔑 オフサイドの位置にいる味方には出さない（出し手には線が見えている）。直接受けてよい再開は別（第11条）
   const offside = exemptFromOffside(restartKind)
     ? new Set<number>()
@@ -174,8 +245,10 @@ function bestPass(v: View, me: Agent, speeds: readonly number[] = PASS_SPEEDS_MP
       const vy = dy / d * speed;
       const probe = new Ball(v.ball.x, v.ball.y);
       probe.kick(vx, vy);
-      const touch = firstTouch(probe, v.bodies, blocked);
-      if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)) continue;
+      const touch = firstTouch(probe, v.bodies, blocked, keepers);
+      // 🔑 味方が先に触っても、速すぎて止められなければ（はね返る）通ったことにならない
+      if (touch === null || v.agents[touch.who]!.team !== me.team || offside.has(touch.who)
+          || touch.speed > CONTROL_MAX_MPS) continue;
       const gain = (touch.x - v.ball.x) * dir;
       if (gain > bestGain) {
         bestGain = gain;
@@ -199,7 +272,7 @@ export function decideOffBall(v: View): void {
     for (const team of [0, 1] as const) {
       const blocked = new Set<number>(v.blocked);
       for (const a of v.agents) if (a.team !== team) blocked.add(a.id);
-      chaser[team] = firstTouch(v.ball, v.bodies, blocked);
+      chaser[team] = firstTouch(v.ball, v.bodies, blocked, keepersOf(v.agents));
     }
   }
 
