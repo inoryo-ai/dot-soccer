@@ -36,6 +36,9 @@ export interface Tactics {
   passOppReactS: number;
   /** 寄せられていないとき、受けてからこの秒数は出さずに持つ（運ぶ）。0 なら出せるときはすぐ出す */
   holdBeforePassS: number;
+  /** 前へ急ぐ度合い: パスの価値に「前へ進んだ距離 ÷ ピッチの長さ × これ」を足す。0 なら受ける地点の価値だけで選ぶ。
+   *  大きいほど、安全な横・後ろのパスより、通る見込みのある前へのパス（ロングボール・スルーパス）を選ぶ */
+  progressBonus: number;
   /** 出し先の候補・裏へ走り込む人数・クロスの場面でゴール前へ入る人数 */
   outletCount: number;
   runnerCount: number;
@@ -46,7 +49,11 @@ export interface Tactics {
 }
 
 /**
- * 標準の型。2026-10-05 時点の値をそのまま移したもの（ここから現実の数字に合うまで探す）。
+ * 標準の型（2026-10-05 決定・D-42 の「標準の型を決める」）。
+ * 🔑 撃つ見込みの閾値（shootMinChance）0.04 は、シュートのブレ 8°（execution.ts）と組で、12試合の平均が
+ *    シュート 0.237・得点 0.028（実プレー1分あたり・現実 約0.23・0.027）、エリア内から撃つ割合 66%（現実 56〜68%）。
+ *    閾値 0.03〜0.12 × ブレ 4〜8° を回して選んだ。
+ * 🔑 ここからつまみをずらして、ハイプレス・ダイレクト・低ブロック・ポゼッションの4つを作る（次の段階）。
  */
 export const STANDARD: Tactics = {
   pressStartM: 60.0,
@@ -63,9 +70,10 @@ export const STANDARD: Tactics = {
   attackShape: { length: 36.0, width: 41.0 },
   passOppReactS: 0.05,
   holdBeforePassS: 0.0,
+  progressBonus: 0.0,
   outletCount: 3,
   runnerCount: 2,
   boxCount: 3,
-  shootMinChance: 0.12,
+  shootMinChance: 0.04,
   crossMinChance: 0.2,
 };

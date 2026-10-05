@@ -385,12 +385,14 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         [goalLineX - dir * 5.0, PITCH_WIDTH_M / 2 + side * 3.0],    // ニアポスト
         [goalLineX - dir * 6.0, PITCH_WIDTH_M / 2 - side * 4.0],    // ファーポスト
         [goalLineX - dir * 11.0, PITCH_WIDTH_M / 2],                // ペナルティスポット
+        [goalLineX - dir * 13.0, PITCH_WIDTH_M / 2 + side * 7.0],   // マイナスの折り返し（ボール側）
+        [goalLineX - dir * 16.0, PITCH_WIDTH_M / 2 - side * 6.0],   // エリアの外のこぼれ球
       ];
       const nearer = (p: Agent, q: Agent): number => (q.body.x - p.body.x) * dir || p.id - q.id;
       const taker = restart?.taker;
       const pick = (role: Agent["role"]): Agent[] =>
         field.filter((a) => a.id !== holder.id && a.id !== taker && a.role === role).sort(nearer);
-      const attackers = [...pick("FW"), ...pick("MF")].slice(0, tactics.boxCount);
+      const attackers = [...pick("FW"), ...pick("MF")].slice(0, Math.min(tactics.boxCount, spots.length));
       attackers.forEach((a, i) => {
         const o = orders.get(a.id)!;
         [o.x, o.y] = spots[i]!;

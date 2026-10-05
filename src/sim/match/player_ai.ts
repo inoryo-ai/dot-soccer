@@ -558,7 +558,10 @@ function bestPassValued(v: View, me: Agent, speeds: readonly number[] = PASS_SPE
       if (touch.speed > CONTROL_MAX_MPS) continue;
       if (touch.z > (box ? HEAD_MAX_Z_M : CONTROL_MAX_Z_M)) continue;
       const open = openAt(opponents, touch.x, touch.y, Math.min(touch.t, 1.0));
-      const gain = xtAt(me.team, touch.x, touch.y) * receiveFactor(open);
+      // 🔑 戦術の「前へ急ぐ度合い」（tactics.progressBonus）: 前へ進んだぶんだけ価値を足す
+      const progress = Math.max(0.0, (touch.x - v.ball.x) * attackDir(me.team));
+      const gain = xtAt(me.team, touch.x, touch.y) * receiveFactor(open)
+        + v.tactics[me.team].progressBonus * progress / PITCH_LENGTH_M;
       if (gain > bestGain) {
         bestGain = gain;
         best = { kind: "PASS", to: touch.who, vx, vy, vz, expect: touch };
