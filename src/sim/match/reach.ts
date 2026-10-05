@@ -113,7 +113,7 @@ export function reachSlack(body: Body, x: number, y: number, t: number,
   const g = ACCEL_TAU_S * (1.0 - exp(-r2 / ACCEL_TAU_S));
   const cx = ox + ax * g;
   const cy = oy + ay * g;
-  return body.topSpeed * (r2 - g) - (hypot(x - cx, y - cy) - reach);
+  return body.maxSpeed * (r2 - g) - (hypot(x - cx, y - cy) - reach);
 }
 
 /**
@@ -127,7 +127,7 @@ export function timeToReach(body: Body, x: number, y: number, reach = REACH_M, r
   const STEP = 0.05;
   // 🔑 速くするため（結果は変えない）: t 秒で体を動かせるのは最大（いまの速さ ＋ 最高速）× t。
   //    それでも届かない時刻までは reachSlack を計算しない。刻みの時刻は今までどおり足し算で進める
-  const rate = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.topSpeed;
+  const rate = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.maxSpeed;
   let t = react;
   while ((rate * t + reach + FILTER_MARGIN_M < d) || reachSlack(body, x, y, t, reach, react) < 0.0) {
     t += STEP;
@@ -241,7 +241,7 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
   const maxReach = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const body = bodies[i]!;
-    moveRate[i] = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.topSpeed;
+    moveRate[i] = Math.sqrt(body.vx * body.vx + body.vy * body.vy) + body.maxSpeed;
     maxReach[i] = (keepers.has(i) ? GK_ARM_M + GK_DIVE_M : REACH_M) + FILTER_MARGIN_M;
   }
   for (let k = 1; k <= steps; k++) {
@@ -324,7 +324,7 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
       // 速くするための足切り（平方根で測り、境目は余裕をもって残す＝結果は変えない）
       const ddx = cx - ox;
       const ddy = cy - oy;
-      if (Math.sqrt(ddx * ddx + ddy * ddy) - reach > body.topSpeed * (t - react) + FILTER_MARGIN_M) return;
+      if (Math.sqrt(ddx * ddx + ddy * ddy) - reach > body.maxSpeed * (t - react) + FILTER_MARGIN_M) return;
       const slack = reachSlack(body, cx, cy, t, reach, react);
       if (slack < 0.0) return;
       // 線の手前で触れる選手が先。同じなら余裕の大きい（＝早く着ける）選手、それも同じなら並びが前

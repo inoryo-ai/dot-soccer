@@ -28,9 +28,13 @@ export const HOLD_DEADBAND_M = 1.5;
 /** 持ち場がこれより遠ければ、ジョグではなくランニングで戻る（m）。🔑 設計値（出典なし） */
 export const RECOVER_RUN_M = 12.0;
 
-/** ペース → body.steerTo に渡す本気度（最高速に対する割合） */
+/**
+ * ペース → body.steerTo に渡す本気度（今の最高速に対する割合）。
+ * 🔑 割合は「疲れていない時の最高速」に対して出す。steerTo は今の最高速（疲れを含む）にかけるので、
+ *    疲れるとどのペースも同じ割合だけ遅くなる。瞬発力が残っていなければスプリントはランニングに落ちる（stamina.ts）
+ */
 export function effortOf(body: Body, pace: Pace): number {
-  if (pace === "SPRINT") return 1.0;
+  if (pace === "SPRINT") return body.canSprint ? 1.0 : Math.min(1.0, PACE_MPS.RUN / body.topSpeed);
   return Math.min(1.0, PACE_MPS[pace] / body.topSpeed);
 }
 

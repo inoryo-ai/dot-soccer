@@ -511,7 +511,7 @@ function bestPassValued(v: View, me: Agent, speeds: readonly number[] = PASS_SPE
       const going = ul > 1.0 ? (mate.body.vx * ux + mate.body.vy * uy) / ul : 0.0;   // 裏へ向かう速さ
       if (ul > 1.0 && going >= THROUGH_RUNNING_MPS) {
         for (const t of THROUGH_LEADS_S) {
-          const run = Math.min(ul, runDistance(mate.body.topSpeed, going, t));
+          const run = Math.min(ul, runDistance(mate.body.maxSpeed, going, t));
           spots.push([mate.body.x + ux / ul * run, mate.body.y + uy / ul * run]);
         }
       }

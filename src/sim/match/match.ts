@@ -24,6 +24,7 @@ import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
 import { Body, topSpeed } from "./body.ts";
 import { Execution } from "./execution.ts";
+import { Fatigue, staminaEfficiency } from "./stamina.ts";
 import type { KickKind } from "./execution.ts";
 import { exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut } from "./laws.ts";
 import type { Restart, RestartKind } from "./laws.ts";
@@ -72,6 +73,8 @@ export interface Spawn {
   topSpeed: number;
   /** 技術（0〜100）。省略すれば 50 */
   technique?: number;
+  /** スタミナ（0〜100）。省略すれば 50。体力の減りにくさ（stamina.ts） */
+  stamina?: number;
 }
 
 export interface Setup {
@@ -142,6 +145,8 @@ export class MatchSim {
   readonly ball: Ball;
   readonly agents: Agent[];
   readonly bodies: Body[];
+  /** 選手ごとの体力（agents と同じ並び） */
+  readonly fatigue: Fatigue[];
   holder: Agent | null = null;
   /** 再開を待っているなら、その中身 */
   restart: RestartState | null = null;
@@ -183,6 +188,7 @@ export class MatchSim {
       homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5, stop: true,
     }));
     this.bodies = this.agents.map((a) => a.body);
+    this.fatigue = setup.players.map((p) => new Fatigue(staminaEfficiency(p.stamina ?? 50)));
     this.noTouchUntil = this.agents.map(() => 0);
     this.execution = new Execution(setup.seed ?? 1);
     this.ball = new Ball(setup.ball.x, setup.ball.y);
@@ -250,8 +256,13 @@ export class MatchSim {
         }
       }
     }
-    // ③ 体
-    for (const a of this.agents) a.body.steerTo(a.aimX, a.aimY, a.effort, a.stop);
+    // ③ 体（動いたぶん体力が減り、今の最高速に反映する）
+    for (const a of this.agents) {
+      a.body.steerTo(a.aimX, a.aimY, a.effort, a.stop);
+      const f = this.fatigue[a.id]!;
+      f.update(a.body.speed, 0.1);
+      f.applyTo(a.body);
+    }
     if (this.restart !== null) {
       // 再開を待つ間、ボールは置いたまま
       this.tick += 1;

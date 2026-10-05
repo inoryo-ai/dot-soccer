@@ -54,7 +54,17 @@ export class Body {
   y: number;
   vx = 0.0;
   vy = 0.0;
+  /** 疲れていないときの最高速（m/s） */
   readonly topSpeed: number;
+  /** 今の最高速 ÷ topSpeed（体力・stamina.ts。疲れていなければ 1） */
+  capacity = 1.0;
+  /** 瞬発力が残っていて、スプリントできるか（stamina.ts） */
+  canSprint = true;
+
+  /** 今の最高速（疲れを含む） */
+  get maxSpeed(): number {
+    return this.topSpeed * this.capacity;
+  }
 
   constructor(x: number, y: number, topSpeedMps: number) {
     this.x = x;
@@ -90,7 +100,7 @@ export class Body {
     const aDt = MAX_DECEL_MPS2 * DT;
     const room = Math.max(0.0, dist - this.speed * DT / 2.0);
     const stoppable = Math.sqrt(aDt * aDt + 2.0 * MAX_DECEL_MPS2 * room) - aDt;
-    let want = stop ? Math.min(this.topSpeed * effort, stoppable) : this.topSpeed * effort;
+    let want = stop ? Math.min(this.maxSpeed * effort, stoppable) : this.maxSpeed * effort;
     // 🔴 **曲がりきれる速さまで落とす。** 全速 9 m/s で曲がれる半径は 9²÷6 ≒ 13.5m。
     //    それより内側の目標へは、速さを落とさないと**目標の周りを回り続けて**永遠に届かない
     //    （真横 5m の目標に 19秒かかった・2026-10-05）。いまの向きと目標の向きの角を θ として、
@@ -133,7 +143,7 @@ export class Body {
     let gripY = dvy - along * uy;
     let push = 0.0;
     if (along > 0) {
-      push = Math.min(along, Math.max(0.0, (this.topSpeed - s) * ACCEL_GAIN));
+      push = Math.min(along, Math.max(0.0, (this.maxSpeed - s) * ACCEL_GAIN));
     } else {
       gripX += along * ux;                    // 緩める分は踏ん張りで受け持つ
       gripY += along * uy;
