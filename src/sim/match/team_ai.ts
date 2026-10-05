@@ -68,8 +68,14 @@ export const BLOCK_FOLLOW = 0.6;
 export const BLOCK_OFFSET_M: Readonly<Record<"ATTACK" | "DEFEND", number>> = { ATTACK: 22.0, DEFEND: 10.0 };
 /** 横はボールの側へこれだけ寄る（ボールのずれ × この値）。設計値（出典なし） */
 export const BLOCK_SLIDE = 0.5;
-/** GK が構える自陣ゴールからの距離（旧エンジンの GK_DEPTH_M と同じ） */
+/** GK が構える自陣ゴールからの距離の上限（旧エンジンの GK_DEPTH_M と同じ） */
 export const GK_DEPTH_M = 5.0;
+/**
+ * GK はゴールの中心とボールを結ぶ線の上に、ボールまでの距離のこの割合だけ前に出て構える（1m〜GK_DEPTH_M）。
+ * 🔑 設計値（出典なし）。いつも 5m 前に立つと、浮き球の無いいまの作りでは 11m のシュートでもゴールの幅を
+ *    すべて覆ってしまった（2026-10-05）。確かめ方: 枠内シュートのセーブ率・決定率 約11%
+ */
+export const GK_DEPTH_RATIO = 0.12;
 /** パスの出し先の候補の数。設計値（出典なし） */
 export const OUTLET_COUNT = 3;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
@@ -125,9 +131,14 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
     });
   });
   for (const gk of mine.filter((a) => a.role === "GK")) {
+    // ゴールの中心からボールへ向かう線の上
+    const vx = ball.x - ownGoalX;
+    const vy = ball.y - PITCH_WIDTH_M / 2;
+    const dist = hypot(vx, vy) || 1.0;
+    const depth = clamp(GK_DEPTH_RATIO * dist, 1.0, GK_DEPTH_M);
     orders.set(gk.id, {
-      x: ownGoalX + dir * GK_DEPTH_M,
-      y: PITCH_WIDTH_M / 2 + (ball.y - PITCH_WIDTH_M / 2) * 0.25,
+      x: ownGoalX + vx / dist * depth,
+      y: PITCH_WIDTH_M / 2 + vy / dist * depth,
       effort: BLOCK_EFFORT,
       role: "GK",
     });

@@ -214,9 +214,26 @@ export function firstTouch(ball: Ball, bodies: readonly Body[],
     let bestNeed = Infinity;
     bodies.forEach((body, i) => {
       if (blocked.has(i)) return;
-      // 🔑 GK は自分のペナルティエリアの中なら、手と飛び込みのぶん遠くまで届く
+      // 🔑 GK は自分のペナルティエリアの中なら手が使える。届き方は2つのどちらか（match.ts と同じ）:
+      //    ① いま立っている所から飛び込む … 立っていた所から 手＋飛び込み（gkReach）
+      //    ② 走ってから手を伸ばす       … 走った体から 手（GK_ARM_M）
+      //    🔴 走ったうえに飛び込みの 1.5m も足すと二重に数えになる。真ん中の GK が 13m のシュートを
+      //       ゴールの幅いっぱい止めてしまい、どこを狙っても入る向きが無かった（2026-10-05）
       const gkTeam = keepers.get(i);
-      const reach = gkTeam !== undefined && inOwnPenaltyArea(gkTeam, b.x, b.y) ? gkReach(t) : REACH_M;
+      const keeper = gkTeam !== undefined && inOwnPenaltyArea(gkTeam, b.x, b.y);
+      if (keeper) {
+        // 🔴 飛び込みの届く距離は**このコマの始まり**（t − Δt）の値を線全体に使う（match.ts と同じ）。
+        //    終わりの値を使うと、線の始まりの点に 0.1秒先の飛び込みが届いてしまう
+        const sDive = enterAt(ax, ay, b.x, b.y, body.x, body.y, gkReach(t - DT));
+        if (sDive >= 0.0 && (sDive < bestS || (sDive === bestS && -Infinity < bestNeed))) {
+          bestS = sDive;
+          bestNeed = -Infinity;
+          best = { who: i, speed: b.speed, t: t - DT + sDive * DT,
+                   x: ax + (b.x - ax) * sDive, y: ay + (b.y - ay) * sDive };
+          return;
+        }
+      }
+      const reach = keeper ? GK_ARM_M : REACH_M;
       // 🔑 反応しなくても当たる: いまの動きのまま進んだ体が、このコマのボールの線にかかる。
       //    持っている人に張り付いて寄せている相手は、蹴った瞬間のボールに反応なしで足が出る。
       //    これを見ないと、目の前の相手にぶつけるパスを「通る」と読む（2026-10-05）

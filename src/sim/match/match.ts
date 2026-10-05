@@ -23,6 +23,7 @@ import { FORMATIONS } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
 import { Body, topSpeed } from "./body.ts";
+import { Execution } from "./execution.ts";
 import { exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut } from "./laws.ts";
 import type { Restart, RestartKind } from "./laws.ts";
 import { CARRY_EFFORT, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
@@ -67,6 +68,8 @@ export interface Spawn {
   homeX: number;
   homeY: number;
   topSpeed: number;
+  /** 技術（0〜100）。省略すれば 50 */
+  technique?: number;
 }
 
 export interface Setup {
@@ -75,6 +78,8 @@ export interface Setup {
   ball: { x: number; y: number; vx?: number; vy?: number; kickedBy?: number; shot?: boolean };
   /** このチームのキックオフで始める（省略すればボールはそのまま動いている） */
   kickoff?: 0 | 1;
+  /** 実行のブレの種（省略すれば 1）。同じ種なら同じ試合になる */
+  seed?: number;
 }
 
 export interface PassRecord {
@@ -97,12 +102,18 @@ export interface ShotRecord {
   y: number;
   /** 相手ゴールの中心からの距離（m） */
   distance: number;
+  /** 撃った人が読んだ入る見込み（物理から出したゴール期待値・0〜1） */
+  chance: number;
   result: "GOAL" | "SAVED" | "BLOCKED" | "OFF_TARGET";
 }
 
 interface InFlight {
+  /** 蹴った瞬間に GK が立っていた所（飛び込みはここから・reach.ts と同じ） */
+  keeperAt: Map<number, [number, number]>;
   /** パスかシュートか */
   shot: boolean;
+  /** シュートなら、撃った人が読んだ入る見込み */
+  chance: number;
   /** 蹴ったコマ */
   at: number;
   team: 0 | 1;
@@ -148,21 +159,23 @@ export class MatchSim {
   /** 蹴る人がボールに着いて、蹴ってよくなるコマ（まだ着いていなければ null） */
   private restartReadyAt: number | null = null;
   private restartBegan = 0;
+  private readonly execution: Execution;
 
   constructor(setup: Setup) {
     this.agents = setup.players.map((p, id) => ({
-      id, team: p.team, role: p.role, body: new Body(p.x, p.y, p.topSpeed),
+      id, team: p.team, role: p.role, body: new Body(p.x, p.y, p.topSpeed), technique: p.technique ?? 50,
       homeX: p.homeX, homeY: p.homeY, aimX: p.x, aimY: p.y, effort: 0.5, stop: true,
     }));
     this.bodies = this.agents.map((a) => a.body);
     this.noTouchUntil = this.agents.map(() => 0);
+    this.execution = new Execution(setup.seed ?? 1);
     this.ball = new Ball(setup.ball.x, setup.ball.y);
     this.ball.kick(setup.ball.vx ?? 0.0, setup.ball.vy ?? 0.0);
     this.plans = [planTeam(0, this.agents, this.ball, null), planTeam(1, this.agents, this.ball, null)];
     const by = setup.ball.kickedBy;
     if (by !== undefined) {
       const from = this.agents[by]!;
-      this.inFlight = { shot: setup.ball.shot ?? false, at: 0, team: from.team, from, x: this.ball.x, y: this.ball.y,
+      this.inFlight = { keeperAt: this.keeperPositions(), shot: setup.ball.shot ?? false, chance: 0.0, at: 0, team: from.team, from, x: this.ball.x, y: this.ball.y,
                         expectedTeam: null, restart: null,
                         offside: offsidePositions(from.team, this.ball.x,
                                                   this.agents.map((a) => ({ team: a.team, x: a.body.x }))) };
@@ -205,7 +218,7 @@ export class MatchSim {
         if (this.plan.kind === "PASS") {
           this.kick(h, this.plan.vx, this.plan.vy, this.agents[this.plan.to]!.team, null);
         } else if (this.plan.kind === "SHOOT") {
-          this.kick(h, this.plan.vx, this.plan.vy, h.team, null, true);
+          this.kick(h, this.plan.vx, this.plan.vy, h.team, null, this.plan.chance);
         } else if (this.plan.kind === "CLEAR") {
           this.kick(h, this.plan.vx, this.plan.vy, null, null);
           this.inFlight = null;
@@ -316,12 +329,19 @@ export class MatchSim {
   // ------------------------------------------------------------ ボール
 
   private kick(from: Agent, vx: number, vy: number, expectedTeam: 0 | 1 | null,
-               restart: RestartKind | null, shot = false): void {
+               restart: RestartKind | null, shotChance: number | null = null): void {
+    const shot = shotChance !== null;
     const offside = exemptFromOffside(restart)
       ? new Set<number>()
       : offsidePositions(from.team, this.ball.x, this.agents.map((a) => ({ team: a.team, x: a.body.x })));
-    this.inFlight = { shot, at: this.tick, team: from.team, from, x: this.ball.x, y: this.ball.y,
+    this.inFlight = { keeperAt: this.keeperPositions(), shot, chance: shotChance ?? 0.0, at: this.tick, team: from.team, from, x: this.ball.x, y: this.ball.y,
                       expectedTeam, restart, offside };
+    // 🔑 実行のブレ: 狙った速度から、技術・速さ・寄せられ具合に応じてずれる（execution.ts）
+    let near = Infinity;
+    for (const a of this.agents) {
+      if (a.team !== from.team) near = Math.min(near, hypot(a.body.x - from.body.x, a.body.y - from.body.y));
+    }
+    [vx, vy] = this.execution.kick(shot ? "SHOT" : "PASS", vx, vy, from.technique, near);
     this.ball.kick(vx, vy);
     this.holder = null;
     this.plan = null;
@@ -383,7 +403,7 @@ export class MatchSim {
     let got: { a: Agent; s: number; d: number } | null = null;
     for (const a of this.agents) {
       if (this.noTouchUntil[a.id]! > this.tick || this.doubleTouchBan === a.id) continue;
-      const s = enterAt(this.prevX, this.prevY, this.ball.x, this.ball.y, a.body.x, a.body.y, this.reachOf(a));
+      const s = this.touchAt(a);
       if (s < 0.0) continue;
       const d = hypot(this.ball.x - a.body.x, this.ball.y - a.body.y);
       if (got === null || s < got.s || (s === got.s && d < got.d)) got = { a, s, d };
@@ -430,13 +450,31 @@ export class MatchSim {
   }
 
   /**
-   * 足（GK は手と飛び込み）が届く距離。
-   * 🔑 GK が自分のペナルティエリアの中にいれば、蹴られてからの時間に応じて飛び込める（reach.ts と同じ式）
+   * このコマにボールが通った線のどこで、その選手の足（GK は手）が届くか（0〜1・届かなければ −1）。
+   * 🔑 GK は自分のペナルティエリアの中なら、① 蹴られた瞬間に立っていた所から 手＋飛び込み、
+   *    ② いまの体から 手、のどちらか（reach.ts の先読みと同じ。走ったうえに飛び込みを足さない）。
    */
-  private reachOf(a: Agent): number {
-    if (a.role !== "GK" || !inOwnPenaltyArea(a.team, this.ball.x, this.ball.y)) return REACH_M;
+  private touchAt(a: Agent): number {
+    const seg = (x: number, y: number, r: number): number =>
+      enterAt(this.prevX, this.prevY, this.ball.x, this.ball.y, x, y, r);
+    if (a.role !== "GK" || !inOwnPenaltyArea(a.team, this.ball.x, this.ball.y)) {
+      return seg(a.body.x, a.body.y, REACH_M);
+    }
     const f = this.inFlight;
-    return f === null ? GK_ARM_M + GK_DIVE_M : gkReach((this.tick - f.at) * 0.1);
+    const start = f?.keeperAt.get(a.id);
+    const arm = seg(a.body.x, a.body.y, GK_ARM_M);
+    const dive = start === undefined
+      ? seg(a.body.x, a.body.y, GK_ARM_M + GK_DIVE_M)
+      : seg(start[0], start[1], gkReach((this.tick - f!.at) * 0.1));
+    if (arm < 0.0) return dive;
+    if (dive < 0.0) return arm;
+    return Math.min(arm, dive);
+  }
+
+  private keeperPositions(): Map<number, [number, number]> {
+    const m = new Map<number, [number, number]>();
+    for (const a of this.agents) if (a.role === "GK") m.set(a.id, [a.body.x, a.body.y]);
+    return m;
   }
 
   /** 止められずに触れた: フィールドの選手ははね返し、GK は横へ弾く。誰のボールでもなくなる */
@@ -472,7 +510,8 @@ export class MatchSim {
   private closeShot(result: ShotRecord["result"]): void {
     const f = this.inFlight!;
     const gx = f.team === 0 ? PITCH_LENGTH_M : 0.0;
-    this.shots.push({ team: f.team, x: f.x, y: f.y, distance: hypot(gx - f.x, PITCH_WIDTH_M / 2 - f.y), result });
+    this.shots.push({ team: f.team, x: f.x, y: f.y, distance: hypot(gx - f.x, PITCH_WIDTH_M / 2 - f.y),
+                      chance: f.chance, result });
     this.inFlight = null;
   }
 

@@ -17,7 +17,7 @@
  * 🔴 乱数は一切使わない（D-42）。同じ盤面なら必ず同じ判断になる。
  */
 
-import { exp } from "../detmath.ts";
+import { atan2, cos, exp, sin } from "../detmath.ts";
 import type { Position } from "../model.ts";
 import { hypot } from "../pymath.ts";
 import { Ball } from "./ball.ts";
@@ -27,6 +27,7 @@ import { CONTROL_MAX_MPS, PITCH_LENGTH_M, PITCH_WIDTH_M, REACT_S, exitPoint, fir
 import type { Touch } from "./reach.ts";
 import { GOAL_WIDTH_M, exemptFromOffside, goalScored, offsideLineX, offsidePositions } from "./laws.ts";
 import type { RestartKind } from "./laws.ts";
+import { directionSigma } from "./execution.ts";
 import { COVER_BEHIND_M } from "./team_ai.ts";
 import type { RestartState, TeamPlan } from "./team_ai.ts";
 
@@ -36,6 +37,8 @@ export interface Agent {
   readonly team: 0 | 1;
   readonly role: Position;
   readonly body: Body;
+  /** 技術（0〜100）。蹴ったボールのブレの大きさに効く（execution.ts） */
+  readonly technique: number;
   /** 持ち場（チームAI ができるまでは動かない） */
   readonly homeX: number;
   readonly homeY: number;
@@ -94,6 +97,14 @@ export const SHOOT_RANGE_M = 30.0;
 export const SHOT_SPEEDS_MPS: readonly number[] = [28.0, 24.0];
 /** 狙う点の、ゴールの中心からの横のずれ（m）。ポストの内側（3.66m − ボールの半径）まで */
 export const SHOT_AIMS_M: readonly number[] = [GOAL_WIDTH_M / 2 - 0.4, 2.0, 0.0];
+/**
+ * 入る見込みがこれ以上なら撃つ（0〜1）。
+ * 🔑 設計値（出典なし）。オーナー指摘「必ず入る状況はあまりない。確信がなくても撃つ力が欲しい」（2026-10-05）。
+ *    確かめ方: シュート数 12〜14本/チーム・決定率 約11%。2026-10-05 に 15%・8%・4% を各3試合で比べ、
+ *    シュート数と得点が現実にいちばん近い 8% にした（1チーム 10.5〜13.5本・1〜3点）。
+ *    ⚠️ 作る順 5 の特性「エゴイスト」の候補（低いほど撃つ）
+ */
+export const SHOOT_MIN_CHANCE = 0.08;
 
 /** 走り込む先: オフサイドラインのこれだけ裏（m）。🔑 設計値（出典なし） */
 export const RUN_BEYOND_M = 12.0;
@@ -134,7 +145,7 @@ export const THROUGH_RUNNING_MPS = 3.0;
 
 export type HolderPlan =
   | { kind: "PASS"; to: number; vx: number; vy: number; expect: Touch }
-  | { kind: "SHOOT"; vx: number; vy: number }
+  | { kind: "SHOOT"; vx: number; vy: number; chance: number }
   /** 出し先を決めずに蹴り出す（パスにもシュートにも数えない） */
   | { kind: "CLEAR"; vx: number; vy: number }
   | { kind: "CARRY"; x: number; y: number };
@@ -146,41 +157,101 @@ export function keepersOf(agents: readonly Agent[]): Map<number, 0 | 1> {
   return m;
 }
 
+/** いちばん近い相手までの距離（m） */
+export function nearestOpponent(v: View, me: Agent): number {
+  let d = Infinity;
+  for (const a of v.agents) {
+    if (a.team !== me.team) d = Math.min(d, hypot(a.body.x - me.body.x, a.body.y - me.body.y));
+  }
+  return d;
+}
+
 /**
- * 撃つ。ゴールの幅の何か所かを、速さを変えて先読みし、**誰にも触られずにゴールポストの間を越える**ものを探す。
- * 🔑 GK から遠い側から試し、最初に見つかったものを撃つ（決定論）。見つからなければ撃たない。
- * 🔴 いまは乱数ゼロ（D-42）なので、蹴ったボールは狙いどおりに飛ぶ。外れるのは先読みが外れたときだけ。
+ * シュートで試す向きの数。左ポストの 1m 外から右ポストの 1m 外まで。
+ * 🔑 7通りのズレ方だけで見込みを出すと 0, 1/7, 2/7… の飛び飛びになり、閾値が効かなかった（2026-10-05）。
+ *    向きごとの「入る／入らない」の地図を1回作り、ブレの分布の重みで足し合わせる。
  */
-export function decideShot(v: View, me: Agent): HolderPlan | null {
+export const SHOT_SCAN_DIRS = 41;
+
+export interface ShotChoice {
+  vx: number;
+  vy: number;
+  /** 入る見込み（0〜1）。自分のブレの分布で「入る向き」を足し合わせたもの＝物理から出したゴール期待値 */
+  chance: number;
+}
+
+/**
+ * いちばん入る見込みの高い狙いと、その見込み。
+ *
+ * 🔑 速さごとに、ゴールの外から外まで SHOT_SCAN_DIRS 方向へ先読みして「誰にも触られずにポストの間を越えるか」の
+ *    地図を作る。狙いの向き a に対する見込みは、地図の「入る向き」に、自分のブレ（directionSigma）の
+ *    正規分布の重みをかけて足したもの。乱数は引かない（同じ盤面なら同じ見込み）。
+ * 🔑 同じ見込みなら、先に試した（速い・番号の小さい向き）もの（決定論）。
+ */
+export function bestShot(v: View, me: Agent): ShotChoice | null {
   const dir = attackDir(me.team);
   const gx = dir > 0 ? PITCH_LENGTH_M : 0.0;
   const gy = PITCH_WIDTH_M / 2;
   if (hypot(gx - v.ball.x, gy - v.ball.y) > SHOOT_RANGE_M) return null;
-  const gk = v.agents.find((a) => a.team !== me.team && a.role === "GK");
-  const gkY = gk?.body.y ?? gy;
-  const aims: number[] = [];
-  for (const off of SHOT_AIMS_M) {
-    if (off === 0.0) aims.push(gy);
-    else aims.push(gy + off, gy - off);
-  }
-  aims.sort((p, q) => Math.abs(q - gkY) - Math.abs(p - gkY) || p - q);
   const keepers = keepersOf(v.agents);
   const blocked = new Set<number>([me.id]);
-  for (const aimY of aims) {
-    const dx = gx - v.ball.x;
-    const dy = aimY - v.ball.y;
-    const d = hypot(dx, dy);
-    for (const speed of SHOT_SPEEDS_MPS) {
-      const probe = new Ball(v.ball.x, v.ball.y);
-      probe.kick(dx / d * speed, dy / d * speed);
-      if (firstTouch(probe, v.bodies, blocked, keepers) !== null) continue;
-      const out = exitPoint(probe);
-      if (out !== null && goalScored(out.x, out.y) === me.team) {
-        return { kind: "SHOOT", vx: probe.vx, vy: probe.vy };
-      }
-    }
+  const near = nearestOpponent(v, me);
+  const half = GOAL_WIDTH_M / 2 + 1.0;
+  const angles: number[] = [];
+  for (let j = 0; j < SHOT_SCAN_DIRS; j++) {
+    const ty = gy - half + (2 * half) * j / (SHOT_SCAN_DIRS - 1);
+    angles.push(atan2(ty - v.ball.y, gx - v.ball.x));
   }
-  return null;
+  let best: ShotChoice | null = null;
+  for (const speed of SHOT_SPEEDS_MPS) {
+    const goal = angles.map((a) => {
+      const probe = new Ball(v.ball.x, v.ball.y);
+      probe.kick(cos(a) * speed, sin(a) * speed);
+      if (firstTouch(probe, v.bodies, blocked, keepers) !== null) return false;
+      const out = exitPoint(probe);
+      return out !== null && goalScored(out.x, out.y) === me.team;
+    });
+    if (!goal.some((g) => g)) continue;
+    const sigma = directionSigma("SHOT", speed, me.technique, near);
+    // 狙いの候補はポストの内側の向きだけ。
+    // 🔑 地図の各向きは「刻みの幅をもつ区間」とみなし、その区間へ飛ぶ確率（正規分布の累積の差）で重みをつける。
+    //    区間の真ん中の値（確率密度）× 刻み で足すと、ブレが刻みより小さいとき見込みが 1 を超えた（2026-10-05）。
+    //    地図の外へ飛ぶぶんは外れ。
+    const step = Math.abs(angles[1]! - angles[0]!);
+    angles.forEach((aim, j) => {
+      if (!goal[j]) return;
+      let chance = 0.0;
+      angles.forEach((a, k) => {
+        if (!goal[k]) return;
+        chance += normalCdf((Math.abs(a - aim) + step / 2) / sigma) - normalCdf((Math.abs(a - aim) - step / 2) / sigma);
+      });
+      if (best === null || chance > best.chance) best = { vx: cos(aim) * speed, vy: sin(aim) * speed, chance };
+    });
+  }
+  return best;
+}
+
+/**
+ * 標準正規分布の累積分布関数。
+ * 🔑 Abramowitz & Stegun 7.1.26 の誤差関数の近似（絶対誤差 1.5×10⁻⁷）。四則演算と exp だけなので
+ *    どの環境でも同じ値（detmath の exp）。
+ */
+export function normalCdf(z: number): number {
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1.0 / (1.0 + 0.3275911 * x);
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+  const erf = 1.0 - poly * exp(-x * x);
+  return z >= 0.0 ? 0.5 * (1.0 + erf) : 0.5 * (1.0 - erf);
+}
+
+/**
+ * 撃つ。入る見込みが SHOOT_MIN_CHANCE 以上なら撃つ（必ず入るときだけ撃つのではない）。
+ */
+export function decideShot(v: View, me: Agent): HolderPlan | null {
+  const shot = bestShot(v, me);
+  return shot !== null && shot.chance >= SHOOT_MIN_CHANCE
+    ? { kind: "SHOOT", vx: shot.vx, vy: shot.vy, chance: shot.chance }
+    : null;
 }
 
 /** 持っている人の判断 */

@@ -151,11 +151,11 @@ describe("ボール", () => {
   });
 });
 
-describe("乱数を使わない（D-42: まずゼロで作る）", () => {
-  test("新しいエンジンは乱数の部品（pyrandom）を読み込んでいない", () => {
+describe("乱数（D-42: 実行のブレだけ）", () => {
+  test("🔴 乱数を使うのは実行のブレ（execution.ts）だけ。判断・先読み・結果の判定は乱数を使わない", () => {
     const offenders = readdirSync(MATCH_DIR)
-      .filter((f) => f.endsWith(".ts"))
-      .filter((f) => readFileSync(join(MATCH_DIR, f), "utf8").includes("pyrandom"));
+      .filter((f) => f.endsWith(".ts") && f !== "execution.ts")
+      .filter((f) => /pyrandom|PyRandom/.test(readFileSync(join(MATCH_DIR, f), "utf8")));
     assert.deepEqual(offenders, []);
   });
 

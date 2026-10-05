@@ -92,3 +92,43 @@ describe("撃つかの判断", () => {
     assert.equal(plan, null);
   });
 });
+
+describe("実行のブレと入る見込み（D-42・2026-10-05 オーナー判断）", () => {
+  test("🔴 ブレは技術が低いほど・速いほど・寄せられているほど大きい", async () => {
+    const { directionSigma } = await import("../src/sim/match/execution.ts");
+    const base = directionSigma("SHOT", 28.0, 50, Infinity);
+    assert.ok(directionSigma("SHOT", 28.0, 20, Infinity) > base);
+    assert.ok(directionSigma("SHOT", 28.0, 90, Infinity) < base);
+    assert.ok(directionSigma("SHOT", 22.0, 50, Infinity) < base);
+    assert.ok(directionSigma("SHOT", 28.0, 50, 0.5) > base);
+    assert.ok(directionSigma("PASS", 28.0, 50, Infinity) < base, "パスはシュートより正確");
+  });
+
+  test("同じ種なら同じ試合、種を変えれば別の試合", async () => {
+    const { standardSetup } = await import("../src/sim/match/match.ts");
+    const run = (seed: number): string => {
+      const sim = new MatchSim({ ...standardSetup(), seed });
+      sim.run(120);
+      return JSON.stringify([sim.passes.length, sim.bodies.map((b) => [b.x, b.y]), sim.ball.x]);
+    };
+    assert.equal(run(7), run(7));
+    assert.notEqual(run(7), run(8));
+  });
+
+  test("🔴 入る見込みは、GK が空けている隅ほど高く、GK の正面しか空いていなければ低い", async () => {
+    const { bestShot } = await import("../src/sim/match/player_ai.ts");
+    const chanceWith = (gkY: number): number => {
+      const sim = new MatchSim({
+        players: [spawn(0, 91.0, 34.0, "FW"), spawn(1, 103.0, gkY, "GK")],
+        ball: { x: 92.0, y: 34.0 },
+      });
+      return bestShot({ agents: sim.agents, bodies: sim.bodies, ball: sim.ball, holder: sim.agents[0]!,
+                        blocked: new Set(), plans: sim.plans, restart: null, holderReady: true },
+                      sim.agents[0]!)?.chance ?? 0.0;
+    };
+    const centered = chanceWith(34.0);
+    const offside = chanceWith(31.0);
+    assert.ok(offside > centered, `GK が寄ったほうが見込みが高くない（${offside} / ${centered}）`);
+    assert.ok(centered > 0.0 && centered < 1.0);
+  });
+});
