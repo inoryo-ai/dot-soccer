@@ -20,7 +20,7 @@ import type { Ball } from "./ball.ts";
 import type { Agent } from "./player_ai.ts";
 import { attackDir } from "./player_ai.ts";
 import { PITCH_LENGTH_M, PITCH_WIDTH_M, REACH_M, timeToReach } from "./reach.ts";
-import { keepAway, offsideLineX } from "./laws.ts";
+import { PENALTY_AREA_DEPTH_M, inOwnPenaltyArea, keepAway, offsideLineX } from "./laws.ts";
 import type { Pace } from "./pace.ts";
 import { openAt, receiveFactor, xtAt } from "./value.ts";
 import type { Restart } from "./laws.ts";
@@ -118,6 +118,8 @@ export const SHIELD_DISTS_M: readonly number[] = [4.0, 7.0];
 export const SHIELD_SPREAD_M = 1.5;
 /** 構える（CONTAIN）とき、ボールから自陣ゴールの向きにどれだけ離れて立つか（m）。🔑 設計値（出典なし） */
 export const CONTAIN_DIST_M = 8.0;
+/** PK のとき、ペナルティマークから離れる距離（第14条: 9.15m） */
+export const KEEP_AWAY_PK_M = 9.15;
 /** COVER がボールのどれだけ後ろ（自陣ゴール側）に立つか（m）。設計値（出典なし） */
 export const COVER_BEHIND_M = 6.0;
 /**
@@ -226,13 +228,35 @@ export function planTeam(team: 0 | 1, agents: readonly Agent[], ball: Ball,
         o.y = a.homeY;
       }
     }
+    if (restart.kind === "PENALTY") {
+      // PK（第14条）: 蹴る人と守る GK のほかは全員ペナルティエリアの外・ペナルティマークから 9.15m 以上。
+      //    守る GK はゴールライン上
+      const defending = restart.team !== team;
+      for (const a of mine) {
+        const o = orders.get(a.id)!;
+        if (a.id === restart.taker) continue;
+        if (a.role === "GK") {
+          if (defending) {
+            o.x = ownGoalX + dir * 0.3;
+            o.y = PITCH_WIDTH_M / 2;
+          }
+          continue;
+        }
+        if (inOwnPenaltyArea(defending ? team : ((1 - team) as 0 | 1), o.x, o.y) || hypot(o.x - restart.x, o.y - restart.y) < KEEP_AWAY_PK_M) {
+          // エリアの外（ゴールから遠い側）へ
+          const edgeX = defending ? ownGoalX + dir * (PENALTY_AREA_DEPTH_M + 2.0)
+                                  : (dir > 0 ? PITCH_LENGTH_M : 0.0) - dir * (PENALTY_AREA_DEPTH_M + 2.0);
+          o.x = edgeX;
+        }
+      }
+    }
     if (restart.team === team) {
       const t = orders.get(restart.taker)!;
       t.x = restart.x;
       t.y = restart.y;
       t.pace = "JOG";
       t.role = "TAKER";
-    } else {
+    } else if (restart.kind !== "PENALTY") {
       // 相手は決められた距離より外へ（ボールから外向きに押し出す）。キックオフはセンターサークルの外
       const r = keepAway(restart.kind) + 0.5;
       for (const a of mine) {

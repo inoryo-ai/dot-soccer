@@ -32,7 +32,7 @@ interface ViewerEvent {
 
 const RESTART_NAME: Record<string, string> = {
   KICKOFF: "キックオフ", THROW_IN: "スローイン", GOAL_KICK: "ゴールキック", CORNER: "コーナーキック",
-  FREE_KICK: "フリーキック",
+  FREE_KICK: "フリーキック", PENALTY: "PK",
 };
 const SHOT_NAME: Record<string, string> = {
   GOAL: "ゴール！", SAVED: "GKがセーブ", BLOCKED: "ブロック", OFF_TARGET: "枠外",

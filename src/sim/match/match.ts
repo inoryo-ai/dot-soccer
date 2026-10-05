@@ -26,10 +26,11 @@ import { Body, topSpeed } from "./body.ts";
 import { Execution } from "./execution.ts";
 import { Fatigue, staminaEfficiency } from "./stamina.ts";
 import type { KickKind } from "./execution.ts";
-import { exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut } from "./laws.ts";
+import { PENALTY_SPOT_M, exemptFromOffside, goalScored, inOwnPenaltyArea, offsidePositions, restartAfterOut }
+  from "./laws.ts";
 import type { Restart, RestartKind } from "./laws.ts";
 import { effortOf } from "./pace.ts";
-import { CARRY_PACE, decideHeader, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
+import { CARRY_PACE, bestShot, decideHeader, decideHolder, decideOffBall, decideRestartKick } from "./player_ai.ts";
 import type { Agent, HolderPlan, View } from "./player_ai.ts";
 import { CONTROL_MAX_MPS, CONTROL_MAX_Z_M, GK_ARM_M, GK_CATCH_MAX_MPS, GK_DIVE_M, PITCH_LENGTH_M, PITCH_WIDTH_M,
   REACH_M, canReachHeight, enterAt, gkReach } from "./reach.ts";
@@ -71,6 +72,15 @@ export const SHIELD_TRIGGER_M = 3.0;
  *    奪われる回数が 1チーム 0〜0.5回になった（2026-10-05）
  */
 export const TACKLE_ATTEMPT_M = 1.3;
+/**
+ * タックルでボールに届かず、相手の体の中心から「足が届いた距離 ＋ この値」以内に相手がいたら、足（体）に当たった＝ファウル。
+ * 🔑 ファウル 1チーム 約11〜17回（プレミアリーグ 約10.6・ラ・リーガ 約16.7・`docs/realism-reference.md`）に合わせた。
+ *    体どうしは 0.8m より近づけないので、足を伸ばせた分（実行のブレ）で当たる・当たらないが分かれ、この値に敏感
+ *    （2026-10-05: −0.30m で 29回、−0.35m で 約20回、−0.37m で 約18.5回、−0.40m で 約9回、−0.45m で 0回）
+ */
+export const FOUL_BODY_M = -0.38;
+/** 自陣のペナルティエリアの中でタックルに行く、ボールまでの距離の上限（m）。🔑 設計値（出典なし） */
+export const BOX_TACKLE_M = 0.9;
 export const TACKLE_COOLDOWN_TICKS = 10;
 export const TACKLE_RECOVER_TICKS = 8;
 export const SHIELD_BALL_MIN_M = 0.3;
@@ -80,7 +90,7 @@ export const SHIELD_BALL_MAX_M = 0.6;
  * 🔑 設計値（出典なし）。確かめ方: 実プレー時間が 54〜59分（`docs/realism-reference.md`）に入るか。
  */
 export const RESTART_PREP_TICKS: Readonly<Record<RestartKind, number>> = {
-  KICKOFF: 20, THROW_IN: 30, GOAL_KICK: 50, CORNER: 50, FREE_KICK: 40,
+  KICKOFF: 20, THROW_IN: 30, GOAL_KICK: 50, CORNER: 50, FREE_KICK: 40, PENALTY: 30,
 };
 /** GK がキャッチしてから配るまで（コマ）。🔑 設計値（出典なし）。競技規則の上限は6秒（第12条） */
 export const GK_HOLD_TICKS = 20;
@@ -101,7 +111,7 @@ export const PARRY_SPEED = 0.35;
  *    ⚠️ ファウル（現実は1試合 約33回の FK）がまだ無いので、これだけでは現実の 56分までは下がらない。
  */
 export const RESTART_STOPPAGE_S: Readonly<Record<RestartKind, number>> = {
-  KICKOFF: 45, THROW_IN: 10, GOAL_KICK: 20, CORNER: 30, FREE_KICK: 25,
+  KICKOFF: 45, THROW_IN: 10, GOAL_KICK: 20, CORNER: 30, FREE_KICK: 25, PENALTY: 60,
 };
 /** キックオフは全員が自陣に戻るまで待つ。ただしこれ以上は待たない（コマ） */
 export const KICKOFF_WAIT_MAX_TICKS = 600;
@@ -206,7 +216,9 @@ export class MatchSim {
   readonly score: [number, number] = [0, 0];
   /** ボールが動いていたコマ数（実プレー時間） */
   inPlayTicks = 0;
-  readonly restarts: Record<RestartKind, number> = { KICKOFF: 0, THROW_IN: 0, GOAL_KICK: 0, CORNER: 0, FREE_KICK: 0 };
+  readonly restarts: Record<RestartKind, number> = { KICKOFF: 0, THROW_IN: 0, GOAL_KICK: 0, CORNER: 0, FREE_KICK: 0, PENALTY: 0 };
+  /** ファウルの回数（したチーム） */
+  readonly fouls: [number, number] = [0, 0];
   readonly offsides: [number, number] = [0, 0];
   readonly passes: PassRecord[] = [];
   readonly shots: ShotRecord[] = [];
@@ -374,7 +386,15 @@ export class MatchSim {
    * 再開を始める。ボールを再開の地点に置き、蹴る人を決める。
    * 🔑 蹴る人: ゴールキックは GK、それ以外は再開するチームでいちばん近いフィールドの選手。
    */
-  private beginRestart(r: Restart): void {
+  /** 飛んでいるパス・シュートがあれば、記録を閉じる（ファウルで止まったときなど） */
+  private closeAnyFlight(): void {
+    const f = this.inFlight;
+    if (f === null) return;
+    if (f.shot) this.closeShot("BLOCKED");
+    else this.closePass("INTERCEPTED", this.ball.x, this.ball.y);
+  }
+
+  private beginRestart(r: Restart, takerId: number | null = null): void {
     this.restarts[r.kind] += 1;
     this.holder = null;
     this.plan = null;
@@ -383,7 +403,8 @@ export class MatchSim {
     this.ball.kick(0.0, 0.0);
     const team = this.agents.filter((a) => a.team === r.team);
     if (team.length === 0) throw new Error(`再開するチーム ${r.team} に選手がいない`);
-    let taker: Agent | undefined = r.kind === "GOAL_KICK" ? team.find((a) => a.role === "GK") : undefined;
+    let taker: Agent | undefined = takerId !== null ? this.agents[takerId]
+      : r.kind === "GOAL_KICK" ? team.find((a) => a.role === "GK") : undefined;
     if (taker === undefined) {
       // フィールドの選手でいちばん近い人（フィールドの選手がいなければ GK）
       const pool = team.some((a) => a.role !== "GK") ? team.filter((a) => a.role !== "GK") : team;
@@ -418,6 +439,17 @@ export class MatchSim {
     if (this.tick - this.restartBegan < stoppage * 10) return;
     if (r.kind === "KICKOFF" && !this.everyoneInOwnHalf()
         && this.tick - this.restartBegan < KICKOFF_WAIT_MAX_TICKS) return;
+    if (r.kind === "PENALTY") {
+      // PK は必ず撃つ。いちばん入る見込みの高い狙いへ（見つからなければ真ん中へ）
+      const shot = bestShot(this.view(), taker);
+      const gx = taker.team === 0 ? PITCH_LENGTH_M : 0.0;
+      const vx = shot?.vx ?? (gx - this.ball.x) / PENALTY_SPOT_M * 26.0;
+      const vy = shot?.vy ?? 0.0;
+      this.restart = null;
+      this.kick(taker, vx, vy, taker.team, "PENALTY", shot?.chance ?? 0.0, shot?.vz ?? 0.0);
+      this.doubleTouchBan = taker.id;
+      return;
+    }
     const plan = decideRestartKick(this.view(), taker, r.kind);
     if (plan.kind !== "PASS" && plan.kind !== "CLEAR") return;
     this.restart = null;
@@ -569,11 +601,26 @@ export class MatchSim {
             || this.tackleReadyAt[a.id]! > this.tick) continue;
         const d = hypot(this.ball.x - a.body.x, this.ball.y - a.body.y);
         if (d > TACKLE_ATTEMPT_M) continue;
+        // 🔑 自陣のペナルティエリアの中では、確実に届くときだけ足を出す（外せば PK になりうる）
+        if (inOwnPenaltyArea(a.team, h.body.x, h.body.y) && d > BOX_TACKLE_M) continue;
         this.tackleReadyAt[a.id] = this.tick + TACKLE_COOLDOWN_TICKS;
         this.tackles[a.team] += 1;
-        if (d <= REACH_M + this.execution.tackleExtension(a.physical)) {
+        const reach = REACH_M + this.execution.tackleExtension(a.physical);
+        if (d <= reach) {
           this.steals[a.team] += 1;
           this.take(a);
+          return;
+        }
+        // 🔑 ファウル: ボールに届かず、相手の足（体）に届いた。体の陰に置いたボールへ後ろや横から足を
+        //    伸ばすと起きる。自陣のペナルティエリアの中なら PK（第12・14条）
+        if (hypot(h.body.x - a.body.x, h.body.y - a.body.y) - FOUL_BODY_M <= reach) {
+          this.fouls[a.team] += 1;
+          const pk = inOwnPenaltyArea(a.team, h.body.x, h.body.y);
+          const goalX = h.team === 0 ? PITCH_LENGTH_M : 0.0;
+          this.closeAnyFlight();
+          this.beginRestart(pk
+            ? { kind: "PENALTY", team: h.team, x: goalX - (h.team === 0 ? 1 : -1) * PENALTY_SPOT_M, y: PITCH_WIDTH_M / 2 }
+            : { kind: "FREE_KICK", team: h.team, x: h.body.x, y: h.body.y }, pk ? null : h.id);
           return;
         }
         this.stunnedUntil[a.id] = this.tick + TACKLE_RECOVER_TICKS;

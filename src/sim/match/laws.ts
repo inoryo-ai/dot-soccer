@@ -21,6 +21,8 @@ export const CROSSBAR_M = 2.44;
 const BALL_R_M = 0.11;
 /** ゴールエリアの奥行きと、ゴールポストから横へ出る長さ（第1条: 5.5m） */
 export const GOAL_AREA_DEPTH_M = 5.5;
+/** ペナルティマークのゴールラインからの距離（第1条: 11m） */
+export const PENALTY_SPOT_M = 11.0;
 /** ペナルティエリアの奥行きと、ゴールの中心から横の端まで（第1条: 16.5m、ゴールポストから 16.5m ＋ ゴール幅の半分） */
 export const PENALTY_AREA_DEPTH_M = 16.5;
 export const PENALTY_AREA_HALF_WIDTH_M = 16.5 + 7.32 / 2;
@@ -37,7 +39,7 @@ export const KEEP_AWAY_M = 9.15;
 /** スローインで相手が離れる距離（第15条: 2m） */
 export const THROW_KEEP_AWAY_M = 2.0;
 
-export type RestartKind = "KICKOFF" | "THROW_IN" | "GOAL_KICK" | "CORNER" | "FREE_KICK";
+export type RestartKind = "KICKOFF" | "THROW_IN" | "GOAL_KICK" | "CORNER" | "FREE_KICK" | "PENALTY";
 
 export interface Restart {
   kind: RestartKind;

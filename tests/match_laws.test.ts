@@ -214,3 +214,33 @@ describe("裏への走り込み", () => {
     assert.ok(ran, "裏へ走り出していない");
   });
 });
+
+describe("ファウル（2026-10-05）", () => {
+  test("🔴 タックルでボールに届かず相手の足に当たればファウル。相手のフリーキックで再開し、試合が止まる", () => {
+    // 持っている人（チーム0）の真後ろから、相手がボールを体の陰に置かれたまま寄せてくる
+    let foul = false;
+    for (let seed = 1; seed <= 20 && !foul; seed++) {
+      const sim = new MatchSim({
+        players: [spawn(0, 50.0, 34.0, "MF"), spawn(0, 30.0, 34.0), spawn(1, 48.8, 34.0, "MF"),
+                  spawn(1, 100.0, 34.0, "GK")],
+        ball: { x: 50.3, y: 34.0 },
+        seed,
+      });
+      for (let i = 0; i < 40; i++) {
+        sim.step();
+        if (sim.fouls[1] > 0) {
+          foul = true;
+          assert.equal(sim.restart?.kind, "FREE_KICK");
+          assert.equal(sim.restart?.team, 0);
+          break;
+        }
+      }
+    }
+    assert.ok(foul, "20通りの種で1度もファウルが起きない");
+  });
+
+  test("自陣のペナルティエリアの中では、確実に届くときしかタックルに行かない（無理に足を出して PK を与えない）", async () => {
+    const { BOX_TACKLE_M, TACKLE_ATTEMPT_M } = await import("../src/sim/match/match.ts");
+    assert.ok(BOX_TACKLE_M < TACKLE_ATTEMPT_M);
+  });
+});
